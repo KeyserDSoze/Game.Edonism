@@ -48,3 +48,5 @@ npm run test:e2e
 # Separate test suite requiring the local .NET Development API on 127.0.0.1:5080:
 npm run test:e2e:live
 ```
+
+- The two-browser Development lab (#25) uses an in-memory single-seat join (match UUID + bearer token) and server-authenticated polling. No token in URLs, logs, localStorage/sessionStorage or React's public 3D projection. Never treat the creator's all-seat credentials or clipboard access as Production identity. Gate all Dev routes and this lab from Production; test real browser isolation, monotonic revisions and 409 reconciliation.

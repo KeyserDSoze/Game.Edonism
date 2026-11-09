@@ -122,3 +122,7 @@ Il laboratorio Development indica ora quali **lotti sono controllati** nella cit
 ## Registro eventi e replay verificato del primo round (#24)
 
 La fixture Development espone adesso una cronologia pubblica del round e l'**ordine proposto** per il prossimo round, mai eseguito automaticamente. Il Domain .NET può rigiocare e verificare i quattro tipi di evento attualmente supportati (genesi, movimento gratuito, fine turno, attesa saldo) contro la board originale e lo stato corrente. La route in sola lettura `GET /api/dev/matches/{id}/audit` richiede il token del posto e **non** esiste in Production. Il frontend mostra solo tipi evento pubblici approvati e non riceve mani o draw pile nel registro. Questa non è persistenza o ripresa della partita. [Guida e limiti](docs/engineering/match-audit-replay.md).
+
+## Partita Development da due browser distinti (#25)
+
+Ora puoi avviare la fixture dal primo browser e far entrare il secondo con **ID partita** e **token privato del suo posto**: il laboratorio copia intenzionalmente le due righe negli appunti, senza aggiungere credenziali all'URL o salvarle in Web Storage. La seconda finestra vede soltanto la propria mano; la città, i turni e la cronologia si aggiornano dagli snapshot .NET con polling autenticato. I movimenti rimangono server-authoritative. **È solo debugging locale in Development**, non login PvP, persistenza o lobby pubblica. [Guida completa](docs/engineering/two-browser-development.md).

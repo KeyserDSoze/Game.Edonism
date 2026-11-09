@@ -61,3 +61,7 @@ La scena usa da oggi anche `controlledActivities` e `boardActivities` pubblici d
 ## Cronologia pubblica e replay indipendente (#24)
 
 La fixture mostra anche la cronologia del round in lettura da `Events` pubblici con revisioni e l'ordine del turno successivo **come proposta**, mai come fase già avanzata. Un nuovo `MatchAuditReplay.Verify` nel Domain ricostruisce autonomamente movimenti/turni del primo round e confronta il risultato con lo snapshot. La route Development `GET /api/dev/matches/{id}/audit` è protetta da token e non viene registrata in Production. [Dettagli tecnici](match-audit-replay.md). Non è stato introdotto pagamento, giro successivo, rifornimento, elezione o replay delle carte.
+
+## Secondo browser / ingresso a un posto (#25)
+
+Con due istanze React separate è possibile usare la stessa partita Development: il browser creatore copia manualmente `matchId` e token del posto; il secondo li inserisce nel form e ottiene lo stato pubblico e la **sola** mano autorizzata. Un polling periodico riprende le revisioni aggiornate dal server, senza scrivere URL/storage né assumere mutazioni ottimistiche. Vedi [guida a due browser](two-browser-development.md). Questo meccanismo è solo Development e non sostituisce identità/sessioni persistenti di #13.

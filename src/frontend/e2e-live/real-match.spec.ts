@@ -21,6 +21,16 @@ type PublicMatch = Readonly<{
     playerId: Seat; baseAtoms: number; standingActivityAtoms: number; grossAtoms: number
   }[];
   assignedCharacters: readonly { playerId: Seat; characterId: string }[];
+  turnOrder: readonly Seat[];
+  proposedNextRoundOrder: readonly Seat[];
+  events: readonly {
+    revision: number;
+    round: number;
+    kind: string;
+    actorId: string;
+    fromStreetId: string | null;
+    toStreetId: string | null;
+  }[];
 }>;
 type CreatedMatch = Readonly<{
   matchId: string;
@@ -48,6 +58,11 @@ async function startRealMatch(page: Page): Promise<CreatedMatch> {
   expect(match.credentials).toHaveLength(2);
   expect(match.state.players).toHaveLength(2);
   await expect(page.getByTestId("dev-session")).toBeVisible();
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("dev-audit-event-0")).toHaveAttribute(
+    "data-event-kind", "match-created");
+  await expect(page.getByTestId("dev-next-order").locator("li"))
+    .toHaveText(match.state.proposedNextRoundOrder.map((id, i) => `${i + 1}.${id}`));
   // These labels are derived from the same public snapshot as the 3D pawns.
   await expect(page.getByTestId("match-player-legend")).toBeVisible();
   await expect(page.getByTestId("match-activity-roster")).toBeVisible();
@@ -119,6 +134,10 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   await expect(page.getByTestId("match-player-alice"))
     .toHaveAttribute("data-street-id", aliceDestination);
   expect(afterMove.players[0].freeMoveUsed).toBe(true);
+  expect(afterMove.events).toHaveLength(2);
+  await expect(page.getByTestId("dev-audit-event-1")).toHaveAttribute(
+    "data-event-kind", "free-move");
+  await expect(page.getByTestId("dev-audit-event-1")).toContainText("alice");
   expect(afterMove.players[0].startingSlotId).toBe(created.state.players[0].startingSlotId);
   expect(afterMove.controlledActivities).toEqual(created.state.controlledActivities);
   expect(afterMove.grossSalaryQuotes).toEqual(created.state.grossSalaryQuotes);
@@ -163,6 +182,12 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-active", "false");
   await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "false");
   expect(final.revision).toBe(4);
+  expect(final.events.map((e) => e.kind)).toEqual([
+    "match-created", "free-move", "turn-ended", "free-move", "round-settlement-pending",
+  ]);
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(final.events.length);
+  await expect(page.getByTestId("dev-audit-event-4"))
+    .toHaveAttribute("data-event-kind", "round-settlement-pending");
   expect(final.controlledActivities).toEqual(created.state.controlledActivities);
   expect(final.grossSalaryQuotes).toEqual(created.state.grossSalaryQuotes);
   expect(final.boardActivities).toEqual(created.state.boardActivities);
@@ -291,4 +316,50 @@ test("real .NET rejects stale revisions and out-of-turn commands without mutatio
     await expect(page.getByTestId(`controlled-lot-${control.slotId}`))
       .toHaveAttribute("data-owner-id", control.ownerPlayerId);
   }
+});
+
+test("real .NET Development audit verification matches the browser history and rejects missing credentials", async ({
+  page, request,
+}) => {
+  const created = await startRealMatch(page);
+  const { matchId } = created;
+  const path = `http://127.0.0.1:5080/api/dev/matches/${matchId}/audit`;
+  const anonymous = await request.get(path);
+  expect(anonymous.status()).toBe(404);
+  const invented = await request.get(path, { headers: auth("0".repeat(64)) });
+  expect(invented.status()).toBe(404);
+
+  const token = tokenFor(created, "alice");
+  const initial = await request.get(path, { headers: auth(token) });
+  expect(initial.status()).toBe(200);
+  const initialReport = await initial.json() as {
+    isValid: boolean; verifiedRevision: number; activePlayerId: string;
+  };
+  expect(initialReport.isValid).toBe(true);
+  expect(initialReport.verifiedRevision).toBe(0);
+  expect(initialReport.activePlayerId).toBe("alice");
+
+  await page.locator('[data-testid^="dev-move-"]:not([disabled])').first().click();
+  await expect(page.getByTestId("dev-audit-event-1"))
+    .toHaveAttribute("data-event-kind", "free-move");
+  const audited = await request.get(path + "?playerId=bob", { headers: auth(token) });
+  expect(audited.status()).toBe(200);
+  const report = await audited.json() as {
+    isValid: boolean; verifiedRevision: number;
+    players: readonly { playerId: string; streetId: string; freeMoveUsed: boolean }[];
+  };
+  expect(report.isValid).toBe(true);
+  expect(report.verifiedRevision).toBe(1);
+  const publicState = await request.get(
+    `http://127.0.0.1:5080/api/dev/matches/${matchId}`, { headers: auth(token) });
+  expect(publicState.status()).toBe(200);
+  const state = await publicState.json() as PublicMatch;
+  expect(report.verifiedRevision).toBe(state.revision);
+  expect(state.events).toHaveLength(2);
+  expect(report.players.map((p) => p.streetId))
+    .toEqual(state.players.map((p) => p.streetId));
+  const text = await audited.text();
+  expect(text).not.toContain(token);
+  expect(text).not.toContain("cardIds");
+  expect(text).not.toContain("demo:action:");
 });

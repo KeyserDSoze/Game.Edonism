@@ -10,6 +10,7 @@ type MockOptions = {
   badControlSlot?: boolean;
   unknownOwner?: boolean;
   missingBoardCard?: boolean;
+  unknownSecretEvent?: boolean;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
@@ -23,6 +24,13 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let phase = 0;
   let active: Seat | null = "alice";
   let conflictRaised = false;
+  const auditEvents: Array<{
+    revision: number; round: number; kind: string; actorId: string;
+    fromStreetId: string | null; toStreetId: string | null;
+  }> = [
+    { revision: 0, round: 1, kind: "match-created", actorId: "system",
+      fromStreetId: null, toStreetId: null },
+  ];
   const observedHeaders: Array<{ path: string; token: string | undefined }> = [];
 
   const snapshot = () => ({
@@ -32,6 +40,12 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     revision,
     phase,
     activePlayerId: active,
+    turnOrder: ["alice", "bob"],
+    proposedNextRoundOrder: ["bob", "alice"],
+    events: options.unknownSecretEvent
+      ? [...auditEvents, { revision: 99, round: 1, kind: "private-action",
+          actorId: "alice", fromStreetId: null, toStreetId: null }]
+      : [...auditEvents],
     players: (["alice", "bob"] as const).map((playerId) => ({
       playerId,
       streetId: streets[playerId],
@@ -145,9 +159,12 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       if (!(neighbors[streets[seat]] ?? []).includes(payload.destinationStreetId ?? "")) {
         return route.fulfill({ status: 409, json: { code: "not_adjacent" } });
       }
+      const fromStreet = streets[seat];
       streets[seat] = payload.destinationStreetId!;
       moved[seat] = true;
       revision++;
+      auditEvents.push({ revision, round: 1, kind: "free-move",
+        actorId: seat, fromStreetId: fromStreet, toStreetId: streets[seat] });
       return route.fulfill({ status: 200, json: snapshot() });
     }
 
@@ -155,9 +172,13 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       revision++;
       if (active === "alice") {
         active = "bob";
+        auditEvents.push({ revision, round: 1, kind: "turn-ended",
+          actorId: seat, fromStreetId: null, toStreetId: null });
       } else {
         active = null;
         phase = 1;
+        auditEvents.push({ revision, round: 1, kind: "round-settlement-pending",
+          actorId: seat, fromStreetId: null, toStreetId: null });
       }
       return route.fulfill({ status: 200, json: snapshot() });
     }
@@ -420,4 +441,67 @@ test("activity ownership survives 409 refresh and is accessible without WebGL on
   await expect(page.getByTestId("match-activity-roster")).toContainText("no salary credited");
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
   expect(overflow).toBe(false);
+});
+
+test("public audit timeline follows accepted server moves and turn ends, not local seat switches", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.goto("/");
+  await expect(page.getByTestId("dev-audit-panel")).toHaveCount(0);
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("dev-audit-event-0")).toContainText("Partita creata");
+  await expect(page.getByTestId("dev-next-order").locator("li")).toHaveText(["1.bob", "2.alice"]);
+  await expect(page.getByTestId("dev-audit-panel")).toContainText("nessun nuovo round");
+
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await page.getByTestId("dev-seat-alice").click();
+  await page.getByTestId("dev-move-planck").click();
+  await expect(page.getByTestId("dev-audit-event-1")).toHaveAttribute("data-event-kind", "free-move");
+  await expect(page.getByTestId("dev-audit-event-1")).toContainText("Gauss Avenue");
+  await expect(page.getByTestId("dev-audit-event-1")).toContainText("Planck Avenue");
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-audit-event-2")).toHaveAttribute("data-event-kind", "turn-ended");
+  await page.getByTestId("dev-seat-bob").click();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-audit-event-3")).toHaveAttribute("data-event-kind", "round-settlement-pending");
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-next-order").locator("li")).toHaveText(["1.bob", "2.alice"]);
+});
+
+test("unknown private audit event kinds never render, and revisions do not leak card ids", async ({ page }) => {
+  await mockMatchApi(page, { unknownSecretEvent: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("dev-audit-event-99")).toHaveCount(0);
+  await expect(page.getByTestId("dev-audit-list")).not.toContainText("private-action");
+  const text = await page.getByTestId("dev-audit-panel").innerText();
+  expect(text).not.toContain("demo:action:");
+  expect(text).not.toContain("alice-token");
+  expect(text).not.toContain("bob-token");
+});
+
+test("409 reconciliation does not invent audit events and works without WebGL in English", async ({ page }) => {
+  await page.addInitScript(() => {
+    const nativeGetContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = (function (
+      this: HTMLCanvasElement, contextId: string, ...args: unknown[]
+    ) {
+      if (contextId === "webgl" || contextId === "webgl2") return null;
+      return Reflect.apply(nativeGetContext, this, [contextId, ...args]);
+    }) as typeof HTMLCanvasElement.prototype.getContext;
+  });
+  await mockMatchApi(page, { conflictOnFirstMove: true });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(page.getByTestId("city-renderer").getByRole("status")).toContainText("3D is not available");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await page.getByTestId("dev-move-planck").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("3");
+  await expect(page.getByTestId("dev-error")).toContainText("state refreshed");
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("dev-next-order")).toContainText("bob");
+  await expect(page.getByTestId("dev-audit-panel")).toContainText("no next round");
 });

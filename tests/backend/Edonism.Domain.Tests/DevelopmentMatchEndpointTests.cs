@@ -118,8 +118,8 @@ public sealed class DevelopmentMatchEndpointTests
             client.PostAsJsonAsync($"/api/dev/matches/{id}/free-move",
                 new { destinationStreetId = "newton", expectedRevision = 0 }));
 
-        Assert.Single(requests.Where(r => r.StatusCode == HttpStatusCode.OK));
-        Assert.Single(requests.Where(r => r.StatusCode == HttpStatusCode.Conflict));
+        Assert.Single(requests, r => r.StatusCode == HttpStatusCode.OK);
+        Assert.Single(requests, r => r.StatusCode == HttpStatusCode.Conflict);
         foreach (var response in requests) response.Dispose();
     }
 

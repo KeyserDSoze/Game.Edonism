@@ -32,4 +32,6 @@ Le attività non controllate restano edifici neutrali. Il programma non afferma 
 
 Le mesh e gli ID delle carte dell'esempio sono **provvisori**. I file delle carte singole e le attribuzioni originali non sono ancora importati (#19). Il regolamento non viene riempito con decisioni arbitrarie.
 
-La CI finale e i conteggi esatti saranno registrati nel ledger e nella issue #23 prima della chiusura.
+## Risultato CI
+
+[GitHub Actions #42701144322](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42701144322), commit `d04616e`: **133/133 xUnit**, **17/17 Playwright UI**, **3/3 Playwright live** contro ASP.NET Core Development reale, tre job conclusi con `success`, build .NET 10/TypeScript/Vite verdi senza warning/errori .NET. Non abbiamo introdotto nuove route Production, mutazioni proprietario o salari netti.

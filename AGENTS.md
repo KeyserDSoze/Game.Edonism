@@ -25,6 +25,7 @@
 - No externally owned/third-party art in final assets. Code-generated geometric placeholders are acceptable.
 - The Development-only match laboratory is under `src/features/matches` (#20), hidden by `import.meta.env.DEV`. Do not expose its creator-issued all-seat tokens or synthetic catalog through Production, URLs or localStorage; real PvP authentication belongs to #13.
 - Test fallback and narrow screens, avoid requiring WebGL for critical interactions.
+- For interactions that cross React → ASP.NET Core (match commands, private projections, reconnect), use **both** fast mocked Playwright UI tests and the real API suite `npm run test:e2e:live` (requires backend Development on loopback). GitHub Actions runs all three gates (xUnit, UI, full-stack). Never claim mock-only browser tests prove API behavior.
 
 ## Backend conventions
 - Keep Domain independent from ASP.NET Core, EF and serialization frameworks.
@@ -41,4 +42,6 @@ npm install
 npm run build
 npx playwright install chromium
 npm run test:e2e
+# Separate test suite requiring the local .NET Development API on 127.0.0.1:5080:
+npm run test:e2e:live
 ```

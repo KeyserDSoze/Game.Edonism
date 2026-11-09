@@ -73,13 +73,13 @@ La mappa non assegna attività reali: la scelta delle carte, i turni, l'economia
 
 ## Governance e roadmap
 
-Ogni feature/bug passa da GitHub Issue, branch e PR con test. `AGENTS.md` è la guida di lavoro, `docs/engineering/development-ledger.md` tiene lo stato sintetico. Issue #5 tratta il board; #6 il match engine; #7 carte/poteri; #8 politica/PvP; #9 asset.
+Ogni feature/bug passa da una GitHub Issue prima del codice, commit diretti su `main` come richiesto, CI completa e chiusura tracciata con i test. Branch/PR saranno usati soltanto se il workflow verrà cambiato. `AGENTS.md` è la guida di lavoro, `docs/engineering/development-ledger.md` tiene lo stato sintetico. Issue #5 tratta il board; #6 il match engine; #7 carte/poteri; #8 politica/PvP; #9 asset.
 
 ## Prototipo motore turni, ambiente Development
 
 La prima verticale del game engine è documentata in [match-engine-slice-1](docs/engineering/match-engine-slice-1.md). L'API di prova si attiva **soltanto** con `ASPNETCORE_ENVIRONMENT=Development` e non è destinata a Internet: permette di creare un fixture con due giocatori e di effettuare un movimento gratuito per turno usando token differenti. Dopo l'ultimo turno il round resta in attesa di risoluzione, perché salario/carte/elezioni non sono ancora implementati.
 
-Le route `/api/dev/matches` non sono disponibili in Production. Il frontend attuale mostra la plancia statica; in futuro useremo l'autenticazione reale e la persistenza per collegare il gioco al server (#13).
+Le route `/api/dev/matches` non sono disponibili in Production. Il frontend mostra la città 3D e, **solo in Development**, il laboratorio di partita React collegato al server. Autenticazione reale e persistenza multiplayer rimangono nella #13.
 
 ## Salario lordo e controllo iniziale delle attività
 
@@ -102,3 +102,9 @@ La regola stampata prevede di mescolare **58 carte azione più Giorno dell'elezi
 La pagina React include ora, **solo quando Vite gira in Development**, un pannello con due posti di prova, creazione di una fixture seeded, movimenti su strade adiacenti validati dal backend, cambio turno e lettura della propria mano con token. Le carte della demo sono dati **sintetici**, non i materiali originali.
 
 Avviare l'API con `ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://127.0.0.1:5080 dotnet run --no-launch-profile --project src/backend/applications/Edonism.Api`, poi `cd src/frontend && npm install && npm run dev`; aprire `http://localhost:5173`. Il proxy Vite inoltra `/api/dev` a porta `5080`. I token della fixture non vengono salvati in storage. [Guida e limiti](docs/engineering/match-ui-dev-bridge.md).
+
+## CI end-to-end reale (issue #21)
+
+Oltre agli xUnit (.NET) e ai Playwright di UI che usano risposte HTTP simulate, GitHub Actions ora esegue **3 Playwright live** contro l'API ASP.NET Core **reale** in Development. Controllano movimenti, turni, revisione server e privacy di due mani con token separati. Il nuovo job `Live React + .NET / Playwright` conserva i due job CI precedenti e si aggiunge ad essi.
+
+Per eseguire i live test locali avviare il backend su `127.0.0.1:5080` come indicato sopra, poi eseguire `cd src/frontend && npm run test:e2e:live`. Non avviare la fixture Development su host pubblici; non sostituisce autenticazione e storage Production. [Dettagli tecnici](docs/engineering/live-fullstack-e2e.md).

@@ -44,7 +44,7 @@ I Pucciottini mesh nella scena restano **decorativi** e non indicano ancora posi
 
 `src/frontend/e2e/development-match.spec.ts` usa mock HTTP deterministici per provare interfaccia e protocollo senza avviare .NET nella CI browser. Testa creazione del fixture (conteggi 46/23/58/1), movimento e revisione, due sedute/turni, fine round, lettura di due mani con token distinti, nessun salvataggio dei token nel browser, risposta 409 con recupero, API non disponibile, traduzione inglese e layout mobile.
 
-Il CI continua inoltre a compilare .NET 10 e lanciare xUnit reali su Domain e API Development (autorizzazione, concorrenza, route assenti in Production). Non presentare i mock Playwright come prova di una partita multiplayer di produzione: rimane necessario un E2E che avvii backend e frontend insieme su ambiente di test quando #13 sarà pronta.
+Il CI compila anche .NET 10 ed esegue xUnit su Domain/API. Dalla [#21](live-fullstack-e2e.md) esegue **in aggiunta** 3 Playwright live con API ASP.NET Core reale e Vite. Questo prova l'integrazione Development ma **non** la sicurezza di login/sessione Production: la #13 resta aperta.
 
 ## Non implementato
 

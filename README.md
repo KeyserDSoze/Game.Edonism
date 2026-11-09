@@ -84,3 +84,7 @@ Le route `/api/dev/matches` non sono disponibili in Production. Il frontend attu
 ## Salario lordo e controllo iniziale delle attività
 
 La prima attività di ogni **fixture** di match Development è controllata dal relativo giocatore, con uno scagnozzo in piedi (15 ancora disponibili). Gli snapshot di `GET /api/dev/matches/{id}` includono `controlledActivities` e `grossSalaryQuotes`: il salario **lordo** è di **2 atoms base + 1 atom per attività controllata con scagnozzo in piedi**. Non è un accredito: saldo, stipendio netto, sindaco, tasse e carte restano da implementare e validare. Vedi [tranche #14](docs/engineering/match-engine-slice-2.md), la parent [#6](https://github.com/KeyserDSoze/Game.Edonism/issues/6) e la conferma regole [#4](https://github.com/KeyserDSoze/Game.Edonism/issues/4).
+
+## Composizione delle 30 attività (Development, #16)
+
+L'endpoint `POST /api/dev/matches/from-cards` prende un catalogo di **46 attività** (ID e categoria), una starting card obbligatoria per giocatore e un seed. Il server seleziona e colloca 30 attività secondo le quote del regolamento, poi ricava la strada e lo scagnozzo iniziale del personaggio. Non contiene le 46 carte originali né consente partite pubbliche. Contratti e limiti: [match-engine-slice-3](docs/engineering/match-engine-slice-3.md).

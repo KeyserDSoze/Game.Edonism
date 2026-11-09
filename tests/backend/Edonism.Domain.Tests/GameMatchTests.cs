@@ -35,6 +35,62 @@ public sealed class GameMatchTests
         Assert.Equal("match-created", snapshot.Events[0].Kind);
     }
 
+    [Fact]
+    public void TurnOptionsReflectCanonicalGraphAndDoNotMutateState()
+    {
+        var match = NewMatch(new("alice", "N-01"), new("bob", "S-01"));
+        var before = match.Snapshot();
+        var options = match.TurnOptionsForActor("alice");
+        Assert.NotNull(options);
+        Assert.Equal(before.MatchId, options.MatchId);
+        Assert.Equal("alice", options.PlayerId);
+        Assert.Equal(0, options.Revision);
+        Assert.True(options.CanEndTurn);
+        Assert.Equal(BoardCatalog.LoadDefault().Streets
+            .Single(s => s.Id == before.Players[0].StreetId).Neighbors,
+            options.FreeMoveStreetIds);
+        Assert.All(options.FreeMoveStreetIds, id =>
+            Assert.True(BoardCatalog.LoadDefault().CanMoveOneStreet(before.Players[0].StreetId, id)));
+        Assert.Throws<NotSupportedException>(() =>
+            ((IList<string>)options.FreeMoveStreetIds)[0] = "invented");
+        Assert.Null(match.TurnOptionsForActor("unknown"));
+        var waiting = match.TurnOptionsForActor("bob");
+        Assert.NotNull(waiting);
+        Assert.Equal(0, waiting.Revision);
+        Assert.False(waiting.CanEndTurn);
+        Assert.Empty(waiting.FreeMoveStreetIds);
+        Assert.Equal(before, match.Snapshot());
+    }
+
+    [Fact]
+    public void TurnOptionsUpdateAfterMovementTurnAndSettlementWithoutCardChanges()
+    {
+        var match = NewMatch(new("alice", "N-01"), new("bob", "S-01"));
+        var start = match.TurnOptionsForActor("alice")!;
+        Assert.True(match.TryFreeMove("alice", start.FreeMoveStreetIds[0], 0).Accepted);
+        var moved = match.TurnOptionsForActor("alice")!;
+        Assert.Equal(1, moved.Revision);
+        Assert.True(moved.CanEndTurn);
+        Assert.Empty(moved.FreeMoveStreetIds);
+        Assert.True(match.TryEndTurn("alice", 1).Accepted);
+        var finished = match.TurnOptionsForActor("alice")!;
+        Assert.False(finished.CanEndTurn);
+        Assert.Empty(finished.FreeMoveStreetIds);
+        var bob = match.TurnOptionsForActor("bob")!;
+        Assert.True(bob.CanEndTurn);
+        Assert.NotEmpty(bob.FreeMoveStreetIds);
+        Assert.Equal(2, bob.Revision);
+        Assert.True(match.TryEndTurn("bob", 2).Accepted);
+        Assert.All(new[] { "alice", "bob" }, player =>
+        {
+            var pending = match.TurnOptionsForActor(player)!;
+            Assert.Equal(3, pending.Revision);
+            Assert.False(pending.CanEndTurn);
+            Assert.Empty(pending.FreeMoveStreetIds);
+        });
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
     [Theory]
     [InlineData("gauss", true)]
     [InlineData("newton", false)]

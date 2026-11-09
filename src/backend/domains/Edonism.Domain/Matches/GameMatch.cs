@@ -57,6 +57,11 @@ public sealed record MatchSnapshot(
 public sealed record MatchAssignedCharacterSnapshot(
     string PlayerId, string CharacterId, string StartingActivityCardId, int PrintedInitialHearts);
 
+/// <summary>Authenticated, actor-scoped read-only options for the currently implemented first-round commands.</summary>
+public sealed record MatchTurnOptions(
+    Guid MatchId, string PlayerId, long Revision, bool CanEndTurn,
+    IReadOnlyList<string> FreeMoveStreetIds);
+
 public sealed record MatchCommandResult(bool Accepted, string Code, MatchSnapshot State);
 
 /// <summary>
@@ -302,6 +307,24 @@ public sealed partial class GameMatch
         _boardActivities,
         _assignedCharacters,
         Array.AsReadOnly(_events.ToArray()));
+
+    /// <summary>
+    /// Returns only the existing free move and end-turn possibilities for this
+    /// actor. The printed street graph is authoritative; clients may display
+    /// the names but must not derive permission from their own board copy.
+    /// Not a reservation: commands recheck the current revision and turn.
+    /// </summary>
+    public MatchTurnOptions? TurnOptionsForActor(string actorId)
+    {
+        var player = _players.FirstOrDefault(p => p.PlayerId == actorId);
+        if (player is null) return null;
+        var isTurn = Phase == MatchPhase.PlayerTurns && ActivePlayerId == actorId;
+        var moves = isTurn && !player.FreeMoveUsed
+            ? _board.Streets.Single(s => s.Id == player.StreetId).Neighbors.ToArray()
+            : [];
+        return new MatchTurnOptions(MatchId, actorId, Revision, isTurn,
+            Array.AsReadOnly(moves));
+    }
 
     public MatchCommandResult TryFreeMove(string actorId, string destinationStreetId, long expectedRevision)
     {

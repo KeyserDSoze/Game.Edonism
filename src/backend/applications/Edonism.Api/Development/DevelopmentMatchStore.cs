@@ -199,6 +199,21 @@ public sealed class DevelopmentMatchStore
         }
     }
 
+    /// <summary>Read-only actor-scoped commands, under the same lock as mutations.</summary>
+    public bool TryReadTurnOptions(
+        Guid matchId, string? token, out MatchTurnOptions? options)
+    {
+        options = null;
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            var actorId = entry.ResolveActor(token);
+            if (actorId is null) return false;
+            options = entry.Match.TurnOptionsForActor(actorId);
+            return options is not null;
+        }
+    }
+
     /// <summary>Authenticated, read-only Development audit check; no private cards.</summary>
     public bool TryReadAudit(
         Guid matchId, string? token, out MatchAuditReplayResult? verification)

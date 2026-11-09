@@ -108,6 +108,17 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "match_not_found" });
         });
 
+        // Actor-scoped first-round options from the Domain, never from 3D/UI
+        // geometry. This projection intentionally has no cards or token data.
+        group.MapGet("/{matchId:guid}/turn-options", (Guid matchId, HttpContext context,
+            DevelopmentMatchStore store) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return store.TryReadTurnOptions(matchId, Token(context), out var options)
+                ? Results.Ok(options)
+                : Results.NotFound(new { code = "match_not_found" });
+        });
+
         group.MapGet("/{matchId:guid}/hand", (Guid matchId, HttpContext context,
             DevelopmentMatchStore store) =>
         {

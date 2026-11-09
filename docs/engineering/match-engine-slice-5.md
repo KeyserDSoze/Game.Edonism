@@ -45,4 +45,4 @@ Un token mancante/errato o una partita senza action deck restituisce **404**. Le
 
 `DevelopmentPrivateHandEndpointTests`: due token distinti, un attore non può ottenere la mano avversaria anche con `playerId` nella query, pubblico senza carte, nessun accesso con token errato, assenza route Production, rifiuto 58 carte incomplete. Playwright è smoke di regressione della UI della mappa e non pretende un card viewer completo.
 
-L'esito e il link della CI finale saranno registrati nella #18 e nel development ledger prima di chiuderla.
+[CI #42682381016](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42682381016), commit `0a8bc7c`, **success**: 131/131 test xUnit e 5/5 Playwright, build frontend e backend verdi, nessun warning/errore .NET. #18 pronta alla chiusura; l'importazione asset rimane #19.

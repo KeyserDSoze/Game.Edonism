@@ -10,6 +10,7 @@ GitHub Issues are the detailed source of truth. Work is committed directly to `m
 | [#6](https://github.com/KeyserDSoze/Game.Edonism/issues/6) | 0.0.2 | Server-authoritative setup and round lifecycle | In progress | Child #12 first slice; card draw/salary/elections still pending |
 | [#12](https://github.com/KeyserDSoze/Game.Edonism/issues/12) | 0.0.2 | Trusted match movement, turn intent, revision & dev API | Done (direct main) | [CI #42662175729](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42662175729): 53/53 xUnit, 5/5 Playwright; build green |
 | [#14](https://github.com/KeyserDSoze/Game.Edonism/issues/14) | 0.0.2 | Initial activity control, standing henchman and gross salary quotes | In progress | Domain/API xUnit + Playwright CI pending; tax and wallet credit intentionally deferred |
+| [#15](https://github.com/KeyserDSoze/Game.Edonism/issues/15) | 0.0.2 | Repair CI completion semantics, unified full-stack gate | In progress | Backend xUnit passed, prior workflow failed without frontend job; verification pending |
 | [#13](https://github.com/KeyserDSoze/Game.Edonism/issues/13) | TBD | PvP identity, persistence and durable authorization | Planned | Requires #6 and external identity plan |
 | [#7](https://github.com/KeyserDSoze/Game.Edonism/issues/7) | TBD | Cards and powers resolver | Planned | Requires canonical card catalog |
 | [#8](https://github.com/KeyserDSoze/Game.Edonism/issues/8) | TBD | PvP factions, mayor, corruption, victory | Planned | Requires #6 |

@@ -119,6 +119,7 @@ export function DevelopmentMatchLab({
   const [hand, setHand] = useState<PrivateHand | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rotationNotice, setRotationNotice] = useState<string | null>(null);
   const [joinMatchId, setJoinMatchId] = useState("");
   const [joinToken, setJoinToken] = useState("");
   // Monotonic authority guards: HTTP polling/commands may resolve out of order.
@@ -231,6 +232,7 @@ export function DevelopmentMatchLab({
     commandInFlight.current = true;
     setBusy(true);
     setError(null);
+    setRotationNotice(null);
     setHand(null);
     currentMatchId.current = null;
     currentRevision.current = -1;
@@ -279,6 +281,7 @@ export function DevelopmentMatchLab({
     commandInFlight.current = true;
     setBusy(true);
     setError(null);
+    setRotationNotice(null);
     setHand(null);
     currentMatchId.current = null;
     currentRevision.current = -1;
@@ -319,6 +322,47 @@ export function DevelopmentMatchLab({
       publishPublicPositions(null);
       setActorId("");
       setError(t("dev.joinError"));
+    } finally {
+      commandInFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+
+  async function rotateSeatToken() {
+    if (busy || !session || !token || !actorId) return;
+    const matchId = session.matchId;
+    const seatId = actorId;
+    commandInFlight.current = true;
+    setBusy(true);
+    setError(null);
+    setRotationNotice(null);
+    try {
+      const result = await responseJson<DemoCredential>(await fetch(
+        `/api/dev/matches/${matchId}/rotate-token`, {
+          method: "POST",
+          headers: { "X-Edonism-Dev-Token": token },
+          cache: "no-store",
+        },
+      ));
+      if (result.playerId !== seatId || !/^[A-F0-9]{64}$/i.test(result.token)
+        || result.token.toLowerCase() === token.toLowerCase()
+        || currentMatchId.current !== matchId)
+        throw new Error("invalid_rotated_credential");
+      // No change to match, public audit or gameplay revision.
+      // Update only the actor's in-memory seat secret.
+      setSession((previous) => previous?.matchId === matchId
+        ? {
+            ...previous,
+            credentials: previous.credentials.map((seat) =>
+              seat.playerId === seatId ? { ...seat, token: result.token } : seat),
+          }
+        : previous);
+      setHand(null);
+      setRotationNotice(t("dev.rotateSuccess"));
+    } catch {
+      // A failed checkpoint write keeps the original capability valid.
+      setError(t("dev.rotateError"));
     } finally {
       commandInFlight.current = false;
       setBusy(false);
@@ -385,6 +429,8 @@ export function DevelopmentMatchLab({
   }
 
   function chooseActor(id: string) {
+    if (busy) return;
+    setRotationNotice(null);
     setActorId(id);
     setHand(null);
     setError(null);
@@ -513,6 +559,7 @@ export function DevelopmentMatchLab({
                   size="sm"
                   variant={actorId === seat.playerId ? "default" : "outline"}
                   aria-pressed={actorId === seat.playerId}
+                  disabled={busy}
                   onClick={() => chooseActor(seat.playerId)}
                   data-testid={`dev-seat-${seat.playerId}`}
                   className="min-w-0"
@@ -520,6 +567,20 @@ export function DevelopmentMatchLab({
                   {seat.playerId}
                 </Button>
               ))}
+            </div>
+
+            <div className="space-y-2">
+              <Button type="button" variant="outline" className="w-full"
+                disabled={busy || !token}
+                onClick={() => void rotateSeatToken()}
+                data-testid="dev-rotate-token">
+                {t("dev.rotateSeat", { seat: actorId })}
+              </Button>
+              {rotationNotice && (
+                <p role="status" data-testid="dev-rotation-notice"
+                  className="text-xs text-muted-foreground">{rotationNotice}</p>
+              )}
+              <p className="text-[11px] text-muted-foreground">{t("dev.rotateWarning")}</p>
             </div>
 
             {player && (

@@ -96,6 +96,52 @@ public sealed class DevelopmentSeatRotationEndpointTests
     }
 
     [Fact]
+    public async Task RevokedTokenIsRejectedOnAllReadsAndConditional304WhileOtherSeatWorks()
+    {
+        using var factory = Host("Development");
+        using var creator = factory.CreateClient();
+        var (id, aliceToken, bobToken) = await Create(creator);
+        using var alice = AsSeat(factory, aliceToken);
+        using var bob = AsSeat(factory, bobToken);
+        var uri = $"/api/dev/matches/{id}";
+
+        using var publicRead = await bob.GetAsync(uri);
+        Assert.Equal(HttpStatusCode.OK, publicRead.StatusCode);
+        var etag = publicRead.Headers.ETag?.ToString();
+        Assert.NotNull(etag);
+        using var rotation = await bob.PostAsync(uri + "/rotate-token", null);
+        Assert.Equal(HttpStatusCode.OK, rotation.StatusCode);
+        using var rotated = await rotation.Content.ReadFromJsonAsync<JsonDocument>();
+        var freshToken = rotated!.RootElement.GetProperty("token").GetString()!;
+        foreach (var readPath in new[] { uri, uri + "/hand", uri + "/turn-options", uri + "/audit" })
+        {
+            using var denied = await bob.GetAsync(readPath);
+            Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+        }
+        using var conditional = new HttpRequestMessage(HttpMethod.Get, uri);
+        conditional.Headers.TryAddWithoutValidation("If-None-Match", etag);
+        using var denied304 = await bob.SendAsync(conditional);
+        Assert.Equal(HttpStatusCode.NotFound, denied304.StatusCode);
+        using var invalidTurn = await bob.PostAsJsonAsync(uri + "/end-turn",
+            new { expectedRevision = 0 });
+        Assert.Equal(HttpStatusCode.NotFound, invalidTurn.StatusCode);
+
+        using var replacement = AsSeat(factory, freshToken);
+        using var valid = await replacement.GetAsync(uri);
+        Assert.Equal(HttpStatusCode.OK, valid.StatusCode);
+        Assert.Equal(etag, valid.Headers.ETag?.ToString());
+        using var aliceRead = await alice.GetAsync(uri);
+        Assert.Equal(HttpStatusCode.OK, aliceRead.StatusCode);
+        var state = await aliceRead.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(freshToken, state);
+        Assert.DoesNotContain(bobToken, state);
+        using var aliceHand = await alice.GetAsync(uri + "/hand");
+        using var bobHand = await replacement.GetAsync(uri + "/hand");
+        Assert.Equal(HttpStatusCode.OK, aliceHand.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, bobHand.StatusCode);
+    }
+
+    [Fact]
     public async Task AnonymousInventedAndProductionRotationCannotMintTokens()
     {
         using var dev = Host("Development");

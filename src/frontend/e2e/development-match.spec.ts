@@ -33,6 +33,9 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let active: Seat | null = "alice";
   let conflictRaised = false;
   let rotationSequence = 0;
+  let snapshotFailure = false;
+  let delayRevokedResponse = false;
+  let delayedRevokedResponse = false;
   let delayedAliceOptions = false;
   const auditEvents: Array<{
     revision: number; round: number; kind: string; actorId: string;
@@ -124,7 +127,15 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     }
 
     const seat = token ? (tokenToSeat.get(token) as Seat | undefined) : undefined;
-    if (!seat) return route.fulfill({ status: 404, json: { code: "match_not_found" } });
+    if (!seat) {
+      if (delayRevokedResponse && !delayedRevokedResponse
+        && request.method() === "GET" && !path.endsWith("/hand")
+        && !path.endsWith("/turn-options")) {
+        delayedRevokedResponse = true;
+        await new Promise((resolve) => setTimeout(resolve, 900));
+      }
+      return route.fulfill({ status: 404, json: { code: "match_not_found" } });
+    }
 
     if (path.endsWith("/turn-options")) {
       if (options.delayFirstAliceOptions && seat === "alice" && !delayedAliceOptions) {
@@ -184,6 +195,10 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
 
     if (request.method() === "GET") {
       const etag = `W/"edonism-revision-${revision}"`;
+      if (snapshotFailure) {
+        observedPolls.push({ status: 503, supplied: null, etag });
+        return route.fulfill({ status: 503, json: { code: "temporarily_unavailable" } });
+      }
       const supplied = request.headers()["if-none-match"] ?? null;
       const status = supplied === etag ? 304 : 200;
       observedPolls.push({ status, supplied, etag });
@@ -249,6 +264,21 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   return {
     observedHeaders,
     observedPolls,
+    setSnapshotFailure: (value: boolean) => { snapshotFailure = value; },
+    delayNextRevokedSnapshot: () => { delayRevokedResponse = true; },
+    // Invalidate a seat as if another browser had rotated its bearer.
+    // The old token never receives the replacement by polling.
+    revokeSeat: (seat: Seat) => {
+      const previous = [...tokenToSeat.entries()].find(([, id]) => id === seat)?.[0];
+      expect(previous).toBeTruthy();
+      tokenToSeat.delete(previous!);
+      rotationSequence++;
+      const fresh = "F".repeat(62)
+        + (seats.indexOf(seat) + 1).toString(16).toUpperCase()
+        + (rotationSequence % 16).toString(16).toUpperCase();
+      tokenToSeat.set(fresh, seat);
+      return fresh;
+    },
     // Simulate a distinct server actor's command between browser polls.
     advanceOtherActor: () => {
       revision++;
@@ -837,4 +867,92 @@ test("authorized conditional polling uses 304 until a second actor changes the r
   const keys = await page.evaluate(() => [...Object.keys(localStorage), ...Object.keys(sessionStorage)]);
   expect(keys.some(k => /match|token|etag/i.test(k))).toBe(false);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+});
+
+test("revoked single-seat join hides private hand and can rejoin with a new bearer", async ({ page }) => {
+  const { revokeSeat } = await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  const id = "00000000-0000-0000-0000-000000000020";
+  await page.getByTestId("dev-join-id").fill(id);
+  await page.getByTestId("dev-join-token").fill("b".repeat(64));
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  const freshToken = revokeSeat("bob");
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByTestId("dev-session")).toHaveCount(0, { timeout: 12000 });
+  await expect(page.getByTestId("dev-error")).toContainText("Seat access revoked");
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+  await expect(page.getByTestId("match-player-legend")).toHaveCount(0);
+  await page.getByTestId("dev-join-id").fill(id);
+  await page.getByTestId("dev-join-token").fill(freshToken);
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+  const storage = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage), session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(storage)).not.toContain(freshToken);
+  expect(JSON.stringify(storage)).not.toContain("b".repeat(64));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+});
+
+test("creator loses only revoked seat, keeping other bearer and match state", async ({ page }) => {
+  const { revokeSeat } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  revokeSeat("bob");
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByTestId("dev-seat-bob")).toHaveCount(0, { timeout: 12000 });
+  await expect(page.getByTestId("dev-seat-alice")).toBeVisible();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await expect(page.getByTestId("dev-hand")).not.toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await expect(page.getByTestId("dev-error")).toContainText("revocato");
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+});
+
+test("temporary API 503 never discards a valid in-memory seat", async ({ page }) => {
+  const { setSnapshotFailure, observedPolls } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-join-id").fill("00000000-0000-0000-0000-000000000020");
+  await page.getByTestId("dev-join-token").fill("b".repeat(64));
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  setSnapshotFailure(true);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect.poll(() => observedPolls.some((p) => p.status === 503),
+    { timeout: 12000 }).toBe(true);
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  setSnapshotFailure(false);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+});
+
+test("late 404 for old revoked actor cannot invalidate another live seat", async ({ page }) => {
+  const { revokeSeat, delayNextRevokedSnapshot, observedHeaders } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  revokeSeat("alice");
+  delayNextRevokedSnapshot();
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect.poll(() => observedHeaders.some((r) =>
+    r.path.endsWith("/00000000-0000-0000-0000-000000000020")
+    && r.token === "a".repeat(64)), { timeout: 6000 }).toBe(true);
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await page.waitForTimeout(1250);
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-session")).toBeVisible();
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
 });

@@ -146,6 +146,47 @@ public sealed class DevelopmentMatchStore
         }
     }
 
+
+    /// <summary>
+    /// Replace only the authenticated actor's Development capability.
+    /// The disk checkpoint is committed before the old digest is revoked.
+    /// This is NOT an identity/session provider for Production.
+    /// </summary>
+    public bool TryRotateSeatToken(
+        Guid matchId, string? token, out DevSeatCredential? replacement)
+    {
+        replacement = null;
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            var actor = entry.ResolveActor(token);
+            if (actor is null) return false;
+
+            byte[] secret;
+            byte[] digest;
+            do
+            {
+                secret = RandomNumberGenerator.GetBytes(32);
+                digest = SHA256.HashData(secret);
+            }
+            while (entry.TokenDigests.Values.Any(candidate =>
+                CryptographicOperations.FixedTimeEquals(candidate, digest)));
+
+            var newToken = Convert.ToHexString(secret);
+            CryptographicOperations.ZeroMemory(secret);
+            var nextDigests = new Dictionary<string, byte[]>(entry.TokenDigests,
+                StringComparer.Ordinal)
+            {
+                [actor] = digest
+            };
+            // Never change the live actor digest on failed encryption or I/O.
+            _checkpointFiles?.Save(entry.Match.CaptureCheckpoint(), nextDigests);
+            entry.TokenDigests[actor] = digest;
+            replacement = new DevSeatCredential(actor, newToken);
+            return true;
+        }
+    }
+
     public bool TryRead(Guid matchId, string? token, out MatchSnapshot? snapshot)
     {
         snapshot = null;

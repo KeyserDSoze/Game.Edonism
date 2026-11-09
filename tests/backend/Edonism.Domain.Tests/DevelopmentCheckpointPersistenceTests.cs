@@ -150,6 +150,81 @@ public sealed class DevelopmentCheckpointPersistenceTests
         Assert.Single(after.Events);
     }
 
+
+    [Fact]
+    public void RotatedSeatCapabilitySurvivesEncryptedRestartAndLeavesOtherSeatsIntact()
+    {
+        using var temp = new TempDirectory();
+        var first = new DevelopmentMatchStore(temp.Files());
+        var created = Create(first);
+        var previous = created.Credentials.Single(c => c.PlayerId == "alice").Token;
+        var other = created.Credentials.Single(c => c.PlayerId == "bob").Token;
+
+        Assert.True(first.TryRotateSeatToken(created.MatchId, previous, out var rotated));
+        Assert.Equal("alice", rotated!.PlayerId);
+        Assert.Matches("^[A-F0-9]{64}$", rotated.Token);
+        Assert.NotEqual(previous, rotated.Token);
+        Assert.False(first.TryRead(created.MatchId, previous, out _));
+        Assert.True(first.TryRead(created.MatchId, rotated.Token, out var unchanged));
+        Assert.Equal(0, unchanged!.Revision);
+        Assert.Single(unchanged.Events);
+
+        var saved = File.ReadAllText(Path.Combine(temp.PathOnDisk,
+            created.MatchId.ToString("N") + ".edonism"));
+        Assert.DoesNotContain(previous, saved);
+        Assert.DoesNotContain(rotated.Token, saved);
+
+        var restarted = new DevelopmentMatchStore(temp.Files());
+        Assert.False(restarted.TryReadHand(created.MatchId, previous, out _));
+        Assert.False(restarted.TryRotateSeatToken(created.MatchId, previous, out _));
+        Assert.True(restarted.TryReadHand(created.MatchId, rotated.Token, out var hand));
+        Assert.Equal("alice", hand!.PlayerId);
+        Assert.Equal(4, hand.CardIds.Count);
+        Assert.True(restarted.TryReadHand(created.MatchId, other, out var bobHand));
+        Assert.Equal("bob", bobHand!.PlayerId);
+    }
+
+    [Fact]
+    public void FailedTokenRotationDoesNotPublishRevocationOrChangeMatch()
+    {
+        using var temp = new TempDirectory();
+        var store = new DevelopmentMatchStore(temp.Files());
+        var created = Create(store);
+        var original = created.Credentials[0].Token;
+        var other = created.Credentials[1].Token;
+
+        // Force failure before the encrypted atomic rename.
+        Directory.Delete(temp.PathOnDisk, recursive: true);
+        File.WriteAllText(temp.PathOnDisk, "not a directory");
+        Assert.ThrowsAny<IOException>(() =>
+            store.TryRotateSeatToken(created.MatchId, original, out _));
+
+        Assert.True(store.TryRead(created.MatchId, original, out var unchanged));
+        Assert.Equal(0, unchanged!.Revision);
+        Assert.Single(unchanged.Events);
+        Assert.True(store.TryReadHand(created.MatchId, other, out _));
+    }
+
+    [Fact]
+    public void ConcurrentRotationsOfSameCapabilityHaveExactlyOneWinner()
+    {
+        var store = new DevelopmentMatchStore();
+        var created = Create(store);
+        var original = created.Credentials[0].Token;
+        var replacements = new System.Collections.Concurrent.ConcurrentBag<DevSeatCredential>();
+        Parallel.For(0, 32, _ =>
+        {
+            if (store.TryRotateSeatToken(created.MatchId, original, out var replaced))
+                replacements.Add(replaced!);
+        });
+
+        var single = Assert.Single(replacements);
+        Assert.False(store.TryRead(created.MatchId, original, out _));
+        Assert.True(store.TryRead(created.MatchId, single.Token, out var state));
+        Assert.Equal(0, state!.Revision);
+        Assert.True(store.TryRead(created.MatchId, created.Credentials[1].Token, out _));
+    }
+
     private static WebApplicationFactory<Program> ApiFactory(TempDirectory dir) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {

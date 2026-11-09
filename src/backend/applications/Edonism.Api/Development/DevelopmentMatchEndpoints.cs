@@ -123,6 +123,18 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "match_not_found" });
         });
 
+
+        // Issue #28: a seat holder can invalidate only their own Development
+        // capability. No playerId/body input and no publicly cached response.
+        group.MapPost("/{matchId:guid}/rotate-token", (
+            Guid matchId, HttpContext context, DevelopmentMatchStore store) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return store.TryRotateSeatToken(matchId, Token(context), out var credential)
+                ? Results.Ok(credential)
+                : Results.NotFound(new { code = "match_not_found" });
+        });
+
         group.MapPost("/{matchId:guid}/free-move", (
             Guid matchId, DevelopmentFreeMoveRequest request, HttpContext context, DevelopmentMatchStore store) =>
         {

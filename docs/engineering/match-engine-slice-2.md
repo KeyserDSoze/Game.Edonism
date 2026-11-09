@@ -21,3 +21,7 @@ xUnit per fixture, determinismo del preventivo, posta `Fallen`, isolamento fra p
 - [#6](https://github.com/KeyserDSoze/Game.Edonism/issues/6) — setup/round/azioni completi.
 - [#4](https://github.com/KeyserDSoze/Game.Edonism/issues/4) — validazione delle interpretazioni e del salario R-08.
 - [#13](https://github.com/KeyserDSoze/Game.Edonism/issues/13) — storage/identità PvP.
+
+## Verifica finale
+
+[Workflow green su `main` #42674069929](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42674069929): **63/63 xUnit**, incluso `GrossSalaryRulesTests` e contratto HTTP Development, **5/5 Playwright**, build .NET con 0 warning/0 errori. La CI ha avuto alcuni problemi di avvio dei job durante l'integrazione, descritti in [ci-investigation](ci-investigation.md); l'ultima esecuzione sul workflow ripristinato è stata completa e verde.

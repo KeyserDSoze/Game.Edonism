@@ -44,6 +44,12 @@ async function startRealMatch(page: Page): Promise<CreatedMatch> {
   expect(match.credentials).toHaveLength(2);
   expect(match.state.players).toHaveLength(2);
   await expect(page.getByTestId("dev-session")).toBeVisible();
+  // These labels are derived from the same public snapshot as the 3D pawns.
+  await expect(page.getByTestId("match-player-legend")).toBeVisible();
+  for (const player of match.state.players) {
+    await expect(page.getByTestId(`match-player-${player.playerId}`))
+      .toHaveAttribute("data-street-id", player.streetId);
+  }
   return match;
 }
 
@@ -90,6 +96,8 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   expect(aliceRead.status()).toBe(200);
   const afterMove = (await aliceRead.json()) as PublicMatch;
   expect(afterMove.players[0].streetId).toBe(aliceDestination);
+  await expect(page.getByTestId("match-player-alice"))
+    .toHaveAttribute("data-street-id", aliceDestination);
   expect(afterMove.players[0].freeMoveUsed).toBe(true);
   expect(afterMove.players[0].startingSlotId).toBe(created.state.players[0].startingSlotId);
   await expect(page.getByTestId("dev-move-" + aliceDestination)).toHaveCount(0);
@@ -124,6 +132,10 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   expect(final.activePlayerId).toBeNull();
   expect(final.round).toBe(1);
   expect(final.players[1].streetId).toBe(bobDestination);
+  await expect(page.getByTestId("match-player-bob"))
+    .toHaveAttribute("data-street-id", bobDestination);
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-active", "false");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "false");
   expect(final.revision).toBe(4);
 });
 
@@ -234,4 +246,14 @@ test("real .NET rejects stale revisions and out-of-turn commands without mutatio
   expect(state.activePlayerId).toBe("bob");
   expect(state.phase).toBe(0);
   expect(state.players[0].freeMoveUsed).toBe(false);
+
+  // The UI is stale because we used an external real HTTP client. Attempt
+  // a command to trigger the application's 409 → authoritative GET path.
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-error")).toContainText("stato aggiornato");
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-active", "false");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("match-player-alice"))
+    .toHaveAttribute("data-street-id", state.players[0].streetId);
 });

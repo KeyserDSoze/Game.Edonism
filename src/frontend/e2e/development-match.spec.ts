@@ -1,11 +1,19 @@
 import { expect, test, type Page } from "@playwright/test";
 
 type Seat = "alice" | "bob";
-type MockOptions = { conflictOnFirstMove?: boolean; creationFails?: boolean };
+type MockOptions = {
+  conflictOnFirstMove?: boolean;
+  creationFails?: boolean;
+  sameStreet?: boolean;
+  unknownStreet?: boolean;
+};
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
   const tokenToSeat = new Map([["alice-token", "alice"], ["bob-token", "bob"]]);
-  const streets: Record<Seat, string> = { alice: "gauss", bob: "einstein" };
+  const streets: Record<Seat, string> = {
+    alice: "gauss",
+    bob: options.unknownStreet ? "unmapped-road" : options.sameStreet ? "gauss" : "einstein",
+  };
   const moved: Record<Seat, boolean> = { alice: false, bob: false };
   let revision = 0;
   let phase = 0;
@@ -220,4 +228,71 @@ test("Development match HUD is accessible on mobile and translated to English", 
     () => document.documentElement.scrollWidth > window.innerWidth + 2,
   );
   expect(overflow).toBe(false);
+});
+
+test("public match markers follow only server-confirmed streets, not local seat selection", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.goto("/");
+  await expect(page.getByTestId("match-player-legend")).toHaveCount(0);
+  await page.getByTestId("dev-create").click();
+  const alice = page.getByTestId("match-player-alice");
+  const bob = page.getByTestId("match-player-bob");
+  await expect(page.getByTestId("match-player-legend")).toBeVisible();
+  await expect(alice).toHaveAttribute("data-street-id", "gauss");
+  await expect(bob).toHaveAttribute("data-street-id", "einstein");
+  await expect(alice).toHaveAttribute("data-active", "true");
+  await expect(bob).toHaveAttribute("data-active", "false");
+
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(alice).toHaveAttribute("data-street-id", "gauss");
+  await expect(bob).toHaveAttribute("data-street-id", "einstein");
+  await expect(alice).toHaveAttribute("data-active", "true");
+
+  // Changing inspector selection also must not move either player.
+  await page.getByTestId("street-picker-boson").click();
+  await expect(bob).toHaveAttribute("data-street-id", "einstein");
+
+  await page.getByTestId("dev-seat-alice").click();
+  await page.getByTestId("dev-move-planck").click();
+  await expect(alice).toHaveAttribute("data-street-id", "planck");
+  await expect(bob).toHaveAttribute("data-street-id", "einstein");
+  await page.getByTestId("dev-end-turn").click();
+  await expect(alice).toHaveAttribute("data-active", "false");
+  await expect(bob).toHaveAttribute("data-active", "true");
+  await expect(bob).toContainText("In turno");
+});
+
+test("shared streets render distinct player entries and unknown street IDs have no invented marker", async ({ page }) => {
+  await mockMatchApi(page, { sameStreet: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "gauss");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-street-id", "gauss");
+  await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(2);
+
+  // A different fixture with a forged/unrecognised street must not render
+  // the unknown player at a guessed default location.
+  await mockMatchApi(page, { unknownStreet: true });
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("match-player-alice")).toHaveCount(1);
+  await expect(page.getByTestId("match-player-bob")).toHaveCount(0);
+});
+
+test("WebGL fallback still exposes authoritative player streets and refresh on HTTP 409", async ({ page }) => {
+  // Force the HTML fallback, verifying the roster works without the Canvas.
+  await page.addInitScript(() => {
+    HTMLCanvasElement.prototype.getContext =
+      (() => null) as typeof HTMLCanvasElement.prototype.getContext;
+  });
+  await mockMatchApi(page, { conflictOnFirstMove: true });
+  await page.goto("/");
+  await expect(page.getByRole("status")).toContainText("3D non è disponibile");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "gauss");
+  await page.getByTestId("dev-move-planck").click();
+  await expect(page.getByTestId("dev-error")).toContainText("stato aggiornato");
+  await expect(page.getByTestId("dev-revision")).toHaveText("3");
+  // Rejected move: roster and inspector remain on the server-confirmed street.
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "gauss");
+  await expect(page.getByTestId("selected-street")).toHaveText("Gauss Avenue");
 });

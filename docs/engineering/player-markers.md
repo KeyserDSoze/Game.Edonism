@@ -31,3 +31,7 @@ L'intera CI .NET/React/Playwright mocked+live deve rimanere verde su `main` prim
 ## Fuori scope
 
 Animazioni di percorso, collisions/pathfinding, spostamenti agli edifici controllati, modelli Pucciottini originali, combattimento, economia, cataloghi e sistema PvP Production. Non anticipa alcuna regola ancora da formalizzare nella #4.
+
+## Esito finale della CI
+
+[GitHub Actions #42697574711](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42697574711), commit `5c0c2d8`: `success` con tutti e tre i job completati. **131/131 xUnit**, **13/13 Playwright UI**, **3/3 Playwright live** con .NET 10 reale; build .NET senza warning/errori e bundle TypeScript/Vite riuscito. Sono inclusi i nuovi controlli di posizione, turni, fallback e 409. L'issue #22 è pronta alla chiusura, salvo regressioni nella CI dell'ultimo commit documentale.

@@ -17,10 +17,10 @@ GitHub Issues are the detailed source of truth. Work is committed directly to `m
 | [#19](https://github.com/KeyserDSoze/Game.Edonism/issues/19) | TBD | Acquire individual official card files and metadata with provenance | Blocked on source files and rights | Rulebook screenshots are not full card assets |
 | [#20](https://github.com/KeyserDSoze/Game.Edonism/issues/20) | 0.0.2 | Dev-only React match lab: server-authoritative moves, turns and private hands | Done (direct main) | [CI #42685047656](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42685047656): 131 xUnit, 10 Playwright, builds green |
 | [#21](https://github.com/KeyserDSoze/Game.Edonism/issues/21) | 0.0.2 | CI true React/Vite ↔ .NET Development API: movements, turns, actor privacy | Done (direct main) | [CI #42693030133](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42693030133): 131 xUnit + 10 UI Playwright + 3 live Playwright, all 3 jobs green |
-| [#22](https://github.com/KeyserDSoze/Game.Edonism/issues/22) | 0.0.2 | Player Pucciottini positioned on canonical roads via public .NET match snapshot | In progress | 131 xUnit + UI & real API Playwright verification pending |
+| [#22](https://github.com/KeyserDSoze/Game.Edonism/issues/22) | 0.0.2 | Player Pucciottini on canonical roads via public server match state | Done (direct main) | [CI #42697574711](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42697574711): 131 xUnit, 13 UI Playwright, 3 live Playwright; 3 jobs green |
 | [#13](https://github.com/KeyserDSoze/Game.Edonism/issues/13) | TBD | PvP identity, persistence and durable authorization | Planned | Requires #6 and external identity plan |
 | [#7](https://github.com/KeyserDSoze/Game.Edonism/issues/7) | TBD | Cards and powers resolver | Planned | Requires canonical card catalog |
 | [#8](https://github.com/KeyserDSoze/Game.Edonism/issues/8) | TBD | PvP factions, mayor, corruption, victory | Planned | Requires #6 |
 | [#9](https://github.com/KeyserDSoze/Game.Edonism/issues/9) | TBD | Original art and card assets | Planned | Require individual assets and publication approval |
 
-Next: verify #22 CI for live 3D markers; acquire official card art (#19/#9), validate R-03/R-07/R-09/R-10 (#4), extend match gameplay (#6) and real PvP sessions (#13). Dev API stays Development-only.
+Next: acquire official card art (#19/#9), validate R-03/R-07/R-09/R-10 (#4), extend match gameplay (#6) and real PvP sessions (#13); replace procedural figures once original models are approved. Dev API remains Development-only.

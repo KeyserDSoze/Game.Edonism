@@ -266,6 +266,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     observedPolls,
     setSnapshotFailure: (value: boolean) => { snapshotFailure = value; },
     delayNextRevokedSnapshot: () => { delayRevokedResponse = true; },
+    didDelayRevokedSnapshot: () => delayedRevokedResponse,
     // Invalidate a seat as if another browser had rotated its bearer.
     // The old token never receives the replacement by polling.
     revokeSeat: (seat: Seat) => {
@@ -939,16 +940,14 @@ test("temporary API 503 never discards a valid in-memory seat", async ({ page })
 });
 
 test("late 404 for old revoked actor cannot invalidate another live seat", async ({ page }) => {
-  const { revokeSeat, delayNextRevokedSnapshot, observedHeaders } = await mockMatchApi(page);
+  const { revokeSeat, delayNextRevokedSnapshot, didDelayRevokedSnapshot } = await mockMatchApi(page);
   await page.goto("/");
   await page.getByTestId("dev-create").click();
   await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
   revokeSeat("alice");
   delayNextRevokedSnapshot();
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
-  await expect.poll(() => observedHeaders.some((r) =>
-    r.path.endsWith("/00000000-0000-0000-0000-000000000020")
-    && r.token === "a".repeat(64)), { timeout: 6000 }).toBe(true);
+  await expect.poll(didDelayRevokedSnapshot, { timeout: 6000 }).toBe(true);
   await page.getByTestId("dev-seat-bob").click();
   await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
   await page.waitForTimeout(1250);

@@ -711,3 +711,119 @@ test("real .NET conditional snapshots: 304 authorized, revision update and brows
     await guestContext.close();
   }
 });
+
+test("real .NET: revoked guest loses visible hand, then rejoins using rotated token", async ({
+  page, browser, request,
+}) => {
+  const match = await startRealMatch(page);
+  const previousBob = tokenFor(match, "bob");
+  const api = `http://127.0.0.1:5080/api/dev/matches/${match.matchId}`;
+  const guestContext = await browser.newContext();
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(match.matchId);
+    await guest.getByTestId("dev-join-token").fill(previousBob);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    const originalHand = await guest.getByTestId("dev-hand").locator("li").allTextContents();
+
+    await page.getByTestId("dev-seat-bob").click();
+    const rotation = page.waitForResponse((res) =>
+      new URL(res.url()).pathname.endsWith("/rotate-token")
+      && res.request().method() === "POST");
+    await page.getByTestId("dev-rotate-token").click();
+    const response = await rotation;
+    expect(response.status()).toBe(200);
+    const credential = await response.json() as { playerId: string; token: string };
+    expect(credential.playerId).toBe("bob");
+    expect(credential.token).toMatch(/^[A-F0-9]{64}$/);
+    expect(credential.token).not.toBe(previousBob);
+
+    const old = await request.get(api, {
+      headers: { ...auth(previousBob), "If-None-Match": 'W/"edonism-revision-0"' },
+    });
+    expect(old.status()).toBe(404);
+    await guest.evaluate(() => window.dispatchEvent(new Event("online")));
+    await expect(guest.getByTestId("dev-session")).toHaveCount(0, { timeout: 12000 });
+    await expect(guest.getByTestId("dev-error")).toContainText("revocato");
+    await expect(guest.getByTestId("dev-hand")).toHaveCount(0);
+    await expect(guest.getByTestId("match-player-legend")).toHaveCount(0);
+
+    await guest.getByTestId("dev-join-id").fill(match.matchId);
+    await guest.getByTestId("dev-join-token").fill(credential.token);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-seat-bob")).toBeVisible();
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    expect(await guest.getByTestId("dev-hand").locator("li").allTextContents()).toEqual(originalHand);
+    await expect(guest.getByTestId("dev-error")).toHaveCount(0);
+
+    await page.getByTestId("dev-seat-alice").click();
+    await page.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-active-player")).toHaveText("bob", { timeout: 12000 });
+    await guest.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-revision")).toHaveText("2");
+    const final = await request.get(api, { headers: auth(credential.token) });
+    const state = await final.json() as PublicMatch;
+    expect(state.phase).toBe(1);
+    expect(state.revision).toBe(2);
+    const storage = await guest.evaluate(() => ({
+      url: location.href, local: Object.values(localStorage), session: Object.values(sessionStorage),
+    }));
+    expect(JSON.stringify(storage)).not.toContain(credential.token);
+    expect(JSON.stringify(storage)).not.toContain(previousBob);
+  } finally {
+    await guestContext.close();
+  }
+});
+
+test("real .NET: creator keeps Alice when remote Bob rotates their capability", async ({
+  page, browser, request,
+}) => {
+  const match = await startRealMatch(page);
+  const bobToken = tokenFor(match, "bob");
+  const aliceToken = tokenFor(match, "alice");
+  const api = `http://127.0.0.1:5080/api/dev/matches/${match.matchId}`;
+  const guestContext = await browser.newContext();
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(match.matchId);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    await page.getByTestId("dev-seat-bob").click();
+    await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+
+    const rotation = guest.waitForResponse((res) =>
+      new URL(res.url()).pathname.endsWith("/rotate-token")
+      && res.request().method() === "POST");
+    await guest.getByTestId("dev-rotate-token").click();
+    const response = await rotation;
+    expect(response.status()).toBe(200);
+    const credential = await response.json() as { playerId: string; token: string };
+    expect(credential.playerId).toBe("bob");
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+
+    await expect(page.getByTestId("dev-seat-bob")).toHaveCount(0, { timeout: 12000 });
+    await expect(page.getByTestId("dev-seat-alice")).toBeVisible();
+    await expect(page.getByTestId("dev-error")).toContainText("revocato");
+    await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    const freshHand = await request.get(`${api}/hand`, { headers: auth(aliceToken) });
+    const aliceCards = (await freshHand.json() as Hand).cardIds;
+    expect(await page.getByTestId("dev-hand").locator("li").allTextContents()).toEqual(aliceCards);
+
+    await page.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-active-player")).toHaveText("bob", { timeout: 12000 });
+    await guest.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("2", { timeout: 12000 });
+    const state = await request.get(api, { headers: auth(credential.token) });
+    const json = await state.json() as PublicMatch;
+    expect(json.phase).toBe(1);
+    expect(json.events).toHaveLength(3);
+    expect(await page.locator("body").innerText()).not.toContain(credential.token);
+  } finally {
+    await guestContext.close();
+  }
+});

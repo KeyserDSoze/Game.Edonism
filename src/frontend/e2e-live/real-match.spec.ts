@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-type Seat = "alice" | "bob";
+type Seat = string;
 type PublicPlayer = Readonly<{
   playerId: Seat;
   streetId: string;
@@ -437,5 +437,93 @@ test("two real isolated browsers join one .NET match and observe each other's tu
   } finally {
     await aliceContext.close();
     await bobContext.close();
+  }
+});
+
+test("real .NET eight-seat match supports private join and all sequential turns", async ({
+  page, browser, request,
+}) => {
+  await page.goto("/");
+  await expect(page.getByTestId("dev-player-count")).toHaveValue("2");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  const creation = page.waitForResponse((response) =>
+    new URL(response.url()).pathname.endsWith("/from-full-deck")
+      && response.request().method() === "POST");
+  await page.getByTestId("dev-create").click();
+  const response = await creation;
+  expect(response.status()).toBe(201);
+  const created = await response.json() as CreatedMatch;
+  const seatIds = ["alice", "bob", "charlie", "diana", "eve", "frank", "grace", "heidi"];
+  expect(created.state.players.map((p) => p.playerId)).toEqual(seatIds);
+  expect(created.credentials.map((p) => p.playerId)).toEqual(seatIds);
+  expect(created.state.boardActivities).toHaveLength(30);
+  expect(created.state.controlledActivities).toHaveLength(8);
+  expect(created.state.assignedCharacters).toHaveLength(8);
+  expect(created.state.grossSalaryQuotes).toHaveLength(8);
+  await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(8);
+  await expect(page.getByTestId("match-activity-roster").locator("li[data-owner-id]")).toHaveCount(8);
+
+  const guestContext = await browser.newContext();
+  try {
+    const guest = await guestContext.newPage();
+    const guestToken = tokenFor(created, "heidi");
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(created.matchId);
+    await guest.getByTestId("dev-join-token").fill(guestToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-session")).toBeVisible();
+    await expect(guest.getByTestId("dev-seat-heidi")).toBeVisible();
+    await expect(guest.getByTestId("dev-seat-alice")).toHaveCount(0);
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    const heidiHand = await guest.getByTestId("dev-hand").locator("li").allTextContents();
+
+    const origin = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`;
+    const hands: string[] = [];
+    for (const seat of seatIds) {
+      const secret = tokenFor(created, seat);
+      const handResponse = await request.get(`${origin}/hand`, { headers: auth(secret) });
+      expect(handResponse.status()).toBe(200);
+      const hand = await handResponse.json() as Hand;
+      expect(hand.playerId).toBe(seat);
+      expect(hand.cardIds).toHaveLength(4);
+      hands.push(...hand.cardIds);
+    }
+    expect(new Set(hands).size).toBe(32);
+    const publicResponse = await request.get(origin, {
+      headers: auth(tokenFor(created, "alice")),
+    });
+    expect(publicResponse.status()).toBe(200);
+    const publicJson = await publicResponse.text();
+    for (const card of hands) expect(publicJson).not.toContain(card);
+    for (const card of hands.slice(0, 4)) {
+      await expect(guest.getByTestId("dev-hand")).not.toContainText(card);
+    }
+    expect(heidiHand).toHaveLength(4);
+
+    for (const [revision, seat] of seatIds.entries()) {
+      const done = await request.post(`${origin}/end-turn`, {
+        headers: auth(tokenFor(created, seat)), data: { expectedRevision: revision },
+      });
+      expect(done.status(), `turn ${revision + 1} by ${seat}`).toBe(200);
+      const updated = await done.json() as PublicMatch;
+      expect(updated.revision).toBe(revision + 1);
+      expect(updated.activePlayerId).toBe(seatIds[revision + 1] ?? null);
+    }
+    await expect(page.getByTestId("dev-revision")).toHaveText("8", { timeout: 12000 });
+    await expect(guest.getByTestId("dev-revision")).toHaveText("8", { timeout: 12000 });
+    await expect(guest.getByTestId("dev-active-player")).not.toHaveText("heidi");
+    const final = await request.get(origin, { headers: auth(guestToken) });
+    const state = await final.json() as PublicMatch;
+    expect(state.phase).toBe(1);
+    expect(state.events).toHaveLength(9);
+    expect(state.events.at(-1)?.kind).toBe("round-settlement-pending");
+
+    const storage = await guest.evaluate(() => ({
+      url: location.href, local: Object.values(localStorage), session: Object.values(sessionStorage),
+    }));
+    expect(JSON.stringify(storage)).not.toContain(guestToken);
+    expect(await guest.locator("body").innerText()).not.toContain(guestToken);
+  } finally {
+    await guestContext.close();
   }
 });

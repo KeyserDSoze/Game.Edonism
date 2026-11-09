@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-type Seat = "alice" | "bob";
+type Seat = string;
+const demoSeats = ["alice", "bob", "charlie", "diana", "eve", "frank", "grace", "heidi"] as const;
 type MockOptions = {
   conflictOnFirstMove?: boolean;
   creationFails?: boolean;
@@ -11,15 +12,19 @@ type MockOptions = {
   unknownOwner?: boolean;
   missingBoardCard?: boolean;
   unknownSecretEvent?: boolean;
+  playerCount?: number;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
-  const tokenToSeat = new Map([["a".repeat(64), "alice"], ["b".repeat(64), "bob"]]);
-  const streets: Record<Seat, string> = {
-    alice: "gauss",
-    bob: options.unknownStreet ? "unmapped-road" : options.sameStreet ? "gauss" : "einstein",
-  };
-  const moved: Record<Seat, boolean> = { alice: false, bob: false };
+  const seats = demoSeats.slice(0, options.playerCount ?? 2);
+  const tokenToSeat = new Map(seats.map((seat, index) =>
+    [String.fromCharCode(97 + index).repeat(64), seat]));
+  const mockStreets = ["gauss", "einstein", "planck", "newton", "meson", "boson", "main-square", "gauss"];
+  const streets: Record<Seat, string> = Object.fromEntries(seats.map((id, index) => [
+    id, index === 1 && options.unknownStreet ? "unmapped-road"
+      : index === 1 && options.sameStreet ? "gauss" : mockStreets[index],
+  ]));
+  const moved: Record<Seat, boolean> = Object.fromEntries(seats.map((id) => [id, false]));
   let revision = 0;
   let phase = 0;
   let active: Seat | null = "alice";
@@ -40,16 +45,17 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     revision,
     phase,
     activePlayerId: active,
-    turnOrder: ["alice", "bob"],
-    proposedNextRoundOrder: ["bob", "alice"],
+    turnOrder: [...seats],
+    proposedNextRoundOrder: [...seats.slice(-1), ...seats.slice(0, -1)],
     events: options.unknownSecretEvent
       ? [...auditEvents, { revision: 99, round: 1, kind: "private-action",
           actorId: "alice", fromStreetId: null, toStreetId: null }]
       : [...auditEvents],
-    players: (["alice", "bob"] as const).map((playerId) => ({
+    players: seats.map((playerId, index) => ({
       playerId,
       streetId: streets[playerId],
-      startingSlotId: playerId === "alice" ? "N-01" : "S-01",
+      startingSlotId: playerId === "alice" ? "N-01" : playerId === "bob" ? "S-01"
+        : `N-${String(index + 1).padStart(2, "0")}`,
       hearts: 3,
       freeMoveUsed: moved[playerId],
     })),
@@ -94,7 +100,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         actionCardIds: string[];
         electionDayCardId: string;
       };
-      expect(fixture.playerIds).toEqual(["alice", "bob"]);
+      expect(fixture.playerIds).toEqual(seats);
       expect(fixture.availableActivities).toHaveLength(46);
       expect(fixture.characters).toHaveLength(23);
       expect(fixture.actionCardIds).toHaveLength(58);
@@ -104,10 +110,9 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         json: {
           matchId: snapshot().matchId,
           state: snapshot(),
-          credentials: [
-            { playerId: "alice", token: "a".repeat(64) },
-            { playerId: "bob", token: "b".repeat(64) },
-          ],
+          credentials: seats.map((playerId, index) => ({
+            playerId, token: String.fromCharCode(97 + index).repeat(64),
+          })),
         },
       });
     }
@@ -121,9 +126,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         json: {
           matchId: snapshot().matchId,
           playerId: seat,
-          cardIds: seat === "alice"
-            ? ["demo:action:01", "demo:action:02", "demo:action:03", "demo:action:04"]
-            : ["demo:action:21", "demo:action:22", "demo:action:23", "demo:action:24"],
+          cardIds: Array.from({ length: 4 }, (_, index) =>
+            `demo:action:${String((seat === "alice" ? 1 : 21 + (seats.indexOf(seat) - 1) * 4) + index).padStart(2, "0")}`),
         },
       });
     }
@@ -170,8 +174,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
 
     if (path.endsWith("/end-turn")) {
       revision++;
-      if (active === "alice") {
-        active = "bob";
+      if (seats.indexOf(seat) < seats.length - 1) {
+        active = seats[seats.indexOf(seat) + 1];
         auditEvents.push({ revision, round: 1, kind: "turn-ended",
           actorId: seat, fromStreetId: null, toStreetId: null });
       } else {
@@ -589,5 +593,58 @@ test("Development join is usable on mobile in English without WebGL", async ({ p
   await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
   await expect(page.getByTestId("dev-join-form")).toContainText("Join the match");
   await expect(page.getByTestId("city-renderer").getByRole("status")).toContainText("3D is not available");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+});
+
+test("eight Development seats: quota-safe fixture, private actor switching, mobile and English", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const { observedHeaders } = await mockMatchApi(page, { playerCount: 8 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(page.getByTestId("dev-player-count")).toHaveAccessibleName("Number of players");
+  await page.getByTestId("dev-player-count").selectOption("8");
+
+  const fixturePosted = page.waitForRequest((request) =>
+    new URL(request.url()).pathname.endsWith("/from-full-deck") && request.method() === "POST");
+  await page.getByTestId("dev-create").click();
+  const fixture = fixturePosted.then((request) => request.postDataJSON() as {
+    playerIds: readonly string[];
+    characters: readonly { startingActivityCardId: string }[];
+  });
+  const payload = await fixture;
+  expect(payload.playerIds).toEqual(demoSeats);
+  expect(payload.characters).toHaveLength(23);
+  const quotas = new Map([
+    ["public-financing", 5], ["private-financing", 5], ["black-market", 4],
+    ["corruption", 4], ["culture", 4], ["sport", 2], ["transport", 3], ["bishopric", 3],
+  ]);
+  const counts = new Map<string, number>();
+  for (const character of payload.characters) {
+    const category = character.startingActivityCardId.split(":")[1];
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+  for (const [category, count] of counts) expect(count).toBeLessThanOrEqual(quotas.get(category)!);
+
+  await expect(page.getByTestId("dev-session")).toBeVisible();
+  await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(8);
+  for (const id of demoSeats) {
+    await expect(page.getByTestId(`dev-seat-${id}`)).toBeVisible();
+    await expect(page.getByTestId(`dev-copy-seat-${id}`)).toBeVisible();
+  }
+  await page.getByTestId("dev-seat-heidi").click();
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:45");
+  await expect(page.getByTestId("dev-hand")).not.toContainText("demo:action:01");
+  expect(observedHeaders.some(({ path, token }) =>
+    path.endsWith("/hand") && token === "h".repeat(64))).toBe(true);
+
+  const storage = await page.evaluate(() => ({
+    local: Object.values(localStorage), session: Object.values(sessionStorage), url: location.href,
+  }));
+  for (let i = 0; i < 8; i++) {
+    const token = String.fromCharCode(97 + i).repeat(64);
+    expect(JSON.stringify(storage)).not.toContain(token);
+    expect(await page.locator("body").innerText()).not.toContain(token);
+  }
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
 });

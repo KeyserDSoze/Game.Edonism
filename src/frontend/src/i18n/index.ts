@@ -54,7 +54,8 @@ const resources = {
       dev: {
         badge: "Solo Development",
         title: "Laboratorio della partita",
-        description: "Prova due posti locali con dati sintetici. Il server .NET convalida movimento e turno; non è PvP pubblico.",
+        description: "Prova da 2 a 8 posti locali con dati sintetici. Il server .NET convalida movimento e turno; non è PvP pubblico.",
+        playerCount: "Numero di giocatori",
         create: "Avvia partita dimostrativa",
         joinTitle: "Entra nella partita da un altro browser",
         joinMatch: "ID partita",
@@ -148,7 +149,8 @@ const resources = {
       dev: {
         badge: "Development only",
         title: "Match laboratory",
-        description: "Try two local seats with synthetic data. The .NET server validates moves and turns; this is not public PvP.",
+        description: "Try 2 to 8 local seats with synthetic data. The .NET server validates moves and turns; this is not public PvP.",
+        playerCount: "Number of players",
         create: "Start demo match",
         joinTitle: "Join the match from another browser",
         joinMatch: "Match ID",

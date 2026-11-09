@@ -52,24 +52,32 @@ const quotaAndExtras = [
   ["bishopric", 3, 3],
 ] as const;
 
+const demoSeatIds = ["alice", "bob", "charlie", "diana", "eve", "frank", "grace", "heidi"] as const;
+
 /**
  * Local Development-only synthetic catalog: 46 activities, 23 characters,
  * 58 action IDs and one Election Day. These IDs are not actual Edonism cards.
  * The backend is still authoritative over draw, position, movement and turn.
  */
-function demoFixture() {
+function demoFixture(playerCount: number) {
   const activities = quotaAndExtras.flatMap(([category, quota, extra]) =>
     Array.from({ length: quota + extra }, (_, index) => ({
       id: `demo:${category}:${String(index + 1).padStart(2, "0")}`,
       category,
     })),
   );
-  // Match backend test fixture semantics. Each character has a distinct
-  // starting card and a synthetic heart count solely for this laboratory.
-  const sortedActivities = [...activities].sort((a, b) => a.id.localeCompare(b.id, "en"));
+  // The 23 synthetic characters reference distinct activities chosen only
+  // from each category's printed 30-slot quota. Any 2-8 drawn characters
+  // then fit the board without inventing overflow compensation (R-03).
+  const startingCards = Array.from(
+    { length: Math.max(...quotaAndExtras.map(([, quota]) => quota)) },
+    (_, index) => quotaAndExtras
+      .filter(([, quota]) => index < quota)
+      .map(([category]) => `demo:${category}:${String(index + 1).padStart(2, "0")}`),
+  ).flat();
   const characters = Array.from({ length: 23 }, (_, index) => ({
     id: `demo:character:${String(index + 1).padStart(2, "0")}`,
-    startingActivityCardId: sortedActivities[index].id,
+    startingActivityCardId: startingCards[index],
     printedInitialHearts: (index % 5) + 1,
   }));
   const actionCardIds = Array.from(
@@ -78,7 +86,7 @@ function demoFixture() {
   );
 
   return {
-    playerIds: ["alice", "bob"],
+    playerIds: demoSeatIds.slice(0, playerCount),
     characters,
     availableActivities: activities,
     actionCardIds,
@@ -106,6 +114,7 @@ export function DevelopmentMatchLab({
 }) {
   const { t } = useTranslation();
   const [session, setSession] = useState<DemoSession | null>(null);
+  const [playerCount, setPlayerCount] = useState(2);
   const [actorId, setActorId] = useState("");
   const [hand, setHand] = useState<PrivateHand | null>(null);
   const [busy, setBusy] = useState(false);
@@ -231,11 +240,14 @@ export function DevelopmentMatchLab({
       const response = await fetch("/api/dev/matches/from-full-deck", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(demoFixture()),
+        body: JSON.stringify(demoFixture(playerCount)),
         cache: "no-store",
       });
       const created = await responseJson<DemoSession>(response);
-      if (created.credentials.length !== 2 || created.state.players.length !== 2) {
+      const playerIds = demoSeatIds.slice(0, playerCount);
+      if (created.credentials.length !== playerCount || created.state.players.length !== playerCount
+        || !playerIds.every((id) => created.credentials.some((seat) => seat.playerId === id)
+          && created.state.players.some((seat) => seat.playerId === id))) {
         throw new Error("invalid_dev_fixture");
       }
       currentMatchId.current = created.matchId;
@@ -393,6 +405,21 @@ export function DevelopmentMatchLab({
         <p className="text-xs leading-5 text-muted-foreground">{t("dev.description")}</p>
       </CardHeader>
       <CardContent className="space-y-4">
+        <label className="flex items-center justify-between gap-3 text-sm">
+          <span className="font-medium">{t("dev.playerCount")}</span>
+          <select
+            aria-label={t("dev.playerCount")}
+            data-testid="dev-player-count"
+            className="h-10 min-w-20 rounded-md border border-input bg-background px-3"
+            value={playerCount}
+            disabled={busy}
+            onChange={(event) => setPlayerCount(Number(event.target.value))}
+          >
+            {demoSeatIds.slice(1).map((id, index) => (
+              <option key={id} value={index + 2}>{index + 2}</option>
+            ))}
+          </select>
+        </label>
         <Button
           type="button"
           className="w-full"
@@ -478,7 +505,7 @@ export function DevelopmentMatchLab({
               </p>
             </div>
 
-            <div role="group" aria-label={t("dev.seatLabel")} className="grid grid-cols-2 gap-2">
+            <div role="group" aria-label={t("dev.seatLabel")} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {session.credentials.map((seat) => (
                 <Button
                   key={seat.playerId}

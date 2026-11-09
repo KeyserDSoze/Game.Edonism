@@ -376,6 +376,12 @@ public sealed class GameMatch
         _events.Add(new MatchAuditEvent(Revision, Round, kind, actorId, from, to));
     }
 
+    /// <summary>
+    /// Checks the emitted public first-round audit without mutating this match.
+    /// Full restoration, finance and future event types are intentionally not covered.
+    /// </summary>
+    public MatchAuditReplayResult VerifyPublicAudit() => MatchAuditReplay.Verify(_board, Snapshot());
+
     private MatchCommandResult Accept() => new(true, "ok", Snapshot());
     private MatchCommandResult Reject(string code) => new(false, code, Snapshot());
 }

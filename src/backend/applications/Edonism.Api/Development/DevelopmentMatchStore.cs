@@ -98,6 +98,20 @@ public sealed class DevelopmentMatchStore
         }
     }
 
+    /// <summary>Authenticated, read-only Development audit check; no private cards.</summary>
+    public bool TryReadAudit(
+        Guid matchId, string? token, out MatchAuditReplayResult? verification)
+    {
+        verification = null;
+        if (!_matches.TryGetValue(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            if (entry.ResolveActor(token) is null) return false;
+            verification = entry.Match.VerifyPublicAudit();
+            return true;
+        }
+    }
+
     public bool TryReadHand(
         Guid matchId, string? token, out MatchPrivateHandSnapshot? hand)
     {

@@ -98,6 +98,16 @@ public static class DevelopmentMatchEndpoints
             }
         });
 
+        // Development only: validates the current PUBLIC movement/turn audit,
+        // not player hands, draw pile, or a Production persistence/replay log.
+        group.MapGet("/{matchId:guid}/audit", (Guid matchId, HttpContext context,
+            DevelopmentMatchStore store) =>
+        {
+            return store.TryReadAudit(matchId, Token(context), out var verification)
+                ? Results.Ok(verification)
+                : Results.NotFound(new { code = "match_not_found" });
+        });
+
         group.MapGet("/{matchId:guid}/hand", (Guid matchId, HttpContext context,
             DevelopmentMatchStore store) =>
         {

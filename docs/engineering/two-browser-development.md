@@ -44,3 +44,7 @@ Le mani private sono richieste **solo** nel contesto del token di posto. Il camb
 `src/frontend/e2e-live/real-match.spec.ts`: scenario **senza HTTP mock** con due veri contesti Chromium indipendenti e API ASP.NET Core Development reale, che crea una partita nel browser A, entra come bob nel browser B, confronta carte private, sposta i giocatori, sincronizza le revisioni di entrambe le finestre e si arresta prima del settlement. I test precedenti rimangono nel gate CI completo.
 
 Il risultato della CI finale va registrato nel ledger e nel commento di chiusura della #25. I test non dimostrano sicurezza Production (#13) né tutte le regole PvP (#4/#6/#8).
+
+## Verifica finale della tranche
+
+[GitHub Actions #42709228987](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42709228987), commit `adc536a`, **completed/success** con tutti i job verdi: **155/155 xUnit**, **24/24 Playwright UI mocked**, **5/5 Playwright live** con due browser e backend .NET reale. Il test del setup full-deck è stato corretto per usare la vera strada iniziale invece di ipotizzarla; il test di revision conflict verifica ora il **polling che aggiorna e disabilita** il pulsante, mentre i 409 continuano a essere esercitati direttamente via API e in Playwright mocked. Nessuna route Production è stata aggiunta.

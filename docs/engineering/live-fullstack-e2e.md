@@ -23,7 +23,7 @@ npx playwright install chromium
 npm run test:e2e:live
 ```
 
-Playwright avvia Vite su `127.0.0.1:5173`. Il proxy `/api/dev` inoltra le richieste **solo localmente** a `127.0.0.1:5080`. Il test live **fallisce** se il backend non risponde: non ripiega su fixture/mock. Non confondere `npm run test:e2e` (10 test mock/UI) con `npm run test:e2e:live` (3 test integrati, richiedono .NET).
+Playwright avvia Vite su `127.0.0.1:5173`. Il proxy `/api/dev` inoltra le richieste **solo localmente** a `127.0.0.1:5080`. Il test live **fallisce** se il backend non risponde: non ripiega su fixture/mock. Non confondere `npm run test:e2e` (suite mock/UI, senza .NET) con `npm run test:e2e:live` (suite integrata contro .NET reale). I conteggi crescono con le nuove issue e sono verificati in CI.
 
 ## CI in tre job indipendenti
 
@@ -33,7 +33,7 @@ Playwright avvia Vite su `127.0.0.1:5173`. Il proxy `/api/dev` inoltra le richie
 
 Il nuovo job `Live React + .NET / Playwright` esegue restore/build .NET Release, installa Node/Chromium, avvia il servizio ASP.NET Core `ASPNETCORE_ENVIRONMENT=Development` su indirizzo loopback `127.0.0.1:5080`, attende un GET `/health` positivo e lancia `playwright.live.config.ts`. In caso di errore raccoglie log API e trace/screenshot Playwright come artifact. Il job aggiuntivo preserva il gate precedente a due job (vedi incidente [#15](https://github.com/KeyserDSoze/Game.Edonism/issues/15)); il workflow è verde solo quando **tutti e tre** sono passati.
 
-### Cosa verificano i 3 test senza mock
+### Verifiche della suite senza mock
 
 1. Creazione del full-deck fixture realmente serializzato dal browser (cataloghi sintetici 46/23/58 + election-day), 30 attività collocate, due personaggi/giocatori; primo movimento su un arco presente nel grafo, rifiuto di seconda mossa gratuita, fine turno di alice, movimento e fine turno di bob, revisione corretta, stato finale `AwaitingRoundSettlement` senza nuovo round.
 2. L'API rifiuta mani senza token e con token inventato; accetta ciascuna mano soltanto con il suo token e ignora `?playerId=alice` quando l'attore è bob; mani disgiunte, snapshot pubblico privo degli ID segreti, nessuna credenziale conservata in `localStorage`, `sessionStorage` o nell'URL.
@@ -59,3 +59,7 @@ I risultati del test sono verificati dalle risposte ASP.NET Core, **non** da un 
 ## Copertura multi-browser (issue #25)
 
 È disponibile anche un test Playwright **live** con due `BrowserContext` distinti, senza mock HTTP: Alice crea la partita, Bob entra con **un solo** token, i browser leggono mani disgiunte e osservano tramite polling revisioni, spostamenti e cambi di turno da ASP.NET Core reale. Il test non misura affidabilità di un WebSocket né autenticazione Production. Per riprodurre manualmente il flusso, vedi [due browser Development](two-browser-development.md).
+
+## Ultimo gate con due browser (#25)
+
+[CI #42709228987](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42709228987): **155/155 xUnit, 24/24 Playwright UI, 5/5 Playwright live**, tre job verdi. Il nuovo E2E apre due veri contesti browser, entra con un solo token nel secondo, verifica che le mani non si sovrappongano e che entrambi seguano la revisione/turno del server via polling. Restano escluse identità e sessioni persistenti Production. [Guida](two-browser-development.md).

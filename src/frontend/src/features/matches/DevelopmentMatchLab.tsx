@@ -143,6 +143,11 @@ export function DevelopmentMatchLab({
   const lastPublicTag = useRef<{
     matchId: string; token: string; revision: number; value: string;
   } | null>(null);
+  // A 404 is authoritative only for the exact match/seat/token that made
+  // the request. Races from a prior seat or rotation must not drop a new one.
+  const currentActorScope = useRef<{
+    matchId: string; seatId: string; token: string;
+  } | null>(null);
 
   const token = session?.credentials.find((seat) => seat.playerId === actorId)?.token;
   const player = session?.state.players.find((seat) => seat.playerId === actorId);
@@ -176,6 +181,41 @@ export function DevelopmentMatchLab({
       : null);
   }
 
+
+  /** A 404 on an authenticated Development read means this capability is gone.
+   * Preserve any other creator-owned seats, but never retain the revoked hand
+   * or reauthorize it from a stale HTTP response. Transient 5xx is not revocation.
+   */
+  function reconcileRevokedSeat(matchId: string, seatId: string, revokedToken: string) {
+    const active = currentActorScope.current;
+    if (active?.matchId !== matchId || active.seatId !== seatId
+      || active.token !== revokedToken || session?.matchId !== matchId) return;
+
+    const remaining = session.credentials.filter((seat) => seat.playerId !== seatId);
+    setHand(null);
+    setOptionLease(null);
+    lastPublicTag.current = null;
+    if (remaining.length === 0) {
+      currentActorScope.current = null;
+      currentMatchId.current = null;
+      currentRevision.current = -1;
+      setSession(null);
+      setActorId("");
+      publishPublicPositions(null);
+    } else {
+      const fallback = remaining[0];
+      currentActorScope.current = { matchId, seatId: fallback.playerId, token: fallback.token };
+      setSession((previous) => previous?.matchId === matchId
+        ? { ...previous, credentials: previous.credentials.filter((seat) => seat.playerId !== seatId) }
+        : previous);
+      setActorId(fallback.playerId);
+      const position = session.state.players.find((seat) => seat.playerId === fallback.playerId)?.streetId;
+      if (position && streetById(position)) onStreetSelect(position);
+    }
+    setRotationNotice(null);
+    setError(t("dev.accessRevoked"));
+  }
+
   /** Apply only a newer snapshot for the CURRENT match, never an old HTTP result. */
   function acceptServerState(next: DemoMatch, matchId: string): boolean {
     if (currentMatchId.current !== matchId || next.matchId !== matchId
@@ -203,7 +243,11 @@ export function DevelopmentMatchLab({
       cache: "no-store",
       signal: controller.signal,
     })
-      .then((response) => responseJson<ActorTurnOptions>(response))
+      .then((response) => {
+        if (response.status === 404 && !controller.signal.aborted)
+          reconcileRevokedSeat(matchId, seatId, actorToken);
+        return responseJson<ActorTurnOptions>(response);
+      })
       .then((options) => {
         if (!controller.signal.aborted && currentMatchId.current === matchId
           && currentRevision.current === revision
@@ -228,13 +272,20 @@ export function DevelopmentMatchLab({
       return;
     }
     const controller = new AbortController();
+    const matchId = session.matchId;
+    const seatId = actorId;
+    const actorToken = token;
     setHand(null);
-    void fetch(`/api/dev/matches/${session.matchId}/hand`, {
-      headers: { "X-Edonism-Dev-Token": token },
+    void fetch(`/api/dev/matches/${matchId}/hand`, {
+      headers: { "X-Edonism-Dev-Token": actorToken },
       signal: controller.signal,
       cache: "no-store",
     })
-      .then((response) => responseJson<PrivateHand>(response))
+      .then((response) => {
+        if (response.status === 404 && !controller.signal.aborted)
+          reconcileRevokedSeat(matchId, seatId, actorToken);
+        return responseJson<PrivateHand>(response);
+      })
       .then((result) => {
         if (!controller.signal.aborted) setHand(result);
       })
@@ -250,6 +301,7 @@ export function DevelopmentMatchLab({
   useEffect(() => {
     const matchId = session?.matchId;
     const actorToken = token;
+    const seatId = actorId;
     if (!matchId || !actorToken) return;
     const controller = new AbortController();
     let polling = false;
@@ -271,6 +323,13 @@ export function DevelopmentMatchLab({
           signal: controller.signal,
           cache: "no-store",
         });
+        // A cached ETag is never an authorization grant. 404 with the
+        // current bearer means the seat has been revoked or match is gone.
+        if (response.status === 404) {
+          if (!controller.signal.aborted)
+            reconcileRevokedSeat(matchId, seatId, actorToken);
+          return;
+        }
         // A conditional GET never returns JSON on 304, nor advances UI state.
         if (response.status === 304) return;
         if (response.ok) {
@@ -321,6 +380,7 @@ export function DevelopmentMatchLab({
     setHand(null);
     setOptionLease(null);
     lastPublicTag.current = null;
+    currentActorScope.current = null;
     currentMatchId.current = null;
     currentRevision.current = -1;
     setSession(null);
@@ -341,6 +401,11 @@ export function DevelopmentMatchLab({
       }
       currentMatchId.current = created.matchId;
       currentRevision.current = created.state.revision;
+      currentActorScope.current = {
+        matchId: created.matchId,
+        seatId: created.credentials[0].playerId,
+        token: created.credentials[0].token,
+      };
       setSession(created);
       publishPublicPositions(created.state);
       setActorId(created.credentials[0].playerId);
@@ -372,6 +437,7 @@ export function DevelopmentMatchLab({
     setHand(null);
     setOptionLease(null);
     lastPublicTag.current = null;
+    currentActorScope.current = null;
     currentMatchId.current = null;
     currentRevision.current = -1;
     setSession(null);
@@ -394,6 +460,7 @@ export function DevelopmentMatchLab({
       const actor = privateHand.playerId;
       currentMatchId.current = state.matchId;
       currentRevision.current = state.revision;
+      currentActorScope.current = { matchId: state.matchId, seatId: actor, token: secret };
       setSession({
         matchId: state.matchId,
         state,
@@ -427,19 +494,24 @@ export function DevelopmentMatchLab({
     setError(null);
     setRotationNotice(null);
     try {
-      const result = await responseJson<DemoCredential>(await fetch(
-        `/api/dev/matches/${matchId}/rotate-token`, {
-          method: "POST",
-          headers: { "X-Edonism-Dev-Token": token },
-          cache: "no-store",
-        },
-      ));
+      const response = await fetch(`/api/dev/matches/${matchId}/rotate-token`, {
+        method: "POST",
+        headers: { "X-Edonism-Dev-Token": token },
+        cache: "no-store",
+      });
+      if (response.status === 404) {
+        reconcileRevokedSeat(matchId, seatId, token);
+        return;
+      }
+      const result = await responseJson<DemoCredential>(response);
       if (result.playerId !== seatId || !/^[A-F0-9]{64}$/i.test(result.token)
         || result.token.toLowerCase() === token.toLowerCase()
         || currentMatchId.current !== matchId)
         throw new Error("invalid_rotated_credential");
       // No change to match, public audit or gameplay revision.
       // Update only the actor's in-memory seat secret.
+      currentActorScope.current = { matchId, seatId, token: result.token };
+      lastPublicTag.current = null;
       setSession((previous) => previous?.matchId === matchId
         ? {
             ...previous,
@@ -492,6 +564,10 @@ export function DevelopmentMatchLab({
         ),
         cache: "no-store",
       });
+      if (response.status === 404) {
+        reconcileRevokedSeat(session.matchId, actorId, token);
+        return;
+      }
       if (response.status === 409) {
         // Server wins on optimistic concurrency. Never guess the next state.
         const refreshed = await responseJson<DemoMatch>(
@@ -523,6 +599,11 @@ export function DevelopmentMatchLab({
 
   function chooseActor(id: string) {
     if (busy) return;
+    const credential = session?.credentials.find((seat) => seat.playerId === id);
+    if (!session || !credential) return;
+    currentActorScope.current = {
+      matchId: session.matchId, seatId: id, token: credential.token,
+    };
     setRotationNotice(null);
     setActorId(id);
     setHand(null);

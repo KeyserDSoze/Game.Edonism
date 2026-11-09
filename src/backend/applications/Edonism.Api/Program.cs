@@ -1,5 +1,6 @@
 using System.Reflection;
 using Edonism.Application;
+using Edonism.Infrastructure.World;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHealthChecks();
@@ -23,6 +24,8 @@ app.MapGet("/api/v1/meta", () => Results.Ok(new
     version = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
     authoritativeGameplay = false
 }));
+// Immutable public board definition only. This endpoint cannot move players or mutate a match.
+app.MapGet("/api/v1/board", () => Results.Ok(BoardCatalog.LoadDefault()));
 app.Run();
 
 public partial class Program

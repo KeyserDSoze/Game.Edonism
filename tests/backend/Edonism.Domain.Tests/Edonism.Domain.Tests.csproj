@@ -11,5 +11,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../../src/backend/domains/Edonism.Domain/Edonism.Domain.csproj" />
+    <ProjectReference Include="../../../src/backend/infrastructure/Edonism.Infrastructure/Edonism.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

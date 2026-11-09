@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="../../business/Edonism.Application/Edonism.Application.csproj" />
+    <EmbeddedResource Include="../../../shared/board/edonism-board.v1.json" LogicalName="Edonism.Board.v1.json" />
   </ItemGroup>
 </Project>

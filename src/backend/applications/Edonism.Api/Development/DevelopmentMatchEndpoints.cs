@@ -127,11 +127,23 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "hand_not_found" });
         });
 
+        // The bearer is validated before handling a conditional GET; a revoked
+        // token can never receive 304 and infer that a match exists. The tag
+        // exposes ONLY the public revision, never a private hand or credential.
         group.MapGet("/{matchId:guid}", (Guid matchId, HttpContext context, DevelopmentMatchStore store) =>
         {
-            return store.TryRead(matchId, Token(context), out var snapshot)
-                ? Results.Ok(snapshot)
-                : Results.NotFound(new { code = "match_not_found" });
+            context.Response.Headers.CacheControl = "no-store";
+            if (!store.TryRead(matchId, Token(context), out var snapshot))
+                return Results.NotFound(new { code = "match_not_found" });
+
+            var etag = $"W/\\"edonism-revision-{snapshot!.Revision}\\"";
+            context.Response.Headers.ETag = etag;
+            // An ETag is scoped to this URL and reflects the current match
+            // revision. Match/token changes remain the caller's responsibility.
+            var conditions = context.Request.Headers.IfNoneMatch.ToString().Split(',');
+            return conditions.Any(condition => condition.Trim() == etag || condition.Trim() == "*")
+                ? Results.StatusCode(StatusCodes.Status304NotModified)
+                : Results.Ok(snapshot);
         });
 
 

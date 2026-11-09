@@ -118,3 +118,7 @@ L'elenco accessibile sotto il Canvas mostra identità, strada e turno corrente a
 ## Attività controllate e scagnozzi sulla mappa (#23)
 
 Il laboratorio Development indica ora quali **lotti sono controllati** nella città 3D: il colore del proprietario e uno scagnozzo geometrico (in piedi/atterrato) derivano esclusivamente da `controlledActivities` nello snapshot .NET; la carta collocata proviene da `boardActivities`. Un elenco accessibile descrive slot/carta/categoria/proprietario/postura anche senza WebGL e mostra il **preventivo lordo** degli atomi del server, esplicitamente **non accreditati**. Non sono stati introdotti comandi di conquista, Pizzo o pagamento; carte e modelli originali attendono #19/#9. [Dettagli tecnici](docs/engineering/controlled-lots.md).
+
+## Registro eventi e replay verificato del primo round (#24)
+
+La fixture Development espone adesso una cronologia pubblica del round e l'**ordine proposto** per il prossimo round, mai eseguito automaticamente. Il Domain .NET può rigiocare e verificare i quattro tipi di evento attualmente supportati (genesi, movimento gratuito, fine turno, attesa saldo) contro la board originale e lo stato corrente. La route in sola lettura `GET /api/dev/matches/{id}/audit` richiede il token del posto e **non** esiste in Production. Il frontend mostra solo tipi evento pubblici approvati e non riceve mani o draw pile nel registro. Questa non è persistenza o ripresa della partita. [Guida e limiti](docs/engineering/match-audit-replay.md).

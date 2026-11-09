@@ -57,3 +57,7 @@ Catalogo reale e art (#19/#7/#9), lobby, token auth Production, rendering delle 
 ## Attività controllate e scagnozzi (#23)
 
 La scena usa da oggi anche `controlledActivities` e `boardActivities` pubblici del match: i 30 edifici rimangono nella topologia originale, quelli controllati mostrano il colore del giocatore e una pedina scagnozzo nella postura dichiarata dal Domain. Il nuovo elenco HTML accessibile permette di verificarne slot, carta sintetica, owner, postura e preventivo del salario **lordo** senza simulare pagamenti. Il lavoro è documentato in [controlled-lots](controlled-lots.md). Le proprietà **non** cambiano quando il personaggio si sposta: il backend resta autoritativo.
+
+## Cronologia pubblica e replay indipendente (#24)
+
+La fixture mostra anche la cronologia del round in lettura da `Events` pubblici con revisioni e l'ordine del turno successivo **come proposta**, mai come fase già avanzata. Un nuovo `MatchAuditReplay.Verify` nel Domain ricostruisce autonomamente movimenti/turni del primo round e confronta il risultato con lo snapshot. La route Development `GET /api/dev/matches/{id}/audit` è protetta da token e non viene registrata in Production. [Dettagli tecnici](match-audit-replay.md). Non è stato introdotto pagamento, giro successivo, rifornimento, elezione o replay delle carte.

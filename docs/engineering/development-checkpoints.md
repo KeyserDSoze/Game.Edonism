@@ -63,3 +63,7 @@ I job CI conservano Playwright UI e Playwright live (inclusi **due browser indip
 ## Risultato verificato su `main`
 
 [CI #42712968317](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42712968317), commit `1733823`: **165/165 xUnit .NET 10**, **24/24 Playwright UI**, **5/5 Playwright live**, tre job `success`, build .NET 10 con **0 warning e 0 errori**. Questa esecuzione include anche README, AGENTS, la guida di sicurezza e la configurazione di opt-in; non abilita alcuna nuova route Production. La parent #13 resta aperta.
+
+## Rotazione del bearer di posto (#28)
+
+La [rotazione Development](development-seat-rotation.md) sostituisce un solo token di posto alla volta, scrivendo il nuovo digest cifrato *prima* della revoca in memoria. La revisione del gioco e il checkpoint delle carte non cambiano. Non si possono recuperare vecchi token o ottenere un nuovo token senza essere già in possesso di quello corrente. Il creator non riceve in automatico i token ruotati da altri browser. L'endpoint non esiste in Production.

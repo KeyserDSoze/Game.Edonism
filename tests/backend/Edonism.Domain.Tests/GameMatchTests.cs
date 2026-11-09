@@ -48,11 +48,13 @@ public sealed class GameMatchTests
         var before = match.Snapshot();
         var outcome = match.TryFreeMove("alice", destination, 0);
         Assert.Equal(shouldAccept, outcome.Accepted);
-        // Planck is adjacent to Gauss, Einstein, Meson; compare using an explicit
-        // allowed set rather than relying on graphical coordinates.
-        // Expected inline data below are corrected in the next fact.
         Assert.Equal(shouldAccept ? 1 : 0, match.Revision);
-        if (!shouldAccept)\n        {\n            Assert.Equal(before.Revision, match.Revision);\n            Assert.Equal(before.Players.Select(p => p.StreetId), match.Snapshot().Players.Select(p => p.StreetId));\n            Assert.Equal(before.Events.Select(e => e.Kind), match.Snapshot().Events.Select(e => e.Kind));\n        }
+        if (!shouldAccept)
+        {
+            Assert.Equal(before.Revision, match.Revision);
+            Assert.Equal(before.Players.Select(p => p.StreetId), match.Snapshot().Players.Select(p => p.StreetId));
+            Assert.Equal(before.Events.Select(e => e.Kind), match.Snapshot().Events.Select(e => e.Kind));
+        }
     }
 
     [Fact]
@@ -84,7 +86,9 @@ public sealed class GameMatchTests
         var result = match.TryFreeMove(actor, destination, 0);
         Assert.False(result.Accepted);
         Assert.Equal(expected, result.Code);
-        Assert.Equal(before.Revision, match.Revision);\n        Assert.Equal(before.Players.Select(p => p.StreetId), match.Snapshot().Players.Select(p => p.StreetId));\n        Assert.Equal(before.Events.Select(e => e.Kind), match.Snapshot().Events.Select(e => e.Kind));
+        Assert.Equal(before.Revision, match.Revision);
+        Assert.Equal(before.Players.Select(p => p.StreetId), match.Snapshot().Players.Select(p => p.StreetId));
+        Assert.Equal(before.Events.Select(e => e.Kind), match.Snapshot().Events.Select(e => e.Kind));
     }
 
     [Fact]

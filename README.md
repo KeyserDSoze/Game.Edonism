@@ -74,3 +74,9 @@ La mappa non assegna attività reali: la scelta delle carte, i turni, l'economia
 ## Governance e roadmap
 
 Ogni feature/bug passa da GitHub Issue, branch e PR con test. `AGENTS.md` è la guida di lavoro, `docs/engineering/development-ledger.md` tiene lo stato sintetico. Issue #5 tratta il board; #6 il match engine; #7 carte/poteri; #8 politica/PvP; #9 asset.
+
+## Prototipo motore turni, ambiente Development
+
+La prima verticale del game engine è documentata in [match-engine-slice-1](docs/engineering/match-engine-slice-1.md). L'API di prova si attiva **soltanto** con `ASPNETCORE_ENVIRONMENT=Development` e non è destinata a Internet: permette di creare un fixture con due giocatori e di effettuare un movimento gratuito per turno usando token differenti. Dopo l'ultimo turno il round resta in attesa di risoluzione, perché salario/carte/elezioni non sono ancora implementati.
+
+Le route `/api/dev/matches` non sono disponibili in Production. Il frontend attuale mostra la plancia statica; in futuro useremo l'autenticazione reale e la persistenza per collegare il gioco al server (#13).

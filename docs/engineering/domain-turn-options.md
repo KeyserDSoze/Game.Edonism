@@ -32,3 +32,5 @@ La rotazione #28 invalida automaticamente le autorizzazioni legate al token vecc
 - Playwright live: due browser contro ASP.NET Core Development reale per lettura opzioni, movimento, turni e blocco settlement.
 
 I test browser mocked non provano il protocollo reale; il gate full-stack è indispensabile. Prima della chiusura, verificare tutti e tre i job GitHub Actions su `main` e riportare i risultati in [issue #29](https://github.com/KeyserDSoze/Game.Edonism/issues/29) e [ledger](development-ledger.md).
+
+**Verifica CI del codice:** [run #42719228127](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42719228127) sul commit `0cc3f35` ha superato 175 xUnit, 29 test UI e 8 full-stack, con tutti e tre i job verdi. La #29 resta una tranche Development: la #6 non è ancora completa.

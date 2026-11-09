@@ -11,9 +11,9 @@
 ## Mandatory issue workflow
 1. Inspect current repository, tests, docs, `docs/engineering/development-ledger.md`, and existing GitHub Issues.
 2. Create/claim an issue with goal, scope, acceptance criteria, target version and test plan before coding.
-3. Set ledger status to In progress. Branch from main, implement in a PR and attach the issue.
+3. Set ledger status to In progress. The game designer currently requests **direct commits on `main`**; keep each commit linked to a GitHub Issue and run CI after every code batch. If this workflow changes in future, use a branch/PR without bypassing issue tracking.
 4. Test with xUnit for backend rules and Playwright for visible frontend behavior, including mobile, language and theme.
-5. Do not close issues until tests and PR/CI are verified, docs and patch notes updated, and a closure note recorded.
+5. Do not close issues until relevant tests and CI (on `main` for direct commits) are green, docs and patch notes updated, and a closure note recorded. Fix CI failures before starting the next feature.
 6. Keep `VERSION` as release source of truth, update `docs/patch-notes/` for release changes.
 
 ## Frontend conventions

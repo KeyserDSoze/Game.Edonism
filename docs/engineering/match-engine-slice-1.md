@@ -52,3 +52,9 @@ Content-Type: application/json
 
 ## Test
 xUnit su invarianti/domain, adiacenze, turni, state revision, assenza mutazioni su errore; test integration `WebApplicationFactory` su capability per attore, spoofing, concurrency, assenza route in Production. Playwright resta come smoke della mappa per il browser.
+
+## Verifica completata
+
+[GitHub Actions main #42662175729](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42662175729): **53 test xUnit superati**, incluso test API Development/Production e collisioni `ExpectedRevision`; **5 test Playwright superati**; compilazioni .NET e frontend riuscite. Root cause dei primi due run rossi: test di uguaglianza di snapshot che confrontavano riferimenti alle collezioni, quindi corretto confrontando le proiezioni strutturali; sequenze `\\n` introdotte erroneamente nel file test e poi rimosse; analizzatore xUnit2031 con warning-as-error per `Assert.Single(Where(...))`, sostituito con l'overload filtrato.
+
+Questa tranche è chiusa in #12. L'aggregato mantiene eventi in memoria, ma un **replay persistente** e l'audit multi-istanza restano per #13: non confondere la cronologia di prova con uno storage di produzione.

@@ -83,6 +83,36 @@ public sealed class DevelopmentCheckpointPersistenceTests
     }
 
     [Fact]
+    public void RestoredMatchTurnOptionsStayActorScopedAndRevisionBound()
+    {
+        using var temp = new TempDirectory();
+        var first = new DevelopmentMatchStore(temp.Files());
+        var created = Create(first);
+        var aliceToken = created.Credentials[0].Token;
+        var bobToken = created.Credentials[1].Token;
+
+        Assert.True(first.TryReadTurnOptions(created.MatchId, aliceToken, out var initial));
+        Assert.True(initial!.CanEndTurn);
+        Assert.NotEmpty(initial.FreeMoveStreetIds);
+        Assert.False(first.TryReadTurnOptions(created.MatchId, new string('0', 64), out _));
+        Assert.True(first.TryEndTurn(created.MatchId, aliceToken, 0, out var ended));
+        Assert.True(ended!.Accepted);
+
+        var resumed = new DevelopmentMatchStore(temp.Files());
+        Assert.True(resumed.TryReadTurnOptions(created.MatchId, aliceToken, out var alice));
+        Assert.Equal(1, alice!.Revision);
+        Assert.False(alice.CanEndTurn);
+        Assert.Empty(alice.FreeMoveStreetIds);
+        Assert.True(resumed.TryReadTurnOptions(created.MatchId, bobToken, out var bob));
+        Assert.Equal(1, bob!.Revision);
+        Assert.True(bob.CanEndTurn);
+        Assert.NotEmpty(bob.FreeMoveStreetIds);
+        Assert.True(resumed.TryRead(created.MatchId, aliceToken, out var unchanged));
+        Assert.Equal(1, unchanged!.Revision);
+        Assert.Equal(2, unchanged.Events.Count);
+    }
+
+    [Fact]
     public void CiphertextDoesNotContainTokensOrCardsAndWrongKeyOrTamperingFailsClosed()
     {
         using var temp = new TempDirectory();

@@ -15,6 +15,7 @@ type MockOptions = {
   playerCount?: number;
   noTurnOptions?: boolean;
   invalidTurnOptions?: boolean;
+  delayFirstAliceOptions?: boolean;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
@@ -32,6 +33,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let active: Seat | null = "alice";
   let conflictRaised = false;
   let rotationSequence = 0;
+  let delayedAliceOptions = false;
   const auditEvents: Array<{
     revision: number; round: number; kind: string; actorId: string;
     fromStreetId: string | null; toStreetId: string | null;
@@ -124,6 +126,10 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     if (!seat) return route.fulfill({ status: 404, json: { code: "match_not_found" } });
 
     if (path.endsWith("/turn-options")) {
+      if (options.delayFirstAliceOptions && seat === "alice" && !delayedAliceOptions) {
+        delayedAliceOptions = true;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
       if (options.noTurnOptions)
         return route.fulfill({ status: 503, json: { code: "unavailable" } });
       const neighbors: Record<string, string[]> = {
@@ -775,4 +781,24 @@ test("actor-scoped options follow seat and revision, not the locally selected st
   expect(observedHeaders.filter(({ path }) => path.endsWith("/turn-options"))
     .some(({ token }) => token === "b".repeat(64))).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+});
+
+test("a delayed option response for Alice cannot enable actions on Bob's seat", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { delayFirstAliceOptions: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect.poll(() => observedHeaders.some(({ path, token }) =>
+    path.endsWith("/turn-options") && token === "a".repeat(64))).toBe(true);
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
+  await expect.poll(() => observedHeaders.some(({ path, token }) =>
+    path.endsWith("/turn-options") && token === "b".repeat(64))).toBe(true);
+  // Delayed Alice response may arrive after Bob's options; it cannot alter
+  // the active actor or grant Bob a command before his turn.
+  await page.waitForTimeout(1150);
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
+  await page.getByTestId("dev-seat-alice").click();
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
 });

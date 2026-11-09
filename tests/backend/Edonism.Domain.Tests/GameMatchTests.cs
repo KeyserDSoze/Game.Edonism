@@ -28,6 +28,7 @@ public sealed class GameMatchTests
             Assert.Equal(4, p.Atoms);
             Assert.Equal(2, p.DiplomacyTokens);
             Assert.Equal(16, p.HenchmenTotal);
+            Assert.Equal(15, p.HenchmenAvailable);
             Assert.False(p.FreeMoveUsed);
         });
         Assert.Single(snapshot.Events);

@@ -22,6 +22,7 @@ public sealed record MatchPlayerSnapshot(
     int Atoms,
     int DiplomacyTokens,
     int HenchmenTotal,
+    int HenchmenAvailable,
     bool FreeMoveUsed);
 
 public sealed record MatchAuditEvent(
@@ -42,6 +43,8 @@ public sealed record MatchSnapshot(
     IReadOnlyList<string> TurnOrder,
     IReadOnlyList<string> ProposedNextRoundOrder,
     IReadOnlyList<MatchPlayerSnapshot> Players,
+    IReadOnlyList<MatchControlledActivitySnapshot> ControlledActivities,
+    IReadOnlyList<MatchGrossSalaryQuote> GrossSalaryQuotes,
     IReadOnlyList<MatchAuditEvent> Events);
 
 public sealed record MatchCommandResult(bool Accepted, string Code, MatchSnapshot State);
@@ -61,16 +64,19 @@ public sealed class GameMatch
 
     private readonly BoardDefinition _board;
     private readonly List<MatchPlayerSnapshot> _players;
+    private readonly List<MatchControlledActivitySnapshot> _controlledActivities;
     private readonly List<string> _turnOrder;
     private readonly List<MatchAuditEvent> _events = [];
 
     private int _turnIndex;
 
-    private GameMatch(Guid matchId, BoardDefinition board, List<MatchPlayerSnapshot> players)
+    private GameMatch(Guid matchId, BoardDefinition board, List<MatchPlayerSnapshot> players,
+        List<MatchControlledActivitySnapshot> controlledActivities)
     {
         MatchId = matchId;
         _board = board;
         _players = players;
+        _controlledActivities = controlledActivities;
         _turnOrder = players.Select(p => p.PlayerId).ToList();
         _events.Add(new MatchAuditEvent(0, 1, "match-created", "system", null, null));
     }
@@ -119,9 +125,16 @@ public sealed class GameMatch
             InitialAtoms,
             InitialDiplomacyTokens,
             TotalHenchmen,
+            HenchmenAvailable: TotalHenchmen - 1,
             FreeMoveUsed: false)).ToList();
 
-        return new GameMatch(matchId, board, players);
+        // Rulebook2 p.4: one henchman is placed on the player's initial activity.
+        // A trusted fixture identifies the lot, but does not claim to know the card art/deck.
+        var controlledActivities = participants.Select(p =>
+            new MatchControlledActivitySnapshot(p.StartingSlotId, p.PlayerId,
+                HenchmanPosture.Standing)).ToList();
+
+        return new GameMatch(matchId, board, players, controlledActivities);
     }
 
     public MatchSnapshot Snapshot() => new(
@@ -134,6 +147,8 @@ public sealed class GameMatch
         Array.AsReadOnly(_turnOrder.ToArray()),
         Array.AsReadOnly(RotateLastToFirst(_turnOrder).ToArray()),
         Array.AsReadOnly(_players.ToArray()),
+        Array.AsReadOnly(_controlledActivities.ToArray()),
+        GrossSalaryRules.Quote(_board, _players, _controlledActivities),
         Array.AsReadOnly(_events.ToArray()));
 
     public MatchCommandResult TryFreeMove(string actorId, string destinationStreetId, long expectedRevision)

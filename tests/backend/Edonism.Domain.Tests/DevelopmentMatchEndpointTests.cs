@@ -88,6 +88,40 @@ public sealed class DevelopmentMatchEndpointTests
     }
 
     [Fact]
+    public async Task ReadOnlyDevMatchProjectsInitialControlAndGrossNotCredited()
+    {
+        using var factory = DevFactory();
+        using var setup = factory.CreateClient();
+        var (id, aliceToken, _) = await CreateMatch(setup);
+        using var alice = factory.CreateClient();
+        alice.DefaultRequestHeaders.Add("X-Edonism-Dev-Token", aliceToken);
+
+        using (var read = await alice.GetAsync($"/api/dev/matches/{id}"))
+        {
+            Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+            using var json = await read.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.NotNull(json);
+            var state = json.RootElement;
+            Assert.Equal("N-01", state.GetProperty("controlledActivities")[0].GetProperty("slotId").GetString());
+            Assert.Equal("alice", state.GetProperty("controlledActivities")[0].GetProperty("ownerPlayerId").GetString());
+            Assert.Equal(0, state.GetProperty("controlledActivities")[0].GetProperty("posture").GetInt32());
+            Assert.Equal(15, state.GetProperty("players")[0].GetProperty("henchmenAvailable").GetInt32());
+            Assert.Equal(3, state.GetProperty("grossSalaryQuotes")[0].GetProperty("grossAtoms").GetInt32());
+            Assert.Equal(4, state.GetProperty("players")[0].GetProperty("atoms").GetInt32());
+            Assert.Equal(0, state.GetProperty("revision").GetInt32());
+        }
+
+        // Ownership and salary are not client-editable fields / actions.
+        using var denied = await alice.PostAsJsonAsync($"/api/dev/matches/{id}/activities",
+            new { slotId = "N-01", ownerPlayerId = "bob", posture = 1 });
+        Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+        using var readAgain = await alice.GetAsync($"/api/dev/matches/{id}");
+        using var after = await readAgain.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert.Equal(3, after!.RootElement.GetProperty("grossSalaryQuotes")[0].GetProperty("grossAtoms").GetInt32());
+        Assert.Equal("alice", after.RootElement.GetProperty("controlledActivities")[0].GetProperty("ownerPlayerId").GetString());
+    }
+
+    [Fact]
     public async Task UnknownCredentialDoesNotReadOrMutateMatch()
     {
         using var factory = DevFactory();

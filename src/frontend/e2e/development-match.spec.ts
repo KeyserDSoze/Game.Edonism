@@ -6,6 +6,10 @@ type MockOptions = {
   creationFails?: boolean;
   sameStreet?: boolean;
   unknownStreet?: boolean;
+  fallenHenchman?: boolean;
+  badControlSlot?: boolean;
+  unknownOwner?: boolean;
+  missingBoardCard?: boolean;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
@@ -35,6 +39,29 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       hearts: 3,
       freeMoveUsed: moved[playerId],
     })),
+    boardActivities: [
+      { slotId: "N-01", cardId: "demo:activity:gauss", category: "culture" },
+      ...(options.missingBoardCard
+        ? []
+        : [{ slotId: "S-01", cardId: "demo:activity:einstein", category: "transport" }]),
+    ],
+    controlledActivities: [
+      { slotId: "N-01", ownerPlayerId: "alice", posture: 0 },
+      {
+        slotId: options.badControlSlot ? "does-not-exist" : "S-01",
+        ownerPlayerId: options.unknownOwner ? "intruder" : "bob",
+        posture: options.fallenHenchman ? 1 : 0,
+      },
+    ],
+    grossSalaryQuotes: [
+      { playerId: "alice", baseAtoms: 2, standingActivityAtoms: 1, grossAtoms: 3 },
+      {
+        playerId: "bob",
+        baseAtoms: 2,
+        standingActivityAtoms: options.fallenHenchman ? 0 : 1,
+        grossAtoms: options.fallenHenchman ? 2 : 3,
+      },
+    ],
   });
 
   await page.route("**/api/dev/matches/**", async (route) => {
@@ -302,4 +329,95 @@ test("WebGL fallback still exposes authoritative player streets and refresh on H
   // Rejected move: roster and inspector remain on the server-confirmed street.
   await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "gauss");
   await expect(page.getByTestId("selected-street")).toHaveText("Gauss Avenue");
+});
+
+test("controlled lots, cards and standing henchmen stay server-owned after moves and seat switches", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.goto("/");
+  await expect(page.getByTestId("match-activity-roster")).toHaveCount(0);
+  await page.getByTestId("dev-create").click();
+
+  const alice = page.getByTestId("controlled-lot-N-01");
+  const bob = page.getByTestId("controlled-lot-S-01");
+  await expect(page.getByTestId("match-activity-roster")).toBeVisible();
+  await expect(page.getByTestId("match-board-card-count")).toContainText("2");
+  await expect(page.getByTestId("match-activity-roster").locator("li[data-owner-id]")).toHaveCount(2);
+  await expect(alice).toHaveAttribute("data-owner-id", "alice");
+  await expect(alice).toHaveAttribute("data-card-id", "demo:activity:gauss");
+  await expect(alice).toHaveAttribute("data-posture", "standing");
+  await expect(bob).toHaveAttribute("data-owner-id", "bob");
+  await expect(bob).toHaveAttribute("data-posture", "standing");
+  await expect(page.getByTestId("gross-salary-alice")).toHaveAttribute("data-gross-atoms", "3");
+  await expect(page.getByTestId("gross-salary-bob")).toHaveAttribute("data-gross-atoms", "3");
+  await expect(page.getByTestId("match-activity-roster")).toContainText("nessun salario accreditato");
+
+  await page.getByTestId("dev-move-planck").click();
+  await expect(alice).toHaveAttribute("data-owner-id", "alice");
+  await expect(alice).toHaveAttribute("data-card-id", "demo:activity:gauss");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "planck");
+  await page.getByTestId("dev-end-turn").click();
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(alice).toHaveAttribute("data-posture", "standing");
+  await expect(bob).toHaveAttribute("data-owner-id", "bob");
+
+  const visible = await page.getByTestId("match-activity-roster").innerText();
+  expect(visible).not.toContain("alice-token");
+  expect(visible).not.toContain("bob-token");
+  expect(visible).not.toContain("demo:action:");
+});
+
+test("fallen henchmen show explicit posture and gross quotes are not wallet credits", async ({ page }) => {
+  await mockMatchApi(page, { fallenHenchman: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("controlled-lot-N-01")).toHaveAttribute("data-posture", "standing");
+  await expect(page.getByTestId("controlled-lot-S-01")).toHaveAttribute("data-posture", "fallen");
+  await expect(page.getByTestId("controlled-lot-S-01")).toContainText("Scagnozzo atterrato");
+  await expect(page.getByTestId("gross-salary-bob")).toHaveAttribute("data-gross-atoms", "2");
+  await expect(page.getByTestId("gross-salary-bob")).toContainText("2 atomi lordi");
+});
+
+test("unknown controlled slot, owner or missing placed card never creates a fake henchman", async ({ page }) => {
+  await mockMatchApi(page, { badControlSlot: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("controlled-lot-N-01")).toHaveCount(1);
+  await expect(page.getByTestId("controlled-lot-S-01")).toHaveCount(0);
+  await expect(page.getByTestId("match-activity-roster").locator("li[data-owner-id]")).toHaveCount(1);
+
+  await mockMatchApi(page, { unknownOwner: true });
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("controlled-lot-S-01")).toHaveCount(0);
+
+  await mockMatchApi(page, { missingBoardCard: true });
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("controlled-lot-S-01")).toHaveCount(0);
+  await expect(page.getByTestId("match-board-card-count")).toContainText("1");
+});
+
+test("activity ownership survives 409 refresh and is accessible without WebGL on mobile in English", async ({ page }) => {
+  await page.addInitScript(() => {
+    const nativeGetContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = (function (
+      this: HTMLCanvasElement, contextId: string, ...args: unknown[]
+    ) {
+      if (contextId === "webgl" || contextId === "webgl2") return null;
+      return Reflect.apply(nativeGetContext, this, [contextId, ...args]);
+    }) as typeof HTMLCanvasElement.prototype.getContext;
+  });
+  await mockMatchApi(page, { conflictOnFirstMove: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(page.getByTestId("city-renderer").getByRole("status")).toContainText("3D is not available");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("controlled-lot-S-01")).toHaveAttribute("data-owner-id", "bob");
+  await page.getByTestId("dev-move-planck").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("3");
+  await expect(page.getByTestId("controlled-lot-S-01")).toHaveAttribute("data-owner-id", "bob");
+  await expect(page.getByTestId("controlled-lot-N-01")).toHaveAttribute("data-posture", "standing");
+  await expect(page.getByTestId("match-activity-roster")).toContainText("Gross salary quotes");
+  await expect(page.getByTestId("match-activity-roster")).toContainText("no salary credited");
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2);
+  expect(overflow).toBe(false);
 });

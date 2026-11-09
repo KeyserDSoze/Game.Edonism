@@ -15,7 +15,11 @@ type PublicMatch = Readonly<{
   phase: number;
   activePlayerId: Seat | null;
   players: readonly PublicPlayer[];
-  boardActivities: readonly { slotId: string; cardId: string }[];
+  boardActivities: readonly { slotId: string; cardId: string; category: string }[];
+  controlledActivities: readonly { slotId: string; ownerPlayerId: Seat; posture: number }[];
+  grossSalaryQuotes: readonly {
+    playerId: Seat; baseAtoms: number; standingActivityAtoms: number; grossAtoms: number
+  }[];
   assignedCharacters: readonly { playerId: Seat; characterId: string }[];
 }>;
 type CreatedMatch = Readonly<{
@@ -46,6 +50,22 @@ async function startRealMatch(page: Page): Promise<CreatedMatch> {
   await expect(page.getByTestId("dev-session")).toBeVisible();
   // These labels are derived from the same public snapshot as the 3D pawns.
   await expect(page.getByTestId("match-player-legend")).toBeVisible();
+  await expect(page.getByTestId("match-activity-roster")).toBeVisible();
+  expect(match.state.boardActivities).toHaveLength(30);
+  expect(match.state.controlledActivities).toHaveLength(2);
+  await expect(page.getByTestId("match-board-card-count")).toContainText("30");
+  for (const control of match.state.controlledActivities) {
+    const lot = page.getByTestId(`controlled-lot-${control.slotId}`);
+    const card = match.state.boardActivities.find((a) => a.slotId === control.slotId);
+    expect(card).toBeDefined();
+    await expect(lot).toHaveAttribute("data-owner-id", control.ownerPlayerId);
+    await expect(lot).toHaveAttribute("data-card-id", card!.cardId);
+    await expect(lot).toHaveAttribute("data-posture", control.posture === 0 ? "standing" : "fallen");
+  }
+  for (const quote of match.state.grossSalaryQuotes) {
+    await expect(page.getByTestId(`gross-salary-${quote.playerId}`))
+      .toHaveAttribute("data-gross-atoms", String(quote.grossAtoms));
+  }
   for (const player of match.state.players) {
     await expect(page.getByTestId(`match-player-${player.playerId}`))
       .toHaveAttribute("data-street-id", player.streetId);
@@ -100,6 +120,12 @@ test("real .NET + React: server draws a match, moves two players and stops befor
     .toHaveAttribute("data-street-id", aliceDestination);
   expect(afterMove.players[0].freeMoveUsed).toBe(true);
   expect(afterMove.players[0].startingSlotId).toBe(created.state.players[0].startingSlotId);
+  expect(afterMove.controlledActivities).toEqual(created.state.controlledActivities);
+  expect(afterMove.grossSalaryQuotes).toEqual(created.state.grossSalaryQuotes);
+  for (const control of afterMove.controlledActivities) {
+    await expect(page.getByTestId(`controlled-lot-${control.slotId}`))
+      .toHaveAttribute("data-owner-id", control.ownerPlayerId);
+  }
   await expect(page.getByTestId("dev-move-" + aliceDestination)).toHaveCount(0);
 
   // A second free move is forbidden by the .NET Domain even with a valid token.
@@ -137,6 +163,9 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-active", "false");
   await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "false");
   expect(final.revision).toBe(4);
+  expect(final.controlledActivities).toEqual(created.state.controlledActivities);
+  expect(final.grossSalaryQuotes).toEqual(created.state.grossSalaryQuotes);
+  expect(final.boardActivities).toEqual(created.state.boardActivities);
 });
 
 test("real .NET: token isolation, secret hand privacy and no token in browser storage", async ({
@@ -246,6 +275,8 @@ test("real .NET rejects stale revisions and out-of-turn commands without mutatio
   expect(state.activePlayerId).toBe("bob");
   expect(state.phase).toBe(0);
   expect(state.players[0].freeMoveUsed).toBe(false);
+  expect(state.controlledActivities).toEqual(created.state.controlledActivities);
+  expect(state.grossSalaryQuotes).toEqual(created.state.grossSalaryQuotes);
 
   // The UI is stale because we used an external real HTTP client. Attempt
   // a command to trigger the application's 409 → authoritative GET path.
@@ -256,4 +287,8 @@ test("real .NET rejects stale revisions and out-of-turn commands without mutatio
   await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
   await expect(page.getByTestId("match-player-alice"))
     .toHaveAttribute("data-street-id", state.players[0].streetId);
+  for (const control of state.controlledActivities) {
+    await expect(page.getByTestId(`controlled-lot-${control.slotId}`))
+      .toHaveAttribute("data-owner-id", control.ownerPlayerId);
+  }
 });

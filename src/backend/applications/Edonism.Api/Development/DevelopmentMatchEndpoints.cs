@@ -136,7 +136,7 @@ public static class DevelopmentMatchEndpoints
             if (!store.TryRead(matchId, Token(context), out var snapshot))
                 return Results.NotFound(new { code = "match_not_found" });
 
-            var etag = $"W/\\"edonism-revision-{snapshot!.Revision}\\"";
+            var etag = $"W/\"edonism-revision-{snapshot!.Revision}\"";
             context.Response.Headers.ETag = etag;
             // An ETag is scoped to this URL and reflects the current match
             // revision. Match/token changes remain the caller's responsibility.

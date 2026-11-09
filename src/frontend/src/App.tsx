@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Building2, Compass, Gamepad2, Info, Languages, Map, MapPin, Monitor, Moon, MousePointer2, Sparkles, Sun } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +8,11 @@ import { CityScene } from "@/features/city/CityScene";
 import { cityBoard, slotById, slotsOnStreet, streetById } from "@/features/city/board";
 import { useTheme, type Theme } from "@/features/settings/useTheme";
 import { changeLanguage } from "@/i18n";
+
+// Production bundle never mounts the Development-only server fixture controls.
+const DevelopmentMatchLab = import.meta.env.DEV
+  ? lazy(() => import("@/features/matches/DevelopmentMatchLab").then((m) => ({ default: m.DevelopmentMatchLab })))
+  : null;
 
 const themeOptions: { theme: Theme; Icon: typeof Monitor }[] = [
   { theme: "system", Icon: Monitor },
@@ -223,6 +228,11 @@ export default function App() {
                 </div>
               </CardContent>
             </Card>
+            {DevelopmentMatchLab && (
+              <Suspense fallback={null}>
+                <DevelopmentMatchLab onStreetSelect={chooseStreet} />
+              </Suspense>
+            )}
           </aside>
         </div>
       </main>

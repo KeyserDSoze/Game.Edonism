@@ -11,6 +11,14 @@ export default defineConfig({
     },
   },
   server: {
+    // Local Development API only. Production builds have no proxy or match HUD.
+    // Start .NET with ASPNETCORE_URLS=http://127.0.0.1:5080.
+    proxy: {
+      "/api/dev": {
+        target: "http://127.0.0.1:5080",
+        changeOrigin: true,
+      },
+    },
     fs: {
       allow: [
         fileURLToPath(new URL(".", import.meta.url)),

@@ -292,7 +292,8 @@ test("WebGL fallback still exposes authoritative player streets and refresh on H
   });
   await mockMatchApi(page, { conflictOnFirstMove: true });
   await page.goto("/");
-  await expect(page.getByRole("status")).toContainText("3D non è disponibile");
+  await expect(page.getByTestId("city-renderer").getByRole("status"))
+    .toContainText("3D non è disponibile");
   await page.getByTestId("dev-create").click();
   await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "gauss");
   await page.getByTestId("dev-move-planck").click();

@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../business/Edonism.Application/Edonism.Application.csproj" />
+  </ItemGroup>
+</Project>

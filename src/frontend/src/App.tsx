@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CityScene } from "@/features/city/CityScene";
 import { cityBoard, slotById, slotsOnStreet, streetById } from "@/features/city/board";
-import { playerMarkerPlacements, type PublicPlayerPositions } from "@/features/city/playerMarkers";
+import { playerMarkerPlacements } from "@/features/city/playerMarkers";
+import { controlledLotMarkers, publicGrossSalaryQuotes, type PublicMatchSceneState } from "@/features/city/activityMarkers";
 import { useTheme, type Theme } from "@/features/settings/useTheme";
 import { changeLanguage } from "@/i18n";
 
@@ -27,10 +28,12 @@ export default function App() {
   const [selectedStreetId, setSelectedStreetId] = useState("gauss");
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>("N-01");
   // Only a public projection supplied by the Development API: never tokens/hands.
-  const [publicPlayers, setPublicPlayers] = useState<PublicPlayerPositions | null>(null);
+  const [publicPlayers, setPublicPlayers] = useState<PublicMatchSceneState | null>(null);
   const playerMarkers = publicPlayers
     ? playerMarkerPlacements(publicPlayers.players, publicPlayers.activePlayerId)
     : [];
+  const controlMarkers = publicPlayers ? controlledLotMarkers(publicPlayers) : [];
+  const grossQuotes = publicPlayers ? publicGrossSalaryQuotes(publicPlayers) : [];
   const currentStreet = streetById(selectedStreetId) ?? cityBoard.streets[0];
   const currentSlot = selectedSlotId ? slotById(selectedSlotId) : undefined;
   const streetSlots = slotsOnStreet(selectedStreetId);
@@ -130,6 +133,7 @@ export default function App() {
                 onStreetSelect={chooseStreet}
                 onSlotSelect={chooseSlot}
                 playerMarkers={playerMarkers}
+                controlMarkers={controlMarkers}
                 hasActiveMatch={publicPlayers !== null}
               />
               <div className="pointer-events-none absolute left-3 top-3 rounded-lg border border-white/15 bg-slate-950/70 px-3 py-2 text-[11px] font-semibold tracking-wide text-teal-100 backdrop-blur sm:left-5 sm:top-5">
@@ -171,6 +175,56 @@ export default function App() {
                   ))}
                 </ul>
               </div>
+            )}
+            {publicPlayers && (
+              <section
+                className="mx-3 mb-4 space-y-3 rounded-xl border border-border bg-muted/30 p-3 sm:mx-5"
+                data-testid="match-activity-roster"
+                aria-label={t("city.controlledActivities")}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold">{t("city.controlledActivities")}</p>
+                  <span className="text-xs text-muted-foreground" data-testid="match-board-card-count">
+                    {t("city.placedCardCount", { count: publicPlayers.boardActivities.length })}
+                  </span>
+                </div>
+                <ul className="grid gap-2 sm:grid-cols-2" aria-live="polite">
+                  {controlMarkers.map((marker) => (
+                    <li
+                      key={marker.slotId}
+                      data-testid={`controlled-lot-${marker.slotId}`}
+                      data-owner-id={marker.ownerPlayerId}
+                      data-card-id={marker.cardId}
+                      data-posture={marker.posture}
+                      className="rounded-lg border border-border bg-card px-3 py-2 text-xs"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span aria-hidden="true" className="size-3 shrink-0 rounded-full" style={{ backgroundColor: marker.color }} />
+                        <strong>{marker.slotId}</strong>
+                        <span className="text-muted-foreground">{marker.ownerPlayerId}</span>
+                        <span className="font-medium">{t(marker.posture === "standing" ? "city.henchmanStanding" : "city.henchmanFallen")}</span>
+                      </div>
+                      <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
+                        {marker.cardId} · {marker.category}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+                <div className="border-t border-border pt-3">
+                  <p className="mb-2 text-xs font-semibold">{t("city.grossSalaryQuotes")}</p>
+                  <ul className="grid gap-2 sm:grid-cols-2">
+                    {grossQuotes.map((quote) => (
+                      <li key={quote.playerId} data-testid={`gross-salary-${quote.playerId}`}
+                        data-gross-atoms={quote.grossAtoms}
+                        className="rounded-md bg-card p-2 text-xs">
+                        <strong>{quote.playerId}</strong>
+                        <span className="ml-2">{t("city.grossAtoms", { count: quote.grossAtoms })}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-[11px] text-muted-foreground">{t("city.salaryNotPaid")}</p>
+                </div>
+              </section>
             )}
           </Card>
 

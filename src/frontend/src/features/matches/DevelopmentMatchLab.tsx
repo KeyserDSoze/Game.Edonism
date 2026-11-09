@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { streetById } from "@/features/city/board";
-import type { PublicPlayerPositions } from "@/features/city/playerMarkers";
+import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
 
 type DemoCredential = Readonly<{ playerId: string; token: string }>;
 type DemoPlayer = Readonly<{
@@ -22,6 +22,9 @@ type DemoMatch = Readonly<{
   phase: number; // .NET MatchPhase: 0 = PlayerTurns, 1 = AwaitingRoundSettlement
   activePlayerId: string | null;
   players: readonly DemoPlayer[];
+  boardActivities: readonly PublicBoardActivity[];
+  controlledActivities: readonly PublicControlledActivity[];
+  grossSalaryQuotes: readonly PublicGrossSalaryQuote[];
 }>;
 type DemoSession = Readonly<{
   matchId: string;
@@ -95,7 +98,7 @@ export function DevelopmentMatchLab({
 }: {
   onStreetSelect: (id: string) => void;
   /** A public-only server snapshot projection for the 3D scene and DOM fallback. */
-  onPublicState: (state: PublicPlayerPositions | null) => void;
+  onPublicState: (state: PublicMatchSceneState | null) => void;
 }) {
   const { t } = useTranslation();
   const [session, setSession] = useState<DemoSession | null>(null);
@@ -118,6 +121,9 @@ export function DevelopmentMatchLab({
             playerId: seat.playerId,
             streetId: seat.streetId,
           })),
+          boardActivities: state.boardActivities ?? [],
+          controlledActivities: state.controlledActivities ?? [],
+          grossSalaryQuotes: state.grossSalaryQuotes ?? [],
         }
       : null);
   }

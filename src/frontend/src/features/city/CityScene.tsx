@@ -4,6 +4,7 @@ import { Html, OrbitControls } from "@react-three/drei";
 import { useTranslation } from "react-i18next";
 import { cityBoard, toScene, type ActivitySlot, type RoadArea, type Street } from "./board";
 import type { PlayerMarkerPlacement } from "./playerMarkers";
+import type { ControlledLotMarker } from "./activityMarkers";
 
 type SceneProps = {
   selectedStreetId: string;
@@ -12,6 +13,7 @@ type SceneProps = {
   onSlotSelect: (slotId: string) => void;
   /** Server-originated public match positions; never client-selected coordinates. */
   playerMarkers: readonly PlayerMarkerPlacement[];
+  controlMarkers: readonly ControlledLotMarker[];
   hasActiveMatch: boolean;
 };
 
@@ -38,7 +40,12 @@ function Road({ road, selected, onSelect }: { road: RoadArea; selected: boolean;
   );
 }
 
-function Building({ slot, selected, onSelect }: { slot: ActivitySlot; selected: boolean; onSelect: (id: string) => void }) {
+function Building({ slot, selected, onSelect, control }: {
+  slot: ActivitySlot;
+  selected: boolean;
+  onSelect: (id: string) => void;
+  control?: ControlledLotMarker;
+}) {
   const [x, z] = toScene(slot.center);
   const index = footprintId(slot.id) % blockColors.length;
   const height = 0.42 + (footprintId(slot.id + "height") % 5) * 0.125;
@@ -52,7 +59,7 @@ function Building({ slot, selected, onSelect }: { slot: ActivitySlot; selected: 
         position={[0, 0.115, 0]}
       >
         <boxGeometry args={[1.4, 0.19, 1.39]} />
-        <meshStandardMaterial color={selected ? "#f1ca7e" : "#769b78"} roughness={0.9} />
+        <meshStandardMaterial color={selected ? "#f1ca7e" : control?.color ?? "#769b78"} roughness={0.9} />
       </mesh>
       {selected && (
         <mesh position={[0, 0.23, 0]}>
@@ -81,6 +88,34 @@ function Building({ slot, selected, onSelect }: { slot: ActivitySlot; selected: 
         <boxGeometry args={[0.3, 0.2, 0.015]} />
         <meshStandardMaterial color="#47677a" metalness={0.15} />
       </mesh>
+      {control && <ControlledHenchman control={control} />}
+    </group>
+  );
+}
+
+/**
+ * One publicly controlled slot = one deployed henchman (#14).
+ * Standing is upright; Fallen is horizontal. This is a READ-ONLY mesh:
+ * no interaction changes posture, ownership or game economy.
+ */
+function ControlledHenchman({ control }: { control: ControlledLotMarker }) {
+  const fallen = control.posture === "fallen";
+  return (
+    <group position={[0.62, 0.28, 0.62]}>
+      <mesh receiveShadow position={[0, -0.07, 0]}>
+        <cylinderGeometry args={[0.20, 0.20, 0.08, 16]} />
+        <meshStandardMaterial color={control.color} metalness={0.1} roughness={0.85} />
+      </mesh>
+      <group position={[0, fallen ? 0.05 : 0.17, 0]} rotation={[0, 0, fallen ? Math.PI / 2 : 0]}>
+        <mesh castShadow>
+          <cylinderGeometry args={[0.09, 0.12, 0.30, 12]} />
+          <meshStandardMaterial color={control.color} roughness={0.65} />
+        </mesh>
+        <mesh castShadow position={[0, 0.20, 0]}>
+          <sphereGeometry args={[0.12, 12, 12]} />
+          <meshStandardMaterial color={control.color} roughness={0.65} />
+        </mesh>
+      </group>
     </group>
   );
 }
@@ -174,7 +209,7 @@ function RoadLabel({ street }: { street: Street }) {
   );
 }
 
-function World({ selectedStreetId, selectedSlotId, onStreetSelect, onSlotSelect, playerMarkers, hasActiveMatch }: SceneProps) {
+function World({ selectedStreetId, selectedSlotId, onStreetSelect, onSlotSelect, playerMarkers, controlMarkers, hasActiveMatch }: SceneProps) {
   const roads = useMemo(() => cityBoard.roads, []);
   const slots = useMemo(() => cityBoard.slots, []);
   const [pucciX1, pucciZ1] = toScene({ x: 130, y: 225 });
@@ -200,7 +235,8 @@ function World({ selectedStreetId, selectedSlotId, onStreetSelect, onSlotSelect,
         <Road key={index} road={road} selected={road.streetId === selectedStreetId} onSelect={onStreetSelect} />
       ))}
       {slots.map((slot) => (
-        <Building key={slot.id} slot={slot} selected={slot.id === selectedSlotId} onSelect={onSlotSelect} />
+        <Building key={slot.id} slot={slot} selected={slot.id === selectedSlotId}
+          onSelect={onSlotSelect} control={controlMarkers.find((marker) => marker.slotId === slot.id)} />
       ))}
       <CityHall />
       {hasActiveMatch

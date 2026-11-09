@@ -279,10 +279,16 @@ test("shared streets render distinct player entries and unknown street IDs have 
 });
 
 test("WebGL fallback still exposes authoritative player streets and refresh on HTTP 409", async ({ page }) => {
-  // Force the HTML fallback, verifying the roster works without the Canvas.
+  // Only suppress 3D contexts; preserving 2D is important for React/other
+  // browser libraries that perform canvas feature detection at startup.
   await page.addInitScript(() => {
-    HTMLCanvasElement.prototype.getContext =
-      (() => null) as typeof HTMLCanvasElement.prototype.getContext;
+    const nativeGetContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = (function (
+      this: HTMLCanvasElement, contextId: string, ...args: unknown[]
+    ) {
+      if (contextId === "webgl" || contextId === "webgl2") return null;
+      return Reflect.apply(nativeGetContext, this, [contextId, ...args]);
+    }) as typeof HTMLCanvasElement.prototype.getContext;
   });
   await mockMatchApi(page, { conflictOnFirstMove: true });
   await page.goto("/");

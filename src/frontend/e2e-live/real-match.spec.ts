@@ -596,3 +596,58 @@ test("real .NET: joined browser rotates only its own Development seat token", as
     await guestContext.close();
   }
 });
+
+test("real .NET Domain turn-options control what two browsers may send", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const api = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const aliceOptions = await request.get(`${api}/turn-options?playerId=bob`, {
+    headers: auth(aliceToken),
+  });
+  expect(aliceOptions.status()).toBe(200);
+  expect(aliceOptions.headers()["cache-control"]).toContain("no-store");
+  const initial = await aliceOptions.json() as {
+    playerId: string; revision: number; canEndTurn: boolean; freeMoveStreetIds: string[];
+  };
+  expect(initial.playerId).toBe("alice");
+  expect(initial.revision).toBe(0);
+  expect(initial.canEndTurn).toBe(true);
+  expect(initial.freeMoveStreetIds.length).toBeGreaterThan(0);
+  const denied = await request.get(`${api}/turn-options`);
+  expect(denied.status()).toBe(404);
+
+  const context = await browser.newContext();
+  try {
+    const guest = await context.newPage();
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(created.matchId);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-seat-bob")).toBeVisible();
+    await expect(guest.getByTestId("dev-end-turn")).toBeDisabled();
+    await expect(guest.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
+    await expect(page.getByTestId(`dev-move-${initial.freeMoveStreetIds[0]}`)).toBeEnabled();
+    await page.getByTestId(`dev-move-${initial.freeMoveStreetIds[0]}`).click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
+    const used = await request.get(`${api}/turn-options`, { headers: auth(aliceToken) });
+    const usedOptions = await used.json() as typeof initial;
+    expect(usedOptions.revision).toBe(1);
+    expect(usedOptions.canEndTurn).toBe(true);
+    expect(usedOptions.freeMoveStreetIds).toEqual([]);
+    await page.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-revision")).toHaveText("2", { timeout: 12000 });
+    await expect(guest.getByTestId("dev-end-turn")).toBeEnabled();
+    await guest.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("3", { timeout: 12000 });
+    const finished = await request.get(`${api}/turn-options`, { headers: auth(bobToken) });
+    const after = await finished.json() as typeof initial;
+    expect(after.canEndTurn).toBe(false);
+    expect(after.freeMoveStreetIds).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});

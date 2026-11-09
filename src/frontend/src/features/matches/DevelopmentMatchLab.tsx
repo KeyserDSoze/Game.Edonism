@@ -41,6 +41,14 @@ type PrivateHand = Readonly<{
   cardIds: readonly string[];
 }>;
 
+type ActorTurnOptions = Readonly<{
+  matchId: string;
+  playerId: string;
+  revision: number;
+  canEndTurn: boolean;
+  freeMoveStreetIds: readonly string[];
+}>;
+
 const quotaAndExtras = [
   ["public-financing", 5, 2],
   ["private-financing", 5, 2],
@@ -117,6 +125,10 @@ export function DevelopmentMatchLab({
   const [playerCount, setPlayerCount] = useState(2);
   const [actorId, setActorId] = useState("");
   const [hand, setHand] = useState<PrivateHand | null>(null);
+  // The credential identity is held only in component memory.
+  const [optionLease, setOptionLease] = useState<{
+    token: string; options: ActorTurnOptions
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rotationNotice, setRotationNotice] = useState<string | null>(null);
@@ -130,8 +142,14 @@ export function DevelopmentMatchLab({
   const token = session?.credentials.find((seat) => seat.playerId === actorId)?.token;
   const player = session?.state.players.find((seat) => seat.playerId === actorId);
   const isMyTurn = session?.state.phase === 0 && session.state.activePlayerId === actorId;
-  const canMove = Boolean(player && isMyTurn && !player.freeMoveUsed && !busy);
-  const adjacent = player ? (streetById(player.streetId)?.neighbors ?? []) : [];
+  const turnOptions = optionLease?.token === token
+    && optionLease.options.matchId === session?.matchId
+    && optionLease.options.playerId === actorId
+    && optionLease.options.revision === session?.state.revision
+    ? optionLease.options : null;
+  const canEndTurn = Boolean(isMyTurn && turnOptions?.canEndTurn && !busy);
+  // The Domain authorizes destinations; the browser board names them only.
+  const adjacent = isMyTurn && turnOptions ? turnOptions.freeMoveStreetIds : [];
   const publicEvents = session
     ? visiblePublicAuditEvents(session.state.events ?? [],
         session.state.players.map((seat) => seat.playerId))
@@ -163,6 +181,38 @@ export function DevelopmentMatchLab({
     publishPublicPositions(next);
     return true;
   }
+
+  // Revision-bound actor options: fail closed when an HTTP result is stale,
+  // unavailable or belongs to an old seat/token. No optimistic game actions.
+  useEffect(() => {
+    setOptionLease(null);
+    const matchId = session?.matchId;
+    const revision = session?.state.revision;
+    const actorToken = token;
+    const seatId = actorId;
+    if (!matchId || revision === undefined || !actorToken || !seatId) return;
+    const controller = new AbortController();
+    void fetch(`/api/dev/matches/${matchId}/turn-options`, {
+      headers: { "X-Edonism-Dev-Token": actorToken },
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((response) => responseJson<ActorTurnOptions>(response))
+      .then((options) => {
+        if (!controller.signal.aborted && currentMatchId.current === matchId
+          && currentRevision.current === revision
+          && options.matchId === matchId && options.playerId === seatId
+          && options.revision === revision && typeof options.canEndTurn === "boolean"
+          && Array.isArray(options.freeMoveStreetIds)
+          && options.freeMoveStreetIds.every((id) => typeof id === "string")) {
+          setOptionLease({ token: actorToken, options });
+        }
+      })
+      .catch(() => {
+        // Offline, 404, or invalid response: leave all actions disabled.
+      });
+    return () => controller.abort();
+  }, [session?.matchId, session?.state.revision, actorId, token]);
 
   // Read the current actor's private hand on seat change; credentials are NEVER
   // copied into URL or Web Storage. Joined sessions contain exactly one seat.
@@ -234,6 +284,7 @@ export function DevelopmentMatchLab({
     setError(null);
     setRotationNotice(null);
     setHand(null);
+    setOptionLease(null);
     currentMatchId.current = null;
     currentRevision.current = -1;
     setSession(null);
@@ -283,6 +334,7 @@ export function DevelopmentMatchLab({
     setError(null);
     setRotationNotice(null);
     setHand(null);
+    setOptionLease(null);
     currentMatchId.current = null;
     currentRevision.current = -1;
     setSession(null);
@@ -381,7 +433,11 @@ export function DevelopmentMatchLab({
   }
 
   async function command(kind: "free-move" | "end-turn", destinationStreetId?: string) {
-    if (busy || !session || !token || !isMyTurn) return;
+    if (busy || !session || !token || !isMyTurn || !turnOptions) return;
+    if (kind === "end-turn" && !turnOptions.canEndTurn) return;
+    if (kind === "free-move"
+      && (!destinationStreetId || !turnOptions.freeMoveStreetIds.includes(destinationStreetId)))
+      return;
     commandInFlight.current = true;
     setBusy(true);
     setError(null);
@@ -603,7 +659,7 @@ export function DevelopmentMatchLab({
                         variant="outline"
                         size="sm"
                         className="min-h-9 whitespace-normal text-xs"
-                        disabled={!canMove}
+                        disabled={busy || !isMyTurn || !turnOptions?.freeMoveStreetIds.includes(id)}
                         onClick={() => void command("free-move", id)}
                         data-testid={`dev-move-${id}`}
                       >
@@ -617,7 +673,7 @@ export function DevelopmentMatchLab({
                   type="button"
                   variant="secondary"
                   className="w-full"
-                  disabled={!isMyTurn || busy}
+                  disabled={!canEndTurn}
                   onClick={() => void command("end-turn")}
                   data-testid="dev-end-turn"
                 >

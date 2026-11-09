@@ -13,6 +13,8 @@ type MockOptions = {
   missingBoardCard?: boolean;
   unknownSecretEvent?: boolean;
   playerCount?: number;
+  noTurnOptions?: boolean;
+  invalidTurnOptions?: boolean;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
@@ -120,6 +122,31 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
 
     const seat = token ? (tokenToSeat.get(token) as Seat | undefined) : undefined;
     if (!seat) return route.fulfill({ status: 404, json: { code: "match_not_found" } });
+
+    if (path.endsWith("/turn-options")) {
+      if (options.noTurnOptions)
+        return route.fulfill({ status: 503, json: { code: "unavailable" } });
+      const neighbors: Record<string, string[]> = {
+        gauss: ["planck", "newton", "main-square"],
+        planck: ["gauss", "einstein", "meson"],
+        einstein: ["newton", "planck", "main-square"],
+        newton: ["gauss", "einstein", "boson"],
+        meson: ["planck", "boson"],
+        boson: ["newton", "meson"],
+        "main-square": ["gauss", "einstein"],
+      };
+      const isTurn = active === seat && phase === 0;
+      return route.fulfill({
+        status: 200, headers: { "Cache-Control": "no-store" },
+        json: {
+          matchId: snapshot().matchId,
+          playerId: seat,
+          revision: options.invalidTurnOptions ? revision + 999 : revision,
+          canEndTurn: isTurn,
+          freeMoveStreetIds: isTurn && !moved[seat] ? neighbors[streets[seat]] ?? [] : [],
+        },
+      });
+    }
 
     if (path.endsWith("/hand")) {
       return route.fulfill({
@@ -232,7 +259,7 @@ test("Development match HUD uses the server for moving and ending both turns", a
   await expect(page.getByTestId("dev-position")).toHaveText("Planck Avenue");
   await expect(page.getByTestId("selected-street")).toHaveText("Planck Avenue");
   await expect(page.getByTestId("dev-revision")).toHaveText("1");
-  await expect(page.getByTestId("dev-move-meson")).toBeDisabled();
+  await expect(page.getByTestId("dev-move-meson")).toHaveCount(0);
 
   await page.getByTestId("dev-end-turn").click();
   await expect(page.getByTestId("dev-active-player")).toHaveText("bob");
@@ -708,5 +735,44 @@ test("Development seat rotation invalidates old capability without touching matc
   }));
   expect(JSON.stringify(storage)).not.toContain(changed.token);
   expect(await page.locator("body").innerText()).not.toContain(changed.token);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+});
+
+test("Domain options are required: missing or wrong revision prevents browser commands", async ({ page }) => {
+  await mockMatchApi(page, { noTurnOptions: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-session")).toBeVisible();
+  await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  await mockMatchApi(page, { invalidTurnOptions: true });
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+});
+
+test("actor-scoped options follow seat and revision, not the locally selected street", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
+  await page.getByTestId("dev-seat-alice").click();
+  await page.getByTestId("street-picker-boson").click();
+  await expect(page.getByTestId("dev-move-planck")).toBeEnabled();
+  await page.getByTestId("dev-move-planck").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("2");
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  expect(observedHeaders.filter(({ path }) => path.endsWith("/turn-options"))
+    .some(({ token }) => token === "b".repeat(64))).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
 });

@@ -12,10 +12,18 @@ public sealed record DevMatchCreated(Guid MatchId, MatchSnapshot State, IReadOnl
 
 public sealed class DevelopmentMatchStore
 {
+    private readonly DevelopmentMatchCheckpointFiles? _checkpointFiles;
+
+    public DevelopmentMatchStore(DevelopmentMatchCheckpointFiles? checkpointFiles = null)
+    {
+        _checkpointFiles = checkpointFiles;
+    }
+
     private sealed class Entry(GameMatch match, Dictionary<string, byte[]> secrets)
     {
         public readonly object Gate = new();
-        public GameMatch Match { get; } = match;
+        public GameMatch Match { get; set; } = match;
+        public Dictionary<string, byte[]> TokenDigests { get; } = secrets;
 
         public string? ResolveActor(string? token)
         {
@@ -24,9 +32,10 @@ public sealed class DevelopmentMatchStore
             try { supplied = Convert.FromHexString(token); }
             catch (FormatException) { return null; }
 
+            var suppliedDigest = SHA256.HashData(supplied);
             foreach (var (playerId, candidate) in secrets)
             {
-                if (CryptographicOperations.FixedTimeEquals(candidate, supplied)) return playerId;
+                if (CryptographicOperations.FixedTimeEquals(candidate, suppliedDigest)) return playerId;
             }
 
             return null;
@@ -76,20 +85,65 @@ public sealed class DevelopmentMatchStore
         foreach (var player in match.Snapshot().Players)
         {
             var bytes = RandomNumberGenerator.GetBytes(32);
-            secrets.Add(player.PlayerId, bytes);
+            secrets.Add(player.PlayerId, SHA256.HashData(bytes));
             credentials.Add(new DevSeatCredential(player.PlayerId, Convert.ToHexString(bytes)));
         }
 
+        // Save BEFORE publishing the created match. Failed disk writes cannot
+        // create a partially visible in-memory session.
+        _checkpointFiles?.Save(match.CaptureCheckpoint(), secrets);
         if (!_matches.TryAdd(match.MatchId, new Entry(match, secrets)))
             throw new InvalidOperationException("Unexpected match ID collision.");
 
         return new DevMatchCreated(match.MatchId, match.Snapshot(), credentials.AsReadOnly());
     }
 
+    private bool TryGetEntry(Guid matchId, out Entry entry)
+    {
+        if (_matches.TryGetValue(matchId, out entry!)) return true;
+        if (_checkpointFiles is null) return false;
+
+        // Lazy reload means restart works without retaining any bearer token in
+        // process memory. Corruption/wrong key fail closed as not found.
+        PersistedDevelopmentMatch? data;
+        try { data = _checkpointFiles.Load(matchId); }
+        catch (Exception ex) when (ex is InvalidDataException or IOException
+            or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
+        if (data is null) return false;
+
+        try
+        {
+            var match = GameMatch.RestoreFromCheckpoint(BoardCatalog.LoadDefault(), data.Checkpoint);
+            var playerIds = match.Snapshot().Players.Select(p => p.PlayerId)
+                .ToHashSet(StringComparer.Ordinal);
+            if (data.TokenDigests.Count != playerIds.Count
+                || data.TokenDigests.Keys.Any(id => !playerIds.Contains(id)))
+                return false;
+            var hashes = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+            foreach (var (id, hex) in data.TokenDigests)
+            {
+                if (hex.Length != 64) return false;
+                var digest = Convert.FromHexString(hex);
+                if (digest.Length != 32) return false;
+                hashes.Add(id, digest);
+            }
+            entry = _matches.GetOrAdd(matchId, _ => new Entry(match, hashes));
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or ArgumentException
+            or InvalidOperationException or FormatException)
+        {
+            return false;
+        }
+    }
+
     public bool TryRead(Guid matchId, string? token, out MatchSnapshot? snapshot)
     {
         snapshot = null;
-        if (!_matches.TryGetValue(matchId, out var entry)) return false;
+        if (!TryGetEntry(matchId, out var entry)) return false;
         lock (entry.Gate)
         {
             if (entry.ResolveActor(token) is null) return false;
@@ -103,7 +157,7 @@ public sealed class DevelopmentMatchStore
         Guid matchId, string? token, out MatchAuditReplayResult? verification)
     {
         verification = null;
-        if (!_matches.TryGetValue(matchId, out var entry)) return false;
+        if (!TryGetEntry(matchId, out var entry)) return false;
         lock (entry.Gate)
         {
             if (entry.ResolveActor(token) is null) return false;
@@ -116,7 +170,7 @@ public sealed class DevelopmentMatchStore
         Guid matchId, string? token, out MatchPrivateHandSnapshot? hand)
     {
         hand = null;
-        if (!_matches.TryGetValue(matchId, out var entry)) return false;
+        if (!TryGetEntry(matchId, out var entry)) return false;
         lock (entry.Gate)
         {
             var actorId = entry.ResolveActor(token);
@@ -146,13 +200,23 @@ public sealed class DevelopmentMatchStore
         out MatchCommandResult? outcome)
     {
         outcome = null;
-        if (!_matches.TryGetValue(matchId, out var entry)) return false;
+        if (!TryGetEntry(matchId, out var entry)) return false;
         lock (entry.Gate)
         {
             var actorId = entry.ResolveActor(token);
             if (actorId is null) return false;
-            // The lock protects revision check + state mutation atomically.
-            outcome = action(entry.Match, actorId);
+            // A durable command is copy-on-write: persist the new checkpoint
+            // BEFORE publishing the mutated match. Failed saves are not visible.
+            var target = _checkpointFiles is null
+                ? entry.Match
+                : GameMatch.RestoreFromCheckpoint(BoardCatalog.LoadDefault(),
+                    entry.Match.CaptureCheckpoint());
+            outcome = action(target, actorId);
+            if (outcome.Accepted && _checkpointFiles is not null)
+            {
+                _checkpointFiles.Save(target.CaptureCheckpoint(), entry.TokenDigests);
+                entry.Match = target;
+            }
             return true;
         }
     }

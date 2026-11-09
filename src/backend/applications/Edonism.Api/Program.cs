@@ -7,8 +7,17 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHealthChecks();
 if (builder.Environment.IsDevelopment())
 {
-    // Dev-only in-memory fixtures. No gameplay mutation endpoints in Production.
-    builder.Services.AddSingleton<DevelopmentMatchStore>();
+    // By default Development stays memory-only. Persistence is opt-in and the
+    // encryption key MUST be provided outside source control.
+    var checkpointDir = Environment.GetEnvironmentVariable("EDONISM_DEV_CHECKPOINT_DIR");
+    var checkpointKey = Environment.GetEnvironmentVariable("EDONISM_DEV_CHECKPOINT_KEY_HEX");
+    if (string.IsNullOrWhiteSpace(checkpointDir) != string.IsNullOrWhiteSpace(checkpointKey))
+        throw new InvalidOperationException(
+            "Development match storage requires BOTH checkpoint dir and AES-256 key.");
+    builder.Services.AddSingleton(string.IsNullOrWhiteSpace(checkpointDir)
+        ? new DevelopmentMatchStore()
+        : new DevelopmentMatchStore(new DevelopmentMatchCheckpointFiles(
+            checkpointDir!, checkpointKey!)));
 }
 
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];

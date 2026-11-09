@@ -88,3 +88,7 @@ La prima attività di ogni **fixture** di match Development è controllata dal r
 ## Composizione delle 30 attività (Development, #16)
 
 L'endpoint `POST /api/dev/matches/from-cards` prende un catalogo di **46 attività** (ID e categoria), una starting card obbligatoria per giocatore e un seed. Il server seleziona e colloca 30 attività secondo le quote del regolamento, poi ricava la strada e lo scagnozzo iniziale del personaggio. Non contiene le 46 carte originali né consente partite pubbliche. Contratti e limiti: [match-engine-slice-3](docs/engineering/match-engine-slice-3.md).
+
+## Personaggi visibili (Development, #17)
+
+La nuova route `POST /api/dev/matches/from-characters` permette di verificare il **sorteggio di 23 personaggi** da un catalogo tipizzato, con un personaggio per giocatore, cuori stampati e attività iniziale obbligatoria. Il backend collega la starting card al lotto della plancia e mostra la vita nello snapshot, senza inventare i dati delle carte vere. Gli esempi di carattere e gli ID in test sono **sintetici**; il catalogo originale è ancora da importare e le partite di produzione rimangono disabilitate. Vedi [match-engine-slice-4](docs/engineering/match-engine-slice-4.md).

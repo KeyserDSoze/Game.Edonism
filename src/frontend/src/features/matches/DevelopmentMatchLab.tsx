@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleDot, FlaskConical, Hand, MoveRight, RotateCw, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -110,6 +110,12 @@ export function DevelopmentMatchLab({
   const [hand, setHand] = useState<PrivateHand | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [joinMatchId, setJoinMatchId] = useState("");
+  const [joinToken, setJoinToken] = useState("");
+  // Monotonic authority guards: HTTP polling/commands may resolve out of order.
+  const currentMatchId = useRef<string | null>(null);
+  const currentRevision = useRef(-1);
+  const commandInFlight = useRef(false);
 
   const token = session?.credentials.find((seat) => seat.playerId === actorId)?.token;
   const player = session?.state.players.find((seat) => seat.playerId === actorId);
@@ -136,6 +142,20 @@ export function DevelopmentMatchLab({
       : null);
   }
 
+  /** Apply only a newer snapshot for the CURRENT match, never an old HTTP result. */
+  function acceptServerState(next: DemoMatch, matchId: string): boolean {
+    if (currentMatchId.current !== matchId || next.matchId !== matchId
+      || !Number.isInteger(next.revision) || next.revision <= currentRevision.current)
+      return false;
+    currentRevision.current = next.revision;
+    setSession((previous) =>
+      previous?.matchId === matchId ? { ...previous, state: next } : previous);
+    publishPublicPositions(next);
+    return true;
+  }
+
+  // Read the current actor's private hand on seat change; credentials are NEVER
+  // copied into URL or Web Storage. Joined sessions contain exactly one seat.
   useEffect(() => {
     if (!session?.matchId || !token) {
       setHand(null);
@@ -158,11 +178,55 @@ export function DevelopmentMatchLab({
     return () => controller.abort();
   }, [session?.matchId, token]);
 
+  // Keep a single active poll and abandon requests on seat/match change.
+  // Visibility and command guards avoid background traffic or stale overwrites.
+  useEffect(() => {
+    const matchId = session?.matchId;
+    const actorToken = token;
+    if (!matchId || !actorToken) return;
+    const controller = new AbortController();
+    let polling = false;
+    const check = async () => {
+      if (polling || controller.signal.aborted || commandInFlight.current
+        || document.visibilityState === "hidden") return;
+      polling = true;
+      try {
+        const response = await fetch(`/api/dev/matches/${matchId}`, {
+          headers: { "X-Edonism-Dev-Token": actorToken },
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        if (response.ok) {
+          const next = (await response.json()) as DemoMatch;
+          if (!controller.signal.aborted && !commandInFlight.current
+            && currentMatchId.current === matchId)
+            acceptServerState(next, matchId);
+        }
+      } catch {
+        // Network glitches do not invent a state. The next poll can retry.
+      } finally {
+        polling = false;
+      }
+    };
+    const handle = window.setInterval(() => void check(), 1500);
+    return () => {
+      controller.abort();
+      window.clearInterval(handle);
+    };
+    // Match and actor token identity control subscription lifetime, not revision.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.matchId, token]);
+
   async function createDemo() {
     if (busy) return;
+    commandInFlight.current = true;
     setBusy(true);
     setError(null);
     setHand(null);
+    currentMatchId.current = null;
+    currentRevision.current = -1;
+    setSession(null);
+    publishPublicPositions(null);
     try {
       const response = await fetch("/api/dev/matches/from-full-deck", {
         method: "POST",
@@ -174,6 +238,8 @@ export function DevelopmentMatchLab({
       if (created.credentials.length !== 2 || created.state.players.length !== 2) {
         throw new Error("invalid_dev_fixture");
       }
+      currentMatchId.current = created.matchId;
+      currentRevision.current = created.state.revision;
       setSession(created);
       publishPublicPositions(created.state);
       setActorId(created.credentials[0].playerId);
@@ -184,12 +250,83 @@ export function DevelopmentMatchLab({
       setActorId("");
       setError(t("dev.createError"));
     } finally {
+      commandInFlight.current = false;
       setBusy(false);
+    }
+  }
+
+  async function joinDemo() {
+    if (busy) return;
+    const id = joinMatchId.trim().toLowerCase();
+    const secret = joinToken.trim();
+    if (!/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id)
+      || !/^[a-f0-9]{64}$/i.test(secret)) {
+      setError(t("dev.joinInvalid"));
+      return;
+    }
+    commandInFlight.current = true;
+    setBusy(true);
+    setError(null);
+    setHand(null);
+    currentMatchId.current = null;
+    currentRevision.current = -1;
+    setSession(null);
+    publishPublicPositions(null);
+    try {
+      const headers = { "X-Edonism-Dev-Token": secret };
+      // The identity MUST be resolved from the token-bound private-hand endpoint,
+      // not from a playerId typed or guessed in the browser.
+      const [publicResponse, handResponse] = await Promise.all([
+        fetch(`/api/dev/matches/${id}`, { headers, cache: "no-store" }),
+        fetch(`/api/dev/matches/${id}/hand`, { headers, cache: "no-store" }),
+      ]);
+      const [state, privateHand] = await Promise.all([
+        responseJson<DemoMatch>(publicResponse),
+        responseJson<PrivateHand>(handResponse),
+      ]);
+      if (state.matchId.toLowerCase() !== id || privateHand.matchId.toLowerCase() !== id
+        || !state.players.some((p) => p.playerId === privateHand.playerId))
+        throw new Error("invalid_seat");
+      const actor = privateHand.playerId;
+      currentMatchId.current = state.matchId;
+      currentRevision.current = state.revision;
+      setSession({
+        matchId: state.matchId,
+        state,
+        credentials: [{ playerId: actor, token: secret }],
+      });
+      setActorId(actor);
+      setHand(privateHand);
+      const street = state.players.find((p) => p.playerId === actor)?.streetId;
+      if (street && streetById(street)) onStreetSelect(street);
+      publishPublicPositions(state);
+      setJoinMatchId("");
+      setJoinToken("");
+    } catch {
+      setSession(null);
+      publishPublicPositions(null);
+      setActorId("");
+      setError(t("dev.joinError"));
+    } finally {
+      commandInFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function copySeatAccess(seat: DemoCredential) {
+    if (!session) return;
+    try {
+      // Clipboard use is deliberate, LOCAL debugging only, never an URL.
+      await navigator.clipboard.writeText(`${session.matchId}\n${seat.token}`);
+      setError(null);
+    } catch {
+      setError(t("dev.copyError"));
     }
   }
 
   async function command(kind: "free-move" | "end-turn", destinationStreetId?: string) {
     if (busy || !session || !token || !isMyTurn) return;
+    commandInFlight.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -214,23 +351,23 @@ export function DevelopmentMatchLab({
             cache: "no-store",
           }),
         );
-        setSession((previous) => previous && { ...previous, state: refreshed });
-        publishPublicPositions(refreshed);
-        const confirmedStreet = refreshed.players.find((seat) => seat.playerId === actorId)?.streetId;
-        if (confirmedStreet && streetById(confirmedStreet)) onStreetSelect(confirmedStreet);
+        if (acceptServerState(refreshed, session.matchId)) {
+          const confirmedStreet = refreshed.players.find((seat) => seat.playerId === actorId)?.streetId;
+          if (confirmedStreet && streetById(confirmedStreet)) onStreetSelect(confirmedStreet);
+        }
         setError(t("dev.conflict"));
         return;
       }
       const next = await responseJson<DemoMatch>(response);
-      setSession((previous) => previous && { ...previous, state: next });
-      publishPublicPositions(next);
-      if (kind === "free-move" && player) {
+      const applied = acceptServerState(next, session.matchId);
+      if (applied && kind === "free-move" && player) {
         const newStreet = next.players.find((seat) => seat.playerId === actorId)?.streetId;
         if (newStreet) onStreetSelect(newStreet);
       }
     } catch {
       setError(t("dev.networkError"));
     } finally {
+      commandInFlight.current = false;
       setBusy(false);
     }
   }
@@ -267,6 +404,34 @@ export function DevelopmentMatchLab({
           {busy ? t("dev.loading") : t("dev.create")}
         </Button>
 
+        <form onSubmit={(event) => { event.preventDefault(); void joinDemo(); }}
+          className="space-y-2 rounded-xl border border-border bg-muted/30 p-3"
+          data-testid="dev-join-form">
+          <p className="text-xs font-semibold">{t("dev.joinTitle")}</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="space-y-1 text-xs">
+              <span>{t("dev.joinMatch")}</span>
+              <input type="text" autoComplete="off" spellCheck={false}
+                data-testid="dev-join-id" value={joinMatchId}
+                onChange={(event) => setJoinMatchId(event.target.value)}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                className="h-10 w-full min-w-0 rounded-md border border-input bg-background px-2 font-mono text-xs" />
+            </label>
+            <label className="space-y-1 text-xs">
+              <span>{t("dev.joinToken")}</span>
+              <input type="password" autoComplete="off" spellCheck={false}
+                data-testid="dev-join-token" value={joinToken}
+                onChange={(event) => setJoinToken(event.target.value)}
+                className="h-10 w-full min-w-0 rounded-md border border-input bg-background px-2 font-mono text-xs" />
+            </label>
+          </div>
+          <Button type="submit" variant="outline" className="w-full"
+            disabled={busy} data-testid="dev-join">
+            {t("dev.joinAction")}
+          </Button>
+          <p className="text-[11px] text-muted-foreground">{t("dev.joinNote")}</p>
+        </form>
+
         {error && (
           <p role="alert" data-testid="dev-error" className="rounded-lg border border-destructive/40 p-3 text-sm text-destructive">
             {error}
@@ -275,6 +440,24 @@ export function DevelopmentMatchLab({
 
         {session && (
           <div className="space-y-4" data-testid="dev-session">
+            <div className="space-y-2 rounded-xl border border-border p-3 text-xs">
+              <p className="font-semibold">{t("dev.shareTitle")}</p>
+              <p data-testid="dev-match-id" className="break-all font-mono text-muted-foreground">
+                {session.matchId}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {session.credentials.map((seat) => (
+                  <Button key={seat.playerId} type="button" size="sm" variant="outline"
+                    data-testid={`dev-copy-seat-${seat.playerId}`}
+                    onClick={() => void copySeatAccess(seat)}>
+                    {t("dev.copySeat", { seat: seat.playerId })}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-[11px] leading-5 text-muted-foreground">
+                {t("dev.shareWarning")}
+              </p>
+            </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="rounded-xl bg-muted p-3">
                 <p className="text-muted-foreground">{t("dev.round")}</p>

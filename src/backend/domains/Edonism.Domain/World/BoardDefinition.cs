@@ -1,6 +1,6 @@
 namespace Edonism.Domain.World;
 
-/// <summary>Positions are editorial board-image pixels, not movement coordinates. Rulebook2 pages 4, 7-8.</summary>
+/// <summary>Positions are approximate coordinates in a 1504x998 design viewbox scaled from the 2048x1371 source image, not movement coordinates. Rulebook2 pages 4, 7-8.</summary>
 public sealed record BoardPoint(double X, double Y);
 public sealed record StreetDefinition(string Id, string Name, IReadOnlyList<string> Neighbors, BoardPoint Label);
 public sealed record ActivitySlot(string Id, string StreetId, BoardPoint Center);

@@ -4,10 +4,10 @@
 
 ## Provenienza
 - `rulebook2.zip` — **p. 4**: 30 carte attività posizionate negli spazi grigi; **p. 7**: movimento consentito solo tra strade adiacenti, esempi espliciti; **p. 8**: denominazioni/legenda delle strade.
-- `plancia di gioco.png` — 1504 × 998 pixel, 30 grandi rettangoli grigi più City Hall nella piazza centrale. Interpretazione di posizioni, intersezioni e orientamento.
+- `plancia di gioco.png` — immagine originale **2048 × 1371 pixel**, con 30 grandi rettangoli grigi più City Hall nella piazza centrale; per il renderer si usa una **viewbox tecnica approssimata 1504 × 998**, derivata dalla visualizzazione dell'immagine. Interpretazione di posizioni, intersezioni e orientamento.
 - JSON source of truth: `src/shared/board/edonism-board.v1.json`.
 
-Le coordinate `x/y` del JSON sono **centri stimati delle caselle nell'immagine sorgente**, non spostamenti consentiti né coordinate GPS. I codici `N-01`, `S-01` ecc. sono **identificatori tecnici introdotti per la digitalizzazione**, non codici presenti nelle carte stampate.
+Le coordinate `x/y` del JSON sono **centri stimati delle caselle nella viewbox tecnica 1504 × 998 (non i pixel nativi dell'immagine 2048 × 1371)**, non spostamenti consentiti né coordinate GPS. I codici `N-01`, `S-01` ecc. sono **identificatori tecnici introdotti per la digitalizzazione**, non codici presenti nelle carte stampate.
 
 ## 30 spazi attività
 

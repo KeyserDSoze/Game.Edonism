@@ -10,7 +10,7 @@ Board data is versioned in `src/shared/board/edonism-board.v1.json`. It is compi
 **The server remains authoritative** when actual matches start in #6: clients will send intent referencing stable street/slot IDs and the server will validate distance, speed, turn limits, ownership, costs and other rules (not yet implemented).
 
 ## Non-authoritative visual details
-Pixel-coordinate centers in the JSON represent the 1504×998 original board image's rough slot/road placement. Rendering translates to Three.js world units. Positions, placeholder building heights/colors, and ornamental Pucciottini do not belong to gameplay state.
+Coordinates in the JSON use a **1504×998 approximate design viewbox** mapped from the **2048×1371 original uploaded board image**; they are not native source image pixel coordinates. They represent rough slot/road placement. Rendering translates to Three.js world units. Positions, placeholder building heights/colors, and ornamental Pucciottini do not belong to gameplay state.
 
 ## Seeded assignment
 `ActivityPlacement.Assign` shuffles only a fully supplied and validated 30-card set (strict printed category quotas). It is NOT the deck selection algorithm. Mandatory character activities, quota overflows and authoritative random setup must be handled in #6 with a documented rule/versioned test.

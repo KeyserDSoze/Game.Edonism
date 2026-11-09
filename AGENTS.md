@@ -3,9 +3,10 @@
 ## Scope and architecture
 - This is a PvP-first browser city strategy game. Do not invent canonical rules before reading user-supplied game design documents.
 - Backend .NET 10: `src/backend/domains` (deterministic rules/aggregates), `business` (use cases), `infrastructure` (adapters), `applications` (HTTP/SignalR surface).
-- Frontend React + TypeScript + Vite: `src/features/city` is the 3D scene (Three.js + React Three Fiber), `src/components/ui` is shadcn/ui and DOM app chrome. Do not mix visual preview with authoritative gameplay state.
+- Frontend React + TypeScript + Vite: `src/features/city` is the 3D scene (Three.js + React Three Fiber), `src/components/ui` is shadcn/ui and DOM app chrome. The **original printed street graph** and 30 activity lots are described in `src/shared/board/edonism-board.v1.json` (issue #5); axial hexes are NOT gameplay coordinates. Do not mix visual preview with authoritative gameplay state.
 - Future PvP/economy state MUST be validated and applied server-side. Clients submit intentions, not trusted game outcomes.
 - Prefer deterministic generation (explicit seed + version) and maintain auditability for any money, ownership and PvP transitions.
+- The board graph and slot IDs are data-driven and shared between .NET and React. Never derive movement from preview geometry or pretend the source document defines unapproved PvP rules.
 
 ## Mandatory issue workflow
 1. Inspect current repository, tests, docs, `docs/engineering/development-ledger.md`, and existing GitHub Issues.

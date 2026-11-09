@@ -142,7 +142,7 @@ export function DevelopmentMatchLab({
   const token = session?.credentials.find((seat) => seat.playerId === actorId)?.token;
   const player = session?.state.players.find((seat) => seat.playerId === actorId);
   const isMyTurn = session?.state.phase === 0 && session.state.activePlayerId === actorId;
-  const turnOptions = optionLease !== null && token !== undefined
+  const turnOptions = optionLease && token
     && optionLease.token === token
     && optionLease.options.matchId === session?.matchId
     && optionLease.options.playerId === actorId

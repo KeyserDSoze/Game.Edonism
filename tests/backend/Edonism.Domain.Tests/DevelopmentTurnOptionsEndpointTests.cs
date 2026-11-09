@@ -61,6 +61,7 @@ public sealed class DevelopmentTurnOptionsEndpointTests
         Assert.Equal(0, a.Revision);
         Assert.True(a.CanEndTurn);
         using var state = await alice.GetFromJsonAsync<JsonDocument>($"/api/dev/matches/{id}");
+        Assert.NotNull(state);
         var origin = state.RootElement.GetProperty("players")[0].GetProperty("streetId").GetString()!;
         Assert.Equal(BoardCatalog.LoadDefault().Streets.Single(s => s.Id == origin).Neighbors,
             a.FreeMoveStreetIds);

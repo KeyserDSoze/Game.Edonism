@@ -15,10 +15,10 @@ GitHub Issues are the detailed source of truth. Work is committed directly to `m
 | [#17](https://github.com/KeyserDSoze/Game.Edonism/issues/17) | 0.0.2 | Draw 23 public characters, printed hearts and starting activity | Done (direct main) | [CI #42678161809](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42678161809): 109 xUnit, 5 Playwright, build green |
 | [#18](https://github.com/KeyserDSoze/Game.Edonism/issues/18) | 0.0.2 | 58 actions + Election Day, four initial cards and actor-private hand | Done (direct main) | [CI #42682381016](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42682381016): 131/131 xUnit and 5/5 Playwright; zero .NET warnings/errors |
 | [#19](https://github.com/KeyserDSoze/Game.Edonism/issues/19) | TBD | Acquire individual official card files and metadata with provenance | Blocked on source files and rights | Rulebook screenshots are not full card assets |
-| [#20](https://github.com/KeyserDSoze/Game.Edonism/issues/20) | 0.0.2 | Development-only browser match laboratory, street moves and private hands | In progress | CI Playwright/browser & backend regression pending |
+| [#20](https://github.com/KeyserDSoze/Game.Edonism/issues/20) | 0.0.2 | Dev-only React match lab: server-authoritative moves, turns and private hands | Done (direct main) | [CI #42685047656](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42685047656): 131 xUnit, 10 Playwright, builds green |
 | [#13](https://github.com/KeyserDSoze/Game.Edonism/issues/13) | TBD | PvP identity, persistence and durable authorization | Planned | Requires #6 and external identity plan |
 | [#7](https://github.com/KeyserDSoze/Game.Edonism/issues/7) | TBD | Cards and powers resolver | Planned | Requires canonical card catalog |
 | [#8](https://github.com/KeyserDSoze/Game.Edonism/issues/8) | TBD | PvP factions, mayor, corruption, victory | Planned | Requires #6 |
 | [#9](https://github.com/KeyserDSoze/Game.Edonism/issues/9) | TBD | Original art and card assets | Planned | Require individual assets and publication approval |
 
-Next: verify #20 frontend CI and browser protocol tests, then acquire official card assets in #19 (#7/#9), clarify #4/R-03/R-07/R-09/R-10 before full #6 rounds. #13 owns Production identity/storage. Development fixture routes remain unavailable in Production.
+Next: acquire official card assets in #19 (#7/#9), confirm unresolved rulebook R-03/R-07/R-09/R-10 in #4, then implement #6 round/action phases and #13 Production sessions. Dev match lab and routes stay Development-only.

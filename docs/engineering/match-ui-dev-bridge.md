@@ -49,3 +49,7 @@ Il CI continua inoltre a compilare .NET 10 e lanciare xUnit reali su Domain e AP
 ## Non implementato
 
 Catalogo reale e art (#19/#7/#9), lobby, token auth Production, rendering delle pedine sulle posizioni effettive, ownership interattiva, gioco/scarto azioni, fasi elezione/tasse/salario e vittoria PvP. I cinque archi inferiti della plancia attendono conferma designer (#4/R-10).
+
+## Verifica CI conclusa
+
+[GitHub Actions #42685047656](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42685047656) su `main` (`3a7befc`), completed/success: **131/131 xUnit** (0 warning, 0 errori), **10/10 Playwright** (5 nuovi test UI + 5 regressioni plancia), compilazione .NET 10 e build TypeScript/Vite superate. Gli smoke Playwright usano un fake HTTP verificabile e non avviano un server .NET reale nello stesso processo; i test xUnit di integrazione dell'API coprono il backend.

@@ -25,6 +25,7 @@
 - No externally owned/third-party art in final assets. Code-generated geometric placeholders are acceptable.
 - The Development-only match laboratory is under `src/features/matches` (#20), hidden by `import.meta.env.DEV`. Do not expose its creator-issued all-seat tokens or synthetic catalog through Production, URLs or localStorage; real PvP authentication belongs to #13.
 - The public-only match-to-city marker projection (#22) lives under `src/features/city/playerMarkers.ts`; it receives only player IDs, street IDs and the current actor. Its X/Z values are view placement on existing road rectangles, never Domain movement coordinates. Keep an accessible roster for WebGL fallback.
+- Activity and henchman visuals (#23) use `src/features/city/activityMarkers.ts` and only public `boardActivities`, `controlledActivities`, and `grossSalaryQuotes`. Never infer ownership from position or award gross salary in React; cardinality/owner/posture validation must fail closed, and keep a WebGL-free roster.
 - Test fallback and narrow screens, avoid requiring WebGL for critical interactions.
 - For interactions that cross React → ASP.NET Core (match commands, private projections, reconnect), use **both** fast mocked Playwright UI tests and the real API suite `npm run test:e2e:live` (requires backend Development on loopback). GitHub Actions runs all three gates (xUnit, UI, full-stack). Never claim mock-only browser tests prove API behavior.
 

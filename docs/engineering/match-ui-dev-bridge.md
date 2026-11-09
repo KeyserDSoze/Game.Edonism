@@ -53,3 +53,7 @@ Catalogo reale e art (#19/#7/#9), lobby, token auth Production, rendering delle 
 ## Verifica CI conclusa
 
 [GitHub Actions #42685047656](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42685047656) su `main` (`3a7befc`), completed/success: **131/131 xUnit** (0 warning, 0 errori), **10/10 Playwright** (5 nuovi test UI + 5 regressioni plancia), compilazione .NET 10 e build TypeScript/Vite superate. Gli smoke Playwright usano un fake HTTP verificabile e non avviano un server .NET reale nello stesso processo; i test xUnit di integrazione dell'API coprono il backend.
+
+## Attività controllate e scagnozzi (#23)
+
+La scena usa da oggi anche `controlledActivities` e `boardActivities` pubblici del match: i 30 edifici rimangono nella topologia originale, quelli controllati mostrano il colore del giocatore e una pedina scagnozzo nella postura dichiarata dal Domain. Il nuovo elenco HTML accessibile permette di verificarne slot, carta sintetica, owner, postura e preventivo del salario **lordo** senza simulare pagamenti. Il lavoro è documentato in [controlled-lots](controlled-lots.md). Le proprietà **non** cambiano quando il personaggio si sposta: il backend resta autoritativo.

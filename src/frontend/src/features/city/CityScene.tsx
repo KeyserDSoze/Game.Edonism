@@ -1,154 +1,182 @@
 import { useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
-import { ContactShadows, OrbitControls } from "@react-three/drei";
-import type { PreviewTile, TileKind } from "./map";
-import { previewTiles, toWorld } from "./map";
+import { Html, OrbitControls } from "@react-three/drei";
 import { useTranslation } from "react-i18next";
+import { cityBoard, toScene, type ActivitySlot, type RoadArea, type Street } from "./board";
 
-const tileColors: Record<TileKind, string> = {
-  civic: "#ebae70",
-  commerce: "#69bea7",
-  park: "#9ec785",
-  residential: "#7697b6",
+type SceneProps = {
+  selectedStreetId: string;
+  selectedSlotId: string | null;
+  onStreetSelect: (streetId: string) => void;
+  onSlotSelect: (slotId: string) => void;
 };
-const figurines: ReadonlyArray<{ tile: string; color: string; cap: string }> = [
-  { tile: "0:0", color: "#eea477", cap: "#a95c5b" },
-  { tile: "1:-1", color: "#8bd0c2", cap: "#467c87" },
-  { tile: "-2:1", color: "#c5a9ed", cap: "#705eab" },
-  { tile: "1:1", color: "#e2c782", cap: "#9d7b51" },
-];
 
-function CityBlock({ kind }: { kind: TileKind }) {
-  if (kind === "park") {
-    return (
-      <group>
-        <mesh castShadow position={[-0.24, 0.23, -0.08]}>
-          <cylinderGeometry args={[0.07, 0.1, 0.32, 6]} />
-          <meshStandardMaterial color="#876c51" />
-        </mesh>
-        <mesh castShadow position={[-0.24, 0.5, -0.08]}>
-          <dodecahedronGeometry args={[0.29, 0]} />
-          <meshStandardMaterial color="#4e956f" roughness={0.88} />
-        </mesh>
-        <mesh castShadow position={[0.3, 0.29, 0.08]}>
-          <dodecahedronGeometry args={[0.24, 0]} />
-          <meshStandardMaterial color="#75b77b" roughness={0.9} />
-        </mesh>
-      </group>
-    );
-  }
+const blockColors = ["#e9cbb3", "#dce6da", "#c8dce5", "#f0dfbd", "#d5c9da", "#e4dacb"];
+const roofColors = ["#9b6a58", "#587a75", "#56778e", "#aa8665", "#877493", "#8c806e"];
 
-  const height = kind === "civic" ? 0.8 : kind === "commerce" ? 0.56 : 0.4;
-  const facade = kind === "civic" ? "#f4dab1" : kind === "commerce" ? "#e5f4e7" : "#dde9f1";
-  const roof = kind === "civic" ? "#c88057" : kind === "commerce" ? "#4d8d84" : "#577695";
+function footprintId(id: string): number {
+  return Array.from(id).reduce((sum, letter) => sum * 31 + letter.charCodeAt(0), 7) >>> 0;
+}
 
+function Road({ road, selected, onSelect }: { road: RoadArea; selected: boolean; onSelect: (id: string) => void }) {
+  const [x, z] = toScene(road.center);
+  const sizeX = road.width / 95;
+  const sizeZ = road.height / 95;
   return (
-    <group position={[0, 0.18, 0]}>
-      <mesh castShadow receiveShadow position={[0, height / 2, 0]}>
-        <boxGeometry args={[kind === "civic" ? 0.72 : 0.66, height, 0.58]} />
-        <meshStandardMaterial color={facade} roughness={0.82} />
-      </mesh>
-      <mesh castShadow position={[0, height + 0.08, 0]}>
-        <boxGeometry args={[0.83, 0.15, 0.69]} />
-        <meshStandardMaterial color={roof} roughness={0.68} />
-      </mesh>
-      <mesh position={[0, height * 0.5, 0.301]}>
-        <boxGeometry args={[0.19, 0.24, 0.012]} />
-        <meshStandardMaterial color="#416377" metalness={0.15} />
-      </mesh>
-    </group>
+    <mesh
+      position={[x, selected ? 0.075 : 0.052, z]}
+      receiveShadow
+      onClick={(event) => { event.stopPropagation(); onSelect(road.streetId); }}
+    >
+      <boxGeometry args={[sizeX, 0.06, sizeZ]} />
+      <meshStandardMaterial color={selected ? "#496f77" : road.streetId === "main-square" ? "#65747a" : "#495661"} roughness={1} />
+    </mesh>
   );
 }
 
-function Hex({ tile, selected, onSelect }: { tile: PreviewTile; selected: boolean; onSelect: (id: string) => void }) {
-  const [x, z] = toWorld(tile.q, tile.r);
+function Building({ slot, selected, onSelect }: { slot: ActivitySlot; selected: boolean; onSelect: (id: string) => void }) {
+  const [x, z] = toScene(slot.center);
+  const index = footprintId(slot.id) % blockColors.length;
+  const height = 0.42 + (footprintId(slot.id + "height") % 5) * 0.125;
+  const width = 1.03;
   return (
     <group position={[x, 0, z]}>
+      <mesh
+        castShadow
+        receiveShadow
+        onClick={(event) => { event.stopPropagation(); onSelect(slot.id); }}
+        position={[0, 0.115, 0]}
+      >
+        <boxGeometry args={[1.4, 0.19, 1.39]} />
+        <meshStandardMaterial color={selected ? "#f1ca7e" : "#769b78"} roughness={0.9} />
+      </mesh>
       {selected && (
-        <mesh position={[0, -0.035, 0]} rotation={[0, Math.PI / 6, 0]}>
-          <cylinderGeometry args={[1.055, 1.055, 0.3, 6]} />
-          <meshStandardMaterial color="#f7d18b" emissive="#b87b2b" emissiveIntensity={0.5} />
+        <mesh position={[0, 0.23, 0]}>
+          <boxGeometry args={[1.29, 0.035, 1.28]} />
+          <meshStandardMaterial color="#f4cf80" emissive="#dfac5b" emissiveIntensity={0.3} />
         </mesh>
       )}
       <mesh
         castShadow
         receiveShadow
-        onClick={(event) => { event.stopPropagation(); onSelect(tile.id); }}
-        rotation={[0, Math.PI / 6, 0]}
-        position={[0, 0.07, 0]}
+        onClick={(event) => { event.stopPropagation(); onSelect(slot.id); }}
+        position={[0, 0.21 + height / 2, 0]}
       >
-        <cylinderGeometry args={[1, 1, 0.32, 6]} />
-        <meshStandardMaterial color={tileColors[tile.kind]} roughness={0.92} />
+        <boxGeometry args={[width, height, 0.94]} />
+        <meshStandardMaterial color={blockColors[index]} roughness={0.88} />
       </mesh>
-      <CityBlock kind={tile.kind} />
+      <mesh
+        castShadow
+        onClick={(event) => { event.stopPropagation(); onSelect(slot.id); }}
+        position={[0, 0.22 + height + 0.07, 0]}
+      >
+        <boxGeometry args={[1.16, 0.13, 1.08]} />
+        <meshStandardMaterial color={roofColors[index]} roughness={0.8} />
+      </mesh>
+      <mesh position={[0, 0.32 + height * 0.35, 0.476]}>
+        <boxGeometry args={[0.3, 0.2, 0.015]} />
+        <meshStandardMaterial color="#47677a" metalness={0.15} />
+      </mesh>
     </group>
   );
 }
 
-function Pucciottino({ tileId, color, cap }: { tileId: string; color: string; cap: string }) {
-  const tile = previewTiles.find((item) => item.id === tileId);
-  const [x, z] = tile ? toWorld(tile.q, tile.r) : [0, 0];
+function CityHall() {
+  const [x, z] = toScene(cityBoard.cityHall);
   return (
-    <group position={[x + 0.33, 0.66, z + 0.34]} scale={0.72}>
-      <mesh castShadow position={[0, 0.04, 0]}>
-        <sphereGeometry args={[0.37, 18, 14]} />
-        <meshStandardMaterial color={color} roughness={0.66} />
+    <group position={[x, 0, z]}>
+      <mesh castShadow receiveShadow position={[0, 0.22, 0]}>
+        <boxGeometry args={[1.85, 0.32, 1.55]} />
+        <meshStandardMaterial color="#c1c9c3" />
       </mesh>
-      <mesh castShadow position={[0, 0.48, 0]}>
-        <sphereGeometry args={[0.32, 18, 14]} />
-        <meshStandardMaterial color={color} roughness={0.66} />
+      <mesh castShadow position={[0, 0.72, 0]}>
+        <boxGeometry args={[1.52, 0.73, 1.24]} />
+        <meshStandardMaterial color="#f1e6d5" />
       </mesh>
-      <mesh castShadow position={[0, 0.77, 0]}>
-        <sphereGeometry args={[0.29, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2]} />
-        <meshStandardMaterial color={cap} roughness={0.87} />
+      <mesh castShadow position={[0, 1.17, 0]}>
+        <boxGeometry args={[1.85, 0.19, 1.51]} />
+        <meshStandardMaterial color="#b47769" />
+      </mesh>
+      <mesh castShadow position={[0, 1.52, 0]}>
+        <cylinderGeometry args={[0.19, 0.27, 0.56, 8]} />
+        <meshStandardMaterial color="#d6b978" metalness={0.28} />
+      </mesh>
+    </group>
+  );
+}
+
+// Decorative, not a player position or an actual turn state.
+function Pucciottino({ x, z, color }: { x: number; z: number; color: string }) {
+  return (
+    <group position={[x, 0.21, z]} scale={0.66}>
+      <mesh castShadow position={[0, 0.25, 0]}>
+        <sphereGeometry args={[0.26, 14, 12]} />
+        <meshStandardMaterial color={color} roughness={0.72} />
+      </mesh>
+      <mesh castShadow position={[0, 0.65, 0]}>
+        <sphereGeometry args={[0.33, 18, 14]} />
+        <meshStandardMaterial color={color} roughness={0.65} />
       </mesh>
       {[-0.13, 0.13].map((eye) => (
-        <mesh key={eye} position={[eye, 0.52, 0.281]}>
+        <mesh key={eye} position={[eye, 0.69, 0.296]}>
           <sphereGeometry args={[0.045, 10, 10]} />
-          <meshStandardMaterial color="#243746" />
+          <meshStandardMaterial color="#29323b" />
         </mesh>
       ))}
-      <mesh position={[0, 0.39, 0.296]}>
-        <sphereGeometry args={[0.035, 10, 10]} />
-        <meshStandardMaterial color="#b66061" />
-      </mesh>
     </group>
   );
 }
 
-function WebGLCity({ selectedId, onSelect }: { selectedId: string; onSelect: (id: string) => void }) {
-  const tiles = useMemo(() => previewTiles, []);
+function RoadLabel({ street }: { street: Street }) {
+  const [x, z] = toScene(street.label);
+  return (
+    <Html
+      center
+      position={[x, 0.28, z]}
+      distanceFactor={14}
+      style={{ pointerEvents: "none", whiteSpace: "nowrap" }}
+    >
+      <span className="rounded-md border border-white/25 bg-slate-900/80 px-2 py-1 text-[10px] font-semibold text-white shadow-lg">
+        {street.name}
+      </span>
+    </Html>
+  );
+}
+
+function World({ selectedStreetId, selectedSlotId, onStreetSelect, onSlotSelect }: SceneProps) {
+  const roads = useMemo(() => cityBoard.roads, []);
+  const slots = useMemo(() => cityBoard.slots, []);
+  const [pucciX1, pucciZ1] = toScene({ x: 130, y: 225 });
+  const [pucciX2, pucciZ2] = toScene({ x: 1150, y: 785 });
+  const [pucciX3, pucciZ3] = toScene({ x: 740, y: 705 });
+
   return (
     <Canvas
       shadows
-      dpr={[1, 1.7]}
-      camera={{ position: [10, 12, 13], fov: 43, near: 0.1, far: 90 }}
+      dpr={[1, 1.6]}
+      camera={{ position: [12, 16, 17], fov: 46, near: 0.1, far: 90 }}
       gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
       style={{ width: "100%", height: "100%" }}
     >
-      <color attach="background" args={["#10212b"]} />
-      <fog attach="fog" args={["#10212b", 18, 38]} />
-      <ambientLight intensity={1.6} />
-      <directionalLight
-        castShadow
-        position={[6, 12, 7]}
-        intensity={2.4}
-        shadow-mapSize={[1024, 1024]}
-        shadow-camera-left={-14}
-        shadow-camera-right={14}
-        shadow-camera-top={14}
-        shadow-camera-bottom={-14}
-      />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.31, 0]} receiveShadow>
-        <planeGeometry args={[120, 120]} />
-        <meshStandardMaterial color="#102a30" roughness={1} />
+      <color attach="background" args={["#13242b"]} />
+      <ambientLight intensity={1.8} />
+      <directionalLight castShadow position={[7, 14, 8]} intensity={2.3} shadow-mapSize={[1024, 1024]} shadow-camera-left={-12} shadow-camera-right={12} shadow-camera-top={-12} shadow-camera-bottom={12} />
+      <mesh receiveShadow position={[0, -0.09, 0]}>
+        <boxGeometry args={[cityBoard.width / 95 + 0.22, 0.2, cityBoard.height / 95 + 0.22]} />
+        <meshStandardMaterial color="#476a51" roughness={1} />
       </mesh>
-      <group>
-        {tiles.map((tile) => <Hex key={tile.id} tile={tile} selected={tile.id === selectedId} onSelect={onSelect} />)}
-        {figurines.map((figure) => <Pucciottino key={figure.tile} tileId={figure.tile} color={figure.color} cap={figure.cap} />)}
-      </group>
-      <ContactShadows position={[0, -0.18, 0]} opacity={0.25} scale={20} blur={2.2} far={7} />
-      <OrbitControls enablePan={false} minDistance={8} maxDistance={25} maxPolarAngle={Math.PI / 2.15} minPolarAngle={0.35} target={[0, 0, 0]} />
+      {roads.map((road, index) => (
+        <Road key={index} road={road} selected={road.streetId === selectedStreetId} onSelect={onStreetSelect} />
+      ))}
+      {slots.map((slot) => (
+        <Building key={slot.id} slot={slot} selected={slot.id === selectedSlotId} onSelect={onSlotSelect} />
+      ))}
+      <CityHall />
+      <Pucciottino x={pucciX1} z={pucciZ1} color="#f2ad86" />
+      <Pucciottino x={pucciX2} z={pucciZ2} color="#a7cdd2" />
+      <Pucciottino x={pucciX3} z={pucciZ3} color="#d7b8e5" />
+      {cityBoard.streets.map((street) => <RoadLabel key={street.id} street={street} />)}
+      <OrbitControls enablePan={false} minDistance={13} maxDistance={32} minPolarAngle={0.33} maxPolarAngle={Math.PI / 2.15} target={[0, 0.18, 0]} />
     </Canvas>
   );
 }
@@ -163,10 +191,10 @@ function webglAvailable(): boolean {
   }
 }
 
-export function CityScene({ selectedId, onSelect }: { selectedId: string; onSelect: (id: string) => void }) {
+export function CityScene(props: SceneProps) {
   const supported = useMemo(webglAvailable, []);
   const { t } = useTranslation();
   return supported
-    ? <WebGLCity selectedId={selectedId} onSelect={onSelect} />
+    ? <World {...props} />
     : <div role="status" className="flex h-full items-center justify-center p-10 text-center text-sm text-slate-200">{t("city.fallback")}</div>;
 }

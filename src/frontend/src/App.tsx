@@ -1,27 +1,40 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Building2, Compass, Gamepad2, Hexagon, Info, Languages, Monitor, Moon, MousePointer2, Sparkles, Sun } from "lucide-react";
+import { Building2, Compass, Gamepad2, Info, Languages, Map, MapPin, Monitor, Moon, MousePointer2, Sparkles, Sun } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CityScene } from "@/features/city/CityScene";
-import { previewTiles } from "@/features/city/map";
+import { cityBoard, slotById, slotsOnStreet, streetById } from "@/features/city/board";
 import { useTheme, type Theme } from "@/features/settings/useTheme";
 import { changeLanguage } from "@/i18n";
 
-const visibleTileIds = ["0:0", "1:0", "0:1", "-1:0", "0:-1", "-1:1", "1:-1"];
+const themeOptions: { theme: Theme; Icon: typeof Monitor }[] = [
+  { theme: "system", Icon: Monitor },
+  { theme: "light", Icon: Sun },
+  { theme: "dark", Icon: Moon },
+];
 
 export default function App() {
   const { t, i18n } = useTranslation();
   const { theme, setTheme } = useTheme();
-  const [selectedId, setSelectedId] = useState("0:0");
-  const selectedTile = previewTiles.find((tile) => tile.id === selectedId) ?? previewTiles[0];
-  const visibleTiles = useMemo(() => visibleTileIds.map((id) => previewTiles.find((tile) => tile.id === id)).filter((tile) => tile !== undefined), []);
-  const themeOptions: { theme: Theme; Icon: typeof Monitor }[] = [
-    { theme: "system", Icon: Monitor },
-    { theme: "light", Icon: Sun },
-    { theme: "dark", Icon: Moon },
-  ];
+  const [selectedStreetId, setSelectedStreetId] = useState("gauss");
+  const [selectedSlotId, setSelectedSlotId] = useState<string | null>("N-01");
+  const currentStreet = streetById(selectedStreetId) ?? cityBoard.streets[0];
+  const currentSlot = selectedSlotId ? slotById(selectedSlotId) : undefined;
+  const streetSlots = slotsOnStreet(selectedStreetId);
+
+  const chooseStreet = (streetId: string) => {
+    setSelectedStreetId(streetId);
+    setSelectedSlotId(slotsOnStreet(streetId)[0]?.id ?? null);
+  };
+
+  const chooseSlot = (slotId: string) => {
+    const slot = slotById(slotId);
+    if (!slot) return;
+    setSelectedSlotId(slotId);
+    setSelectedStreetId(slot.streetId);
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -84,8 +97,8 @@ export default function App() {
           </div>
         </section>
 
-        <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
-          <Card className="overflow-hidden">
+        <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_350px]">
+          <Card className="min-w-0 overflow-hidden">
             <CardHeader className="flex-row items-start justify-between gap-3 pb-5">
               <div>
                 <CardTitle className="flex items-center gap-2 text-lg sm:text-xl"><Compass aria-hidden="true" className="size-5 text-primary" />{t("city.title")}</CardTitle>
@@ -98,15 +111,21 @@ export default function App() {
               role="region"
               aria-label={t("city.canvasLabel")}
               data-testid="city-renderer"
+              data-board-version={cityBoard.version}
             >
-              <CityScene selectedId={selectedId} onSelect={setSelectedId} />
+              <CityScene
+                selectedStreetId={selectedStreetId}
+                selectedSlotId={selectedSlotId}
+                onStreetSelect={chooseStreet}
+                onSlotSelect={chooseSlot}
+              />
               <div className="pointer-events-none absolute left-3 top-3 rounded-lg border border-white/15 bg-slate-950/70 px-3 py-2 text-[11px] font-semibold tracking-wide text-teal-100 backdrop-blur sm:left-5 sm:top-5">
                 <span aria-hidden="true" className="mr-2 inline-block size-2 rounded-full bg-emerald-300" />
                 {t("city.previewTag")}
               </div>
               <div className="pointer-events-none absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2 text-[11px] font-medium text-slate-100/85 sm:bottom-5 sm:left-5 sm:right-5">
                 <span className="rounded-lg bg-slate-950/60 px-3 py-2 backdrop-blur"><MousePointer2 aria-hidden="true" className="mr-1 inline size-3.5" />{t("city.controls")}</span>
-                <span className="rounded-lg bg-slate-950/60 px-3 py-2 font-mono backdrop-blur">HEX / {previewTiles.length}</span>
+                <span className="rounded-lg bg-slate-950/60 px-3 py-2 font-mono backdrop-blur">{cityBoard.slots.length} {t("city.slotsShort")}</span>
               </div>
             </div>
             <CardContent className="mt-5 flex items-start gap-2 text-xs leading-5 text-muted-foreground">
@@ -115,21 +134,31 @@ export default function App() {
             </CardContent>
           </Card>
 
-          <aside aria-label={t("city.inspect")} className="space-y-5">
+          <aside aria-label={t("city.inspect")} className="min-w-0 space-y-5">
             <Card>
               <CardHeader>
-                <Badge className="w-fit border-primary/20 bg-primary/10 text-primary">{t("city.active")}</Badge>
-                <CardTitle className="mt-2 flex items-center gap-2"><Hexagon aria-hidden="true" className="size-5 text-primary" />{t(`tiles.${selectedTile.kind}`)}</CardTitle>
+                <Badge className="w-fit border-primary/20 bg-primary/10 text-primary">{t("city.selectedStreet")}</Badge>
+                <CardTitle className="mt-2 flex items-center gap-2"><MapPin aria-hidden="true" className="size-5 text-primary" /><span data-testid="selected-street">{currentStreet.name}</span></CardTitle>
               </CardHeader>
               <CardContent className="space-y-4 pt-1">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-xl bg-muted p-3">
-                    <p className="text-xs text-muted-foreground">{t("city.coordinate")}</p>
-                    <output data-testid="selected-coordinate" className="mt-1 block font-mono text-lg font-bold">{selectedTile.q}, {selectedTile.r}</output>
+                    <p className="text-xs text-muted-foreground">{t("city.activitySpaces")}</p>
+                    <output data-testid="street-slot-count" className="mt-1 block font-mono text-lg font-bold">{streetSlots.length}</output>
                   </div>
                   <div className="rounded-xl bg-muted p-3">
-                    <p className="text-xs text-muted-foreground">{t("city.district")}</p>
-                    <p className="mt-1 text-sm font-semibold">{t(`tiles.${selectedTile.kind}`)}</p>
+                    <p className="text-xs text-muted-foreground">{t("city.selectedSlot")}</p>
+                    <output data-testid="selected-slot" className="mt-1 block font-mono text-lg font-bold">{currentSlot?.id ?? t("city.cityHall")}</output>
+                  </div>
+                </div>
+                <div className="border-t border-border pt-3">
+                  <p className="mb-2 text-xs font-semibold text-muted-foreground">{t("city.adjacentStreets")}</p>
+                  <div className="flex flex-wrap gap-2" data-testid="adjacency-list">
+                    {currentStreet.neighbors.map((id) => (
+                      <Button key={id} size="sm" variant="outline" data-testid={`adjacent-${id}`} onClick={() => chooseStreet(id)} className="h-8 text-xs">
+                        {streetById(id)?.name ?? id}
+                      </Button>
+                    ))}
                   </div>
                 </div>
                 <div className="flex items-start gap-2 border-t border-border pt-4 text-xs leading-5 text-muted-foreground">
@@ -141,26 +170,44 @@ export default function App() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">{t("city.inspect")}</CardTitle>
-                <p className="text-xs leading-5 text-muted-foreground">{t("city.inspectHelp")}</p>
+                <CardTitle className="flex items-center gap-2 text-base"><Map aria-hidden="true" className="size-4 text-primary" />{t("city.streets")}</CardTitle>
+                <p className="text-xs leading-5 text-muted-foreground">{t("city.streetHelp")}</p>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-2">
-                  {visibleTiles.map((tile) => (
+                  {cityBoard.streets.map((street) => (
                     <Button
-                      key={tile.id}
+                      key={street.id}
                       type="button"
                       size="sm"
-                      variant={selectedId === tile.id ? "default" : "outline"}
-                      aria-label={t("city.inspectHex", { q: tile.q, r: tile.r })}
-                      aria-pressed={selectedId === tile.id}
-                      data-testid={`tile-picker-${tile.id}`}
-                      onClick={() => setSelectedId(tile.id)}
-                      className="justify-start font-mono text-xs"
+                      variant={selectedStreetId === street.id ? "default" : "outline"}
+                      aria-pressed={selectedStreetId === street.id}
+                      data-testid={`street-picker-${street.id}`}
+                      onClick={() => chooseStreet(street.id)}
+                      className="h-auto min-h-10 justify-start whitespace-normal px-2 py-2 text-left text-xs"
                     >
-                      <Hexagon aria-hidden="true" className="size-3" />{tile.q}, {tile.r}
+                      {street.name}
                     </Button>
                   ))}
+                </div>
+                <p className="mt-4 mb-2 text-xs font-semibold text-muted-foreground">{t("city.activitySpaces")}</p>
+                <div className="grid max-h-32 grid-cols-4 gap-2 overflow-y-auto" role="group" aria-label={t("city.selectSlot")}>
+                  {streetSlots.length > 0
+                    ? streetSlots.map((slot) => (
+                      <Button
+                        key={slot.id}
+                        type="button"
+                        size="sm"
+                        variant={slot.id === selectedSlotId ? "default" : "outline"}
+                        aria-label={t("city.inspectSlot", { id: slot.id })}
+                        aria-pressed={slot.id === selectedSlotId}
+                        data-testid={`slot-picker-${slot.id}`}
+                        onClick={() => chooseSlot(slot.id)}
+                        className="text-xs"
+                      >{slot.id}</Button>
+                    ))
+                    : <p className="col-span-4 text-xs text-muted-foreground">{t("city.mainSquareOnly")}</p>
+                  }
                 </div>
                 <p className="mt-3 text-[11px] leading-5 text-muted-foreground">{t("city.accessibility")}</p>
               </CardContent>

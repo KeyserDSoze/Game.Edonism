@@ -1,0 +1,427 @@
+{
+  "version": "edonism-streets-v1",
+  "source": "rulebook2.zip pp. 4, 7-8; plancia di gioco.png",
+  "width": 1504,
+  "height": 998,
+  "cityHall": {
+    "x": 750,
+    "y": 484
+  },
+  "streets": [
+    {
+      "id": "gauss",
+      "name": "Gauss Avenue",
+      "neighbors": [
+        "newton",
+        "planck",
+        "main-square"
+      ],
+      "label": {
+        "x": 1070,
+        "y": 215
+      }
+    },
+    {
+      "id": "einstein",
+      "name": "Einstein Avenue",
+      "neighbors": [
+        "newton",
+        "planck",
+        "main-square"
+      ],
+      "label": {
+        "x": 360,
+        "y": 786
+      }
+    },
+    {
+      "id": "newton",
+      "name": "Newton Avenue",
+      "neighbors": [
+        "gauss",
+        "einstein",
+        "boson"
+      ],
+      "label": {
+        "x": 212,
+        "y": 675
+      }
+    },
+    {
+      "id": "planck",
+      "name": "Planck Avenue",
+      "neighbors": [
+        "gauss",
+        "einstein",
+        "meson"
+      ],
+      "label": {
+        "x": 1288,
+        "y": 343
+      }
+    },
+    {
+      "id": "boson",
+      "name": "Boson Street",
+      "neighbors": [
+        "newton",
+        "main-square"
+      ],
+      "label": {
+        "x": 455,
+        "y": 485
+      }
+    },
+    {
+      "id": "meson",
+      "name": "Meson Street",
+      "neighbors": [
+        "planck",
+        "main-square"
+      ],
+      "label": {
+        "x": 1060,
+        "y": 485
+      }
+    },
+    {
+      "id": "main-square",
+      "name": "Main Square",
+      "neighbors": [
+        "gauss",
+        "einstein",
+        "boson",
+        "meson"
+      ],
+      "label": {
+        "x": 749,
+        "y": 482
+      }
+    }
+  ],
+  "slots": [
+    {
+      "id": "N-01",
+      "streetId": "gauss",
+      "center": {
+        "x": 75,
+        "y": 79
+      }
+    },
+    {
+      "id": "N-02",
+      "streetId": "gauss",
+      "center": {
+        "x": 345,
+        "y": 79
+      }
+    },
+    {
+      "id": "N-03",
+      "streetId": "gauss",
+      "center": {
+        "x": 505,
+        "y": 79
+      }
+    },
+    {
+      "id": "N-04",
+      "streetId": "gauss",
+      "center": {
+        "x": 673,
+        "y": 79
+      }
+    },
+    {
+      "id": "N-05",
+      "streetId": "gauss",
+      "center": {
+        "x": 838,
+        "y": 79
+      }
+    },
+    {
+      "id": "N-06",
+      "streetId": "gauss",
+      "center": {
+        "x": 997,
+        "y": 79
+      }
+    },
+    {
+      "id": "N-07",
+      "streetId": "gauss",
+      "center": {
+        "x": 1158,
+        "y": 79
+      }
+    },
+    {
+      "id": "N-08",
+      "streetId": "gauss",
+      "center": {
+        "x": 1430,
+        "y": 79
+      }
+    },
+    {
+      "id": "S-01",
+      "streetId": "einstein",
+      "center": {
+        "x": 75,
+        "y": 929
+      }
+    },
+    {
+      "id": "S-02",
+      "streetId": "einstein",
+      "center": {
+        "x": 345,
+        "y": 929
+      }
+    },
+    {
+      "id": "S-03",
+      "streetId": "einstein",
+      "center": {
+        "x": 505,
+        "y": 929
+      }
+    },
+    {
+      "id": "S-04",
+      "streetId": "einstein",
+      "center": {
+        "x": 673,
+        "y": 929
+      }
+    },
+    {
+      "id": "S-05",
+      "streetId": "einstein",
+      "center": {
+        "x": 838,
+        "y": 929
+      }
+    },
+    {
+      "id": "S-06",
+      "streetId": "einstein",
+      "center": {
+        "x": 997,
+        "y": 929
+      }
+    },
+    {
+      "id": "S-07",
+      "streetId": "einstein",
+      "center": {
+        "x": 1158,
+        "y": 929
+      }
+    },
+    {
+      "id": "S-08",
+      "streetId": "einstein",
+      "center": {
+        "x": 1430,
+        "y": 929
+      }
+    },
+    {
+      "id": "W-01",
+      "streetId": "newton",
+      "center": {
+        "x": 75,
+        "y": 356
+      }
+    },
+    {
+      "id": "W-02",
+      "streetId": "newton",
+      "center": {
+        "x": 75,
+        "y": 500
+      }
+    },
+    {
+      "id": "W-03",
+      "streetId": "newton",
+      "center": {
+        "x": 75,
+        "y": 645
+      }
+    },
+    {
+      "id": "E-01",
+      "streetId": "planck",
+      "center": {
+        "x": 1431,
+        "y": 356
+      }
+    },
+    {
+      "id": "E-02",
+      "streetId": "planck",
+      "center": {
+        "x": 1431,
+        "y": 500
+      }
+    },
+    {
+      "id": "E-03",
+      "streetId": "planck",
+      "center": {
+        "x": 1431,
+        "y": 645
+      }
+    },
+    {
+      "id": "B-01",
+      "streetId": "boson",
+      "center": {
+        "x": 355,
+        "y": 357
+      }
+    },
+    {
+      "id": "B-02",
+      "streetId": "boson",
+      "center": {
+        "x": 519,
+        "y": 357
+      }
+    },
+    {
+      "id": "B-03",
+      "streetId": "boson",
+      "center": {
+        "x": 355,
+        "y": 645
+      }
+    },
+    {
+      "id": "B-04",
+      "streetId": "boson",
+      "center": {
+        "x": 519,
+        "y": 645
+      }
+    },
+    {
+      "id": "M-01",
+      "streetId": "meson",
+      "center": {
+        "x": 988,
+        "y": 350
+      }
+    },
+    {
+      "id": "M-02",
+      "streetId": "meson",
+      "center": {
+        "x": 1147,
+        "y": 350
+      }
+    },
+    {
+      "id": "M-03",
+      "streetId": "meson",
+      "center": {
+        "x": 988,
+        "y": 643
+      }
+    },
+    {
+      "id": "M-04",
+      "streetId": "meson",
+      "center": {
+        "x": 1147,
+        "y": 643
+      }
+    }
+  ],
+  "roads": [
+    {
+      "streetId": "gauss",
+      "center": {
+        "x": 752,
+        "y": 216
+      },
+      "width": 1504,
+      "height": 89
+    },
+    {
+      "streetId": "einstein",
+      "center": {
+        "x": 752,
+        "y": 790
+      },
+      "width": 1504,
+      "height": 92
+    },
+    {
+      "streetId": "newton",
+      "center": {
+        "x": 212,
+        "y": 499
+      },
+      "width": 91,
+      "height": 998
+    },
+    {
+      "streetId": "planck",
+      "center": {
+        "x": 1285,
+        "y": 499
+      },
+      "width": 105,
+      "height": 998
+    },
+    {
+      "streetId": "boson",
+      "center": {
+        "x": 473,
+        "y": 484
+      },
+      "width": 440,
+      "height": 115
+    },
+    {
+      "streetId": "meson",
+      "center": {
+        "x": 1020,
+        "y": 484
+      },
+      "width": 444,
+      "height": 115
+    },
+    {
+      "streetId": "main-square",
+      "center": {
+        "x": 750,
+        "y": 367
+      },
+      "width": 110,
+      "height": 230
+    },
+    {
+      "streetId": "main-square",
+      "center": {
+        "x": 750,
+        "y": 637
+      },
+      "width": 110,
+      "height": 217
+    },
+    {
+      "streetId": "main-square",
+      "center": {
+        "x": 750,
+        "y": 484
+      },
+      "width": 295,
+      "height": 240
+    }
+  ]
+}

@@ -1,16 +1,16 @@
 # Edonism
 
-Edonism è un gioco strategico web PvP/PvE ambientato in una città di proprietà, attività commerciali e personaggi ("Pucciottini"). La foundation 0.0.1 è **solo un'anteprima tecnica**: le regole di gioco, l'economia e le interazioni multiplayer arriveranno dopo la revisione del game design.
+Edonism è un gioco strategico web PvP/PvE ambientato in una città di attività commerciali e personaggi ("Pucciottini"). La release tecnica 0.0.2 mostra **la plancia originale ricostruita in 3D**, ma non è ancora una partita giocabile.
 
 ## Stack
 
-- **World renderer 3D:** Three.js, React Three Fiber e Drei, con esagoni e pucciottini placeholder generati da primitive 3D.
-- **UI:** React, TypeScript, Vite, shadcn/ui e Tailwind CSS (tema system/light/dark, italiano e inglese).
-- **Backend:** ASP.NET Core .NET 10, con Domain/Application/Infrastructure/API separati.
+- **3D board:** Three.js, React Three Fiber e Drei; strade ortogonali e edifici/pucciottini placeholder originali fatti di primitive geometriche.
+- **UI:** React, TypeScript, Vite, shadcn/ui, Tailwind CSS (tema system/light/dark, italiano e inglese).
+- **Backend:** ASP.NET Core .NET 10, Domain/Application/Infrastructure/API.
 - **Tests:** xUnit, Playwright; gate GitHub Actions.
-- **Principio:** il server sarà autoritativo per le azioni di gioco PvP/PvE. Il frontend non può assegnare denaro, proprietà o modificare lo stato canonico.
+- **Principio:** il server sarà autoritativo per le azioni di gioco PvP/PvE. Nessuna validazione di movimento tramite coordinate 3D client.
 
-## Sviluppo locale
+## Avvio locale
 
 Prerequisiti: .NET SDK 10, Node.js 22 o 24 e npm.
 
@@ -28,9 +28,9 @@ npm install
 npm run dev
 ```
 
-Frontend: `http://localhost:5173`. Backend: usa la URL HTTP stampata da `dotnet run`; verifica `/health` e `/api/v1/meta`. Il frontend non necessita del backend per visualizzare la demo iniziale.
+Frontend `http://localhost:5173`. Il renderer usa direttamente lo stesso JSON versionato del backend e **funziona anche con API spenta**. L'API espone `/health`, `/api/v1/meta` e `GET /api/v1/board`.
 
-### Test frontend
+Test frontend:
 
 ```bash
 cd src/frontend
@@ -43,17 +43,19 @@ npm run test:e2e
 
 ```text
 src/
+  shared/board/edonism-board.v1.json   # 7 strade, 30 slot, vie, grafo e City Hall
   backend/
-    domains/Edonism.Domain/
+    domains/Edonism.Domain/World/      # grafo e assegnazione seeded (non match engine)
     business/Edonism.Application/
     infrastructure/Edonism.Infrastructure/
     applications/Edonism.Api/
   frontend/
-    src/components/ui/       # shadcn/ui, fuori dalla scena 3D
-    src/features/city/        # rendering 3D + geometria demo
-    src/features/settings/    # theme state
-    src/i18n/                 # localizzazione
-tests/backend/                # xUnit
+    src/components/ui/                 # shadcn/ui, fuori dalla scena 3D
+    src/features/city/                 # geometria 3D e overlay di esplorazione
+    src/features/settings/             # temi
+    src/i18n/                          # IT/EN
+tests/backend/                          # xUnit
+docs/game-design/                       # regole stampate, tracciabilità e punti aperti
 docs/architecture/
 docs/engineering/
 docs/patch-notes/
@@ -61,10 +63,14 @@ docs/patch-notes/
 AGENTS.md
 ```
 
-La struttura riprende i confini di [Vuxo](https://github.com/KeyserDSoze/Vuxo), ma usa un renderer 3D anziché Phaser 2D.
+## Regolamento e priorità delle fonti
+
+Le regole finali di riferimento si trovano nelle 22 immagini di `rulebook2.zip` fornite dal game designer; `document.pdf` è una versione precedente e non può sostituirle. I materiali originali non vengono pubblicati in repository senza una decisione su storage e permessi.
+
+**Decisione mappa #5:** mantenere i movimenti sul **grafo di strade originale**, non su esagoni. Le posizioni dei 30 spazi grigi sono riprese dalla plancia; il Municipio resta al centro. La topologia e le adiacenze sono documentate in [board-topology-v1](docs/game-design/board-topology-v1.md); alcuni archi derivano dalla lettura dell'immagine e richiedono verifica prima dell'attivazione di match reali.
+
+La mappa non assegna attività reali: la scelta delle carte, i turni, l'economia, il PvP e la gestione delle sessioni devono ancora essere sviluppati nelle issue successive. Lo shuffle seeded serve solo per 30 carte **già selezionate**.
 
 ## Governance e roadmap
 
-Ogni feature/bug passa da una issue a un branch e a una PR con test. La foundation è tracciata in [#1](https://github.com/KeyserDSoze/Game.Edonism/issues/1). Il registro sintetico è in `docs/engineering/development-ledger.md`; la guida di lavoro è `AGENTS.md`.
-
-Regole, modelli e grafica definitiva saranno aggiunti quando disponibile il materiale originale di Edonism. Non interpretare la mappa demo come contratto di gioco.
+Ogni feature/bug passa da GitHub Issue, branch e PR con test. `AGENTS.md` è la guida di lavoro, `docs/engineering/development-ledger.md` tiene lo stato sintetico. Issue #5 tratta il board; #6 il match engine; #7 carte/poteri; #8 politica/PvP; #9 asset.

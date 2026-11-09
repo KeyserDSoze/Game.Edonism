@@ -23,3 +23,8 @@ Edonism is a browser city board game with hexagonal land plots, businesses and c
 - Future big maps: instanced meshes, asset LOD and culling; measure before optimizing.
 - Multiplayer synchronization and anti-cheat: wait for canonical game design.
 - Real characters/assets, persistence, auth, observability and deployments are out of scope of issue #1.
+
+
+## Update — issue #5 (2026-11-09)
+
+The game designer approved **preserving the original street topology and movement rules** when rebuilding the city as 3D. The original axial hex city was a throwaway visualization and has been removed. See [ADR 0002](0002-original-street-board.md) and [board topology](../game-design/board-topology-v1.md). The 30 activity lots and seven streets, including Main Square/City Hall, now have a single versioned geometry definition. The source graph (not distance in Three.js) is the movement adjacency reference.

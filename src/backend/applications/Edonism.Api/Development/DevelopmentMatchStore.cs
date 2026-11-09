@@ -58,6 +58,17 @@ public sealed class DevelopmentMatchStore
             Guid.NewGuid(), BoardCatalog.LoadDefault(),
             playerIds, characters, activities, seed));
 
+    public DevMatchCreated CreateWithFullDeck(
+        IReadOnlyList<string> playerIds,
+        IReadOnlyCollection<CharacterCardDefinition> characters,
+        IReadOnlyCollection<ActivityCardId> activities,
+        IReadOnlyCollection<string> actionCardIds,
+        string electionDayCardId,
+        int seed) =>
+        Register(GameMatch.CreateFromTrustedFullDeckSetup(
+            Guid.NewGuid(), BoardCatalog.LoadDefault(), playerIds,
+            characters, activities, actionCardIds, electionDayCardId, seed));
+
     private DevMatchCreated Register(GameMatch match)
     {
         var secrets = new Dictionary<string, byte[]>(StringComparer.Ordinal);
@@ -84,6 +95,20 @@ public sealed class DevelopmentMatchStore
             if (entry.ResolveActor(token) is null) return false;
             snapshot = entry.Match.Snapshot();
             return true;
+        }
+    }
+
+    public bool TryReadHand(
+        Guid matchId, string? token, out MatchPrivateHandSnapshot? hand)
+    {
+        hand = null;
+        if (!_matches.TryGetValue(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            var actorId = entry.ResolveActor(token);
+            if (actorId is null) return false;
+            hand = entry.Match.PrivateHandForActor(actorId);
+            return hand is not null;
         }
     }
 

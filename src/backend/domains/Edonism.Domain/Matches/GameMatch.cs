@@ -79,13 +79,16 @@ public sealed class GameMatch
     private readonly List<MatchAuditEvent> _events = [];
     private readonly IReadOnlyList<PlacedActivityCard> _boardActivities;
     private readonly IReadOnlyList<MatchAssignedCharacterSnapshot> _assignedCharacters;
+    // Server-only private cards and remaining deck. Never passed into Snapshot().
+    private readonly InitialActionDeal? _initialActionDeal;
 
     private int _turnIndex;
 
     private GameMatch(Guid matchId, BoardDefinition board, List<MatchPlayerSnapshot> players,
         List<MatchControlledActivitySnapshot> controlledActivities,
         IReadOnlyList<PlacedActivityCard> boardActivities,
-        IReadOnlyList<MatchAssignedCharacterSnapshot> assignedCharacters)
+        IReadOnlyList<MatchAssignedCharacterSnapshot> assignedCharacters,
+        InitialActionDeal? initialActionDeal)
     {
         MatchId = matchId;
         _board = board;
@@ -93,6 +96,7 @@ public sealed class GameMatch
         _controlledActivities = controlledActivities;
         _boardActivities = Array.AsReadOnly(boardActivities.ToArray());
         _assignedCharacters = Array.AsReadOnly(assignedCharacters.ToArray());
+        _initialActionDeal = initialActionDeal;
         _turnOrder = players.Select(p => p.PlayerId).ToList();
         _events.Add(new MatchAuditEvent(0, 1, "match-created", "system", null, null));
     }
@@ -174,12 +178,64 @@ public sealed class GameMatch
         return CreateFromPreconfiguredSlots(matchId, board, placedPlayers, setup.Activities, assigned);
     }
 
+    /// <summary>
+    /// A Development fixture with all three source-derived printed deck counts:
+    /// 23 characters, 46 activities and 58 action cards + Election Day.
+    /// Action card effects/turn usage remain unimplemented (#6/#7).
+    /// </summary>
+    public static GameMatch CreateFromTrustedFullDeckSetup(
+        Guid matchId,
+        BoardDefinition board,
+        IReadOnlyList<string> playerIds,
+        IReadOnlyCollection<CharacterCardDefinition> characters,
+        IReadOnlyCollection<ActivityCardId> activities,
+        IReadOnlyCollection<string> actionCardIds,
+        string electionDayCardId,
+        int seed)
+    {
+        // This shuffles and stores private hands only on the server. Keep a
+        // distinct seed stream from character and activity composition.
+        var deal = InitialActionDeckComposer.Deal(
+            actionCardIds, electionDayCardId, playerIds,
+            seed ^ unchecked((int)0x51D7348D));
+        var draw = CharacterSetupComposer.Draw(characters, activities, playerIds, seed);
+        var activitySeed = seed ^ unchecked((int)0x9E3779B9);
+        var setup = ActivitySetupComposer.Compose(board, activities,
+            draw.Characters.Select(c => c.StartingActivityCardId).ToArray(), activitySeed);
+        var slotsByCard = setup.Activities.ToDictionary(c => c.CardId, StringComparer.Ordinal);
+        var placedPlayers = draw.Characters.Select(c =>
+            new MatchParticipantSeed(c.PlayerId, slotsByCard[c.StartingActivityCardId].SlotId))
+            .ToArray();
+        var assigned = draw.Characters.Select(c => new MatchAssignedCharacterSnapshot(
+            c.PlayerId, c.CharacterId, c.StartingActivityCardId, c.PrintedInitialHearts))
+            .ToArray();
+        return CreateFromPreconfiguredSlots(matchId, board, placedPlayers,
+            setup.Activities, assigned, deal);
+    }
+
+    /// <summary>
+    /// An actor-scoped projection. API handlers must derive the actor from a
+    /// validated credential, never from a player ID supplied in a request.
+    /// </summary>
+    public MatchPrivateHandSnapshot? PrivateHandForActor(string actorId)
+    {
+        if (string.IsNullOrWhiteSpace(actorId) || _initialActionDeal is null)
+            return null;
+
+        var hand = _initialActionDeal.Hands.FirstOrDefault(h => h.PlayerId == actorId);
+        return hand is null
+            ? null
+            : new MatchPrivateHandSnapshot(MatchId, actorId,
+                Array.AsReadOnly(hand.CardIds.ToArray()));
+    }
+
     private static GameMatch CreateFromPreconfiguredSlots(
         Guid matchId,
         BoardDefinition board,
         IReadOnlyList<MatchParticipantSeed> participants,
         IReadOnlyList<PlacedActivityCard> boardActivities,
-        IReadOnlyList<MatchAssignedCharacterSnapshot>? assignedCharacters = null)
+        IReadOnlyList<MatchAssignedCharacterSnapshot>? assignedCharacters = null,
+        InitialActionDeal? initialActionDeal = null)
     {
         ArgumentNullException.ThrowIfNull(board);
         ArgumentNullException.ThrowIfNull(participants);
@@ -228,7 +284,7 @@ public sealed class GameMatch
                 HenchmanPosture.Standing)).ToList();
 
         return new GameMatch(matchId, board, players, controlledActivities,
-            boardActivities, assignedCharacters ?? []);
+            boardActivities, assignedCharacters ?? [], initialActionDeal);
     }
 
     public MatchSnapshot Snapshot() => new(

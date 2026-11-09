@@ -13,6 +13,13 @@ public sealed record CreateCharacterDevelopmentMatchRequest(
     IReadOnlyList<CharacterCardDefinition> Characters,
     IReadOnlyList<ActivityCardId> AvailableActivities,
     int Seed);
+public sealed record CreateFullDevelopmentMatchRequest(
+    IReadOnlyList<string> PlayerIds,
+    IReadOnlyList<CharacterCardDefinition> Characters,
+    IReadOnlyList<ActivityCardId> AvailableActivities,
+    IReadOnlyList<string> ActionCardIds,
+    string ElectionDayCardId,
+    int Seed);
 public sealed record DevelopmentFreeMoveRequest(string DestinationStreetId, long ExpectedRevision);
 public sealed record DevelopmentEndTurnRequest(long ExpectedRevision);
 
@@ -71,6 +78,32 @@ public static class DevelopmentMatchEndpoints
             {
                 return Results.BadRequest(new { code = "invalid_character_setup" });
             }
+        });
+
+        // Rulebook2 pp.3-4: 58 actions plus one Election Day, dealt 4 per player.
+        // Neither player hands nor the draw pile appear in the public response.
+        group.MapPost("/from-full-deck", (
+            CreateFullDevelopmentMatchRequest request, DevelopmentMatchStore store) =>
+        {
+            try
+            {
+                var created = store.CreateWithFullDeck(
+                    request.PlayerIds, request.Characters, request.AvailableActivities,
+                    request.ActionCardIds, request.ElectionDayCardId, request.Seed);
+                return Results.Created($"/api/dev/matches/{created.MatchId}", created);
+            }
+            catch (ArgumentException)
+            {
+                return Results.BadRequest(new { code = "invalid_full_deck_setup" });
+            }
+        });
+
+        group.MapGet("/{matchId:guid}/hand", (Guid matchId, HttpContext context,
+            DevelopmentMatchStore store) =>
+        {
+            return store.TryReadHand(matchId, Token(context), out var hand)
+                ? Results.Ok(hand)
+                : Results.NotFound(new { code = "hand_not_found" });
         });
 
         group.MapGet("/{matchId:guid}", (Guid matchId, HttpContext context, DevelopmentMatchStore store) =>

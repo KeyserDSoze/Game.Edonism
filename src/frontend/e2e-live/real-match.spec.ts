@@ -527,3 +527,72 @@ test("real .NET eight-seat match supports private join and all sequential turns"
     await guestContext.close();
   }
 });
+
+test("real .NET: joined browser rotates only its own Development seat token", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const oldBob = tokenFor(created, "bob");
+  const aliceToken = tokenFor(created, "alice");
+  const api = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`;
+  const guestContext = await browser.newContext();
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(created.matchId);
+    await guest.getByTestId("dev-join-token").fill(oldBob);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-seat-bob")).toBeVisible();
+    await expect(guest.getByTestId("dev-seat-alice")).toHaveCount(0);
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    const oldHand = await guest.getByTestId("dev-hand").locator("li").allTextContents();
+
+    const rotation = guest.waitForResponse((res) =>
+      new URL(res.url()).pathname.endsWith("/rotate-token") && res.request().method() === "POST");
+    await guest.getByTestId("dev-rotate-token").click();
+    const tokenResponse = await rotation;
+    expect(tokenResponse.status()).toBe(200);
+    const newCredential = await tokenResponse.json() as { playerId: string; token: string };
+    expect(newCredential.playerId).toBe("bob");
+    expect(newCredential.token).toMatch(/^[A-F0-9]{64}$/);
+    expect(newCredential.token).not.toBe(oldBob);
+    await expect(guest.getByTestId("dev-rotation-notice")).toBeVisible();
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    expect(await guest.getByTestId("dev-hand").locator("li").allTextContents()).toEqual(oldHand);
+
+    for (const url of [api, `${api}/hand`, `${api}/audit`]) {
+      const stale = await request.get(url, { headers: auth(oldBob) });
+      expect(stale.status()).toBe(404);
+    }
+    const staleTurn = await request.post(`${api}/end-turn`, {
+      headers: auth(oldBob), data: { expectedRevision: 0 },
+    });
+    expect(staleTurn.status()).toBe(404);
+    const newRead = await request.get(api, { headers: auth(newCredential.token) });
+    expect(newRead.status()).toBe(200);
+    const before = await newRead.json() as PublicMatch;
+    expect(before.revision).toBe(0);
+    expect(before.events).toHaveLength(1);
+    const aliceRead = await request.get(api, { headers: auth(aliceToken) });
+    expect(aliceRead.status()).toBe(200);
+
+    await page.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-active-player")).toHaveText("bob", { timeout: 12000 });
+    await guest.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-revision")).toHaveText("2");
+    const final = await request.get(api, { headers: auth(newCredential.token) });
+    const state = await final.json() as PublicMatch;
+    expect(state.phase).toBe(1);
+    expect(state.revision).toBe(2);
+    expect(state.events.map((e) => e.kind)).toEqual([
+      "match-created", "turn-ended", "round-settlement-pending",
+    ]);
+    const storage = await guest.evaluate(() => ({
+      local: Object.values(localStorage), session: Object.values(sessionStorage), url: location.href,
+    }));
+    expect(JSON.stringify(storage)).not.toContain(newCredential.token);
+    expect(await guest.locator("body").innerText()).not.toContain(newCredential.token);
+  } finally {
+    await guestContext.close();
+  }
+});

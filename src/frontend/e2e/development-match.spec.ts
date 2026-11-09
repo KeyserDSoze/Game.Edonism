@@ -29,6 +29,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let phase = 0;
   let active: Seat | null = "alice";
   let conflictRaised = false;
+  let rotationSequence = 0;
   const auditEvents: Array<{
     revision: number; round: number; kind: string; actorId: string;
     fromStreetId: string | null; toStreetId: string | null;
@@ -129,6 +130,21 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           cardIds: Array.from({ length: 4 }, (_, index) =>
             `demo:action:${String((seat === "alice" ? 1 : 21 + (seats.indexOf(seat) - 1) * 4) + index).padStart(2, "0")}`),
         },
+      });
+    }
+
+
+    if (path.endsWith("/rotate-token") && request.method() === "POST") {
+      rotationSequence++;
+      const fresh = "F".repeat(62)
+        + (seats.indexOf(seat) + 1).toString(16).toUpperCase()
+        + (rotationSequence % 16).toString(16).toUpperCase();
+      tokenToSeat.delete(token!);
+      tokenToSeat.set(fresh, seat);
+      return route.fulfill({
+        status: 200,
+        headers: { "Cache-Control": "no-store" },
+        json: { playerId: seat, token: fresh },
       });
     }
 
@@ -646,5 +662,51 @@ test("eight Development seats: quota-safe fixture, private actor switching, mobi
     expect(JSON.stringify(storage)).not.toContain(token);
     expect(await page.locator("body").innerText()).not.toContain(token);
   }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+});
+
+test("Development seat rotation invalidates old capability without touching match state", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-session")).toBeVisible();
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  const rotation = page.waitForResponse((res) => new URL(res.url()).pathname.endsWith("/rotate-token"));
+  await expect(page.getByTestId("dev-rotate-token")).toHaveText("Rotate bob token");
+  await page.getByTestId("dev-rotate-token").click();
+  const response = await rotation;
+  expect(response.status()).toBe(200);
+  expect(response.headers()["cache-control"]).toBe("no-store");
+  const changed = await response.json() as { playerId: string; token: string };
+  expect(changed.playerId).toBe("bob");
+  expect(changed.token).toMatch(/^[A-F0-9]{64}$/);
+  expect(changed.token).not.toBe("b".repeat(64));
+
+  await expect(page.getByTestId("dev-rotation-notice")).toContainText("Previous copies no longer work");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-active-player")).toHaveText("alice");
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-hand")).not.toContainText("demo:action:01");
+  expect(observedHeaders.some(({ path, token }) =>
+    path.endsWith("/hand") && token === changed.token)).toBe(true);
+
+  const access = await page.evaluate(async ({ fresh }) => {
+    const old = await fetch("/api/dev/matches/00000000-0000-0000-0000-000000000020/hand", {
+      headers: { "X-Edonism-Dev-Token": "b".repeat(64) },
+    });
+    const next = await fetch("/api/dev/matches/00000000-0000-0000-0000-000000000020/hand", {
+      headers: { "X-Edonism-Dev-Token": fresh },
+    });
+    return { stale: old.status, valid: next.status };
+  }, { fresh: changed.token });
+  expect(access).toEqual({ stale: 404, valid: 200 });
+  const storage = await page.evaluate(() => ({
+    local: Object.values(localStorage), session: Object.values(sessionStorage), url: location.href,
+  }));
+  expect(JSON.stringify(storage)).not.toContain(changed.token);
+  expect(await page.locator("body").innerText()).not.toContain(changed.token);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
 });

@@ -44,3 +44,7 @@ La risposta include la normale coppia `matchId`/snapshot e le credenziali effime
 Test xUnit: catalogo/controllo delle 23 carte, corrispondenza carta→attività, valori vita, riproducibilità del sorteggio, duplicati e overquota impossibili, avvio partita, posizione e proprietà, compatibilità fixture precedenti, immutabilità, API dev/prod e lettura solo con token. Playwright continua a coprire la scena React 3D come regressione.
 
 **Bloccanti per partite vere:** approvazione delle ambiguità **#4/R-03 e R-10**, importazione dei **23 personaggi originali** e delle 46 carte attività in #7/#9, sicurezza #13; #6 rimane aperta per fasi, azioni, salario effettivo ed elezioni. Non dichiarare il gioco completo.
+
+## Risultato CI
+
+[Workflow `main` #42678161809](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42678161809), commit `8298dbcd`: **109/109 xUnit**, **5/5 Playwright**, build .NET/TypeScript riuscite, 0 warning/errori .NET. Le prove API verificano che la route `from-characters` non esista in Production e che la vista della partita in Development sia accessibile solo con token.

@@ -26,7 +26,8 @@ public sealed record MatchPlayerSnapshot(
     int DiplomacyTokens,
     int HenchmenTotal,
     int HenchmenAvailable,
-    bool FreeMoveUsed);
+    bool FreeMoveUsed,
+    int? Hearts = null);
 
 public sealed record MatchAuditEvent(
     long Revision,
@@ -49,7 +50,12 @@ public sealed record MatchSnapshot(
     IReadOnlyList<MatchControlledActivitySnapshot> ControlledActivities,
     IReadOnlyList<MatchGrossSalaryQuote> GrossSalaryQuotes,
     IReadOnlyList<PlacedActivityCard> BoardActivities,
+    IReadOnlyList<MatchAssignedCharacterSnapshot> AssignedCharacters,
     IReadOnlyList<MatchAuditEvent> Events);
+
+/// <summary>Public assigned character metadata, not a faction or hidden action hand.</summary>
+public sealed record MatchAssignedCharacterSnapshot(
+    string PlayerId, string CharacterId, string StartingActivityCardId, int PrintedInitialHearts);
 
 public sealed record MatchCommandResult(bool Accepted, string Code, MatchSnapshot State);
 
@@ -72,18 +78,21 @@ public sealed class GameMatch
     private readonly List<string> _turnOrder;
     private readonly List<MatchAuditEvent> _events = [];
     private readonly IReadOnlyList<PlacedActivityCard> _boardActivities;
+    private readonly IReadOnlyList<MatchAssignedCharacterSnapshot> _assignedCharacters;
 
     private int _turnIndex;
 
     private GameMatch(Guid matchId, BoardDefinition board, List<MatchPlayerSnapshot> players,
         List<MatchControlledActivitySnapshot> controlledActivities,
-        IReadOnlyList<PlacedActivityCard> boardActivities)
+        IReadOnlyList<PlacedActivityCard> boardActivities,
+        IReadOnlyList<MatchAssignedCharacterSnapshot> assignedCharacters)
     {
         MatchId = matchId;
         _board = board;
         _players = players;
         _controlledActivities = controlledActivities;
         _boardActivities = Array.AsReadOnly(boardActivities.ToArray());
+        _assignedCharacters = Array.AsReadOnly(assignedCharacters.ToArray());
         _turnOrder = players.Select(p => p.PlayerId).ToList();
         _events.Add(new MatchAuditEvent(0, 1, "match-created", "system", null, null));
     }
@@ -134,11 +143,43 @@ public sealed class GameMatch
         return CreateFromPreconfiguredSlots(matchId, board, placedPlayers, setup.Activities);
     }
 
+    /// <summary>
+    /// Full Development-only character draw from the 23 typed character records.
+    /// Starting lots and visible initial hearts are derived server-side.
+    /// Rulebook2 pp. 3-4; no secret factions are assigned.
+    /// </summary>
+    public static GameMatch CreateFromTrustedCharacterCatalog(
+        Guid matchId,
+        BoardDefinition board,
+        IReadOnlyList<string> playerIds,
+        IReadOnlyCollection<CharacterCardDefinition> characters,
+        IReadOnlyCollection<ActivityCardId> activities,
+        int seed)
+    {
+        ArgumentNullException.ThrowIfNull(board);
+        var draw = CharacterSetupComposer.Draw(characters, activities, playerIds, seed);
+
+        // Separate deterministic streams for character draw and activity setup.
+        var activitySeed = seed ^ unchecked((int)0x9E3779B9);
+        var cardSeeds = draw.Characters.Select(c =>
+            new MatchParticipantCardSeed(c.PlayerId, c.StartingActivityCardId)).ToArray();
+        var setup = ActivitySetupComposer.Compose(board, activities,
+            cardSeeds.Select(c => c.StartingCardId).ToArray(), activitySeed);
+        var slotsByCard = setup.Activities.ToDictionary(c => c.CardId, StringComparer.Ordinal);
+        var placedPlayers = cardSeeds.Select(c =>
+            new MatchParticipantSeed(c.PlayerId, slotsByCard[c.StartingCardId].SlotId)).ToArray();
+        var assigned = draw.Characters.Select(c => new MatchAssignedCharacterSnapshot(
+            c.PlayerId, c.CharacterId, c.StartingActivityCardId, c.PrintedInitialHearts)).ToArray();
+
+        return CreateFromPreconfiguredSlots(matchId, board, placedPlayers, setup.Activities, assigned);
+    }
+
     private static GameMatch CreateFromPreconfiguredSlots(
         Guid matchId,
         BoardDefinition board,
         IReadOnlyList<MatchParticipantSeed> participants,
-        IReadOnlyList<PlacedActivityCard> boardActivities)
+        IReadOnlyList<PlacedActivityCard> boardActivities,
+        IReadOnlyList<MatchAssignedCharacterSnapshot>? assignedCharacters = null)
     {
         ArgumentNullException.ThrowIfNull(board);
         ArgumentNullException.ThrowIfNull(participants);
@@ -166,6 +207,8 @@ public sealed class GameMatch
             throw new ArgumentException("Every starting slot must exist on the printed board.", nameof(participants));
         }
 
+        var assignedByPlayer = (assignedCharacters ?? [])
+            .ToDictionary(c => c.PlayerId, StringComparer.Ordinal);
         var players = participants.Select(p => new MatchPlayerSnapshot(
             p.PlayerId,
             p.StartingSlotId,
@@ -174,7 +217,9 @@ public sealed class GameMatch
             InitialDiplomacyTokens,
             TotalHenchmen,
             HenchmenAvailable: TotalHenchmen - 1,
-            FreeMoveUsed: false)).ToList();
+            FreeMoveUsed: false,
+            Hearts: assignedByPlayer.TryGetValue(p.PlayerId, out var assigned)
+                ? assigned.PrintedInitialHearts : null)).ToList();
 
         // Rulebook2 p.4: one henchman is placed on the player's initial activity.
         // A trusted fixture identifies the lot, but does not claim to know the card art/deck.
@@ -182,7 +227,8 @@ public sealed class GameMatch
             new MatchControlledActivitySnapshot(p.StartingSlotId, p.PlayerId,
                 HenchmanPosture.Standing)).ToList();
 
-        return new GameMatch(matchId, board, players, controlledActivities, boardActivities);
+        return new GameMatch(matchId, board, players, controlledActivities,
+            boardActivities, assignedCharacters ?? []);
     }
 
     public MatchSnapshot Snapshot() => new(
@@ -198,6 +244,7 @@ public sealed class GameMatch
         Array.AsReadOnly(_controlledActivities.ToArray()),
         GrossSalaryRules.Quote(_board, _players, _controlledActivities),
         _boardActivities,
+        _assignedCharacters,
         Array.AsReadOnly(_events.ToArray()));
 
     public MatchCommandResult TryFreeMove(string actorId, string destinationStreetId, long expectedRevision)

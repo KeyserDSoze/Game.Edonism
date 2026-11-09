@@ -49,6 +49,15 @@ public sealed class DevelopmentMatchStore
         Register(GameMatch.CreateFromTrustedCardSetup(
             Guid.NewGuid(), BoardCatalog.LoadDefault(), participants, catalog, seed));
 
+    public DevMatchCreated CreateWithCharacters(
+        IReadOnlyList<string> playerIds,
+        IReadOnlyCollection<CharacterCardDefinition> characters,
+        IReadOnlyCollection<ActivityCardId> activities,
+        int seed) =>
+        Register(GameMatch.CreateFromTrustedCharacterCatalog(
+            Guid.NewGuid(), BoardCatalog.LoadDefault(),
+            playerIds, characters, activities, seed));
+
     private DevMatchCreated Register(GameMatch match)
     {
         var secrets = new Dictionary<string, byte[]>(StringComparer.Ordinal);

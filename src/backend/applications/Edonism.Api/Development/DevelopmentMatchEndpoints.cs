@@ -8,6 +8,11 @@ public sealed record CreateCardDevelopmentMatchRequest(
     IReadOnlyList<MatchParticipantCardSeed> Players,
     IReadOnlyList<ActivityCardId> AvailableActivities,
     int Seed);
+public sealed record CreateCharacterDevelopmentMatchRequest(
+    IReadOnlyList<string> PlayerIds,
+    IReadOnlyList<CharacterCardDefinition> Characters,
+    IReadOnlyList<ActivityCardId> AvailableActivities,
+    int Seed);
 public sealed record DevelopmentFreeMoveRequest(string DestinationStreetId, long ExpectedRevision);
 public sealed record DevelopmentEndTurnRequest(long ExpectedRevision);
 
@@ -48,6 +53,23 @@ public static class DevelopmentMatchEndpoints
             catch (ArgumentException)
             {
                 return Results.BadRequest(new { code = "invalid_card_setup" });
+            }
+        });
+
+        // The caller supplies synthetic Development catalog metadata, not
+        // the drawn character or any player location. The server draws both.
+        group.MapPost("/from-characters", (
+            CreateCharacterDevelopmentMatchRequest request, DevelopmentMatchStore store) =>
+        {
+            try
+            {
+                var created = store.CreateWithCharacters(
+                    request.PlayerIds, request.Characters, request.AvailableActivities, request.Seed);
+                return Results.Created($"/api/dev/matches/{created.MatchId}", created);
+            }
+            catch (ArgumentException)
+            {
+                return Results.BadRequest(new { code = "invalid_character_setup" });
             }
         });
 

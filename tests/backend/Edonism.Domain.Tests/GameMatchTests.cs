@@ -59,7 +59,11 @@ public sealed class GameMatchTests
         Assert.Equal(0, waiting.Revision);
         Assert.False(waiting.CanEndTurn);
         Assert.Empty(waiting.FreeMoveStreetIds);
-        Assert.Equal(before, match.Snapshot());
+        var after = match.Snapshot();
+        Assert.Equal(before.Revision, after.Revision);
+        Assert.Equal(before.ActivePlayerId, after.ActivePlayerId);
+        Assert.Equal(before.Events, after.Events);
+        Assert.Equal(before.Players, after.Players);
     }
 
     [Fact]

@@ -92,3 +92,7 @@ L'endpoint `POST /api/dev/matches/from-cards` prende un catalogo di **46 attivit
 ## Personaggi visibili (Development, #17)
 
 La nuova route `POST /api/dev/matches/from-characters` permette di verificare il **sorteggio di 23 personaggi** da un catalogo tipizzato, con un personaggio per giocatore, cuori stampati e attività iniziale obbligatoria. Il backend collega la starting card al lotto della plancia e mostra la vita nello snapshot, senza inventare i dati delle carte vere. Gli esempi di carattere e gli ID in test sono **sintetici**; il catalogo originale è ancora da importare e le partite di produzione rimangono disabilitate. Vedi [match-engine-slice-4](docs/engineering/match-engine-slice-4.md).
+
+## Mani azione private nella fixture Development (#18)
+
+La regola stampata prevede di mescolare **58 carte azione più Giorno dell'elezione** e distribuirne **4 a giocatore**. Il backend può ora avviare `POST /api/dev/matches/from-full-deck` con un mazzo di ID tipizzati di prova, le 23 definizioni personaggio e le 46 attività; il mix è deterministico con seed. **Le mani e la pila non vengono serializzate nel match pubblico.** Il giocatore le legge solo da `GET /api/dev/matches/{id}/hand` con il proprio `X-Edonism-Dev-Token`. È un prototipo locale, non login Production: niente gioco/scarto azioni, poteri o elezioni. Consulta [match-engine-slice-5](docs/engineering/match-engine-slice-5.md) e la [issue #19](https://github.com/KeyserDSoze/Game.Edonism/issues/19) per l'acquisizione dei file originali.

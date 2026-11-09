@@ -1,0 +1,22 @@
+# Node
+node_modules/
+dist/
+.vite/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# .NET
+bin/
+obj/
+TestResults/
+*.user
+
+# Editor, environment
+.vscode/
+.idea/
+.env
+.env.*
+!.env.example
+.DS_Store

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111d22" />
+    <meta name="description" content="Edonism — la tua città, le tue storie. Anteprima tecnica della città 3D." />
+    <title>Edonism — City Preview</title>
+    <script>
+      (function () {
+        try {
+          var chosen = localStorage.getItem("edonism-theme") || "system";
+          var dark = chosen === "dark" || (chosen === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.classList.toggle("dark", dark);
+        } catch (error) { document.documentElement.classList.toggle("dark", matchMedia("(prefers-color-scheme: dark)").matches); }
+      }());
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

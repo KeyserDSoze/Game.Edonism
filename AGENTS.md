@@ -23,6 +23,7 @@
 - i18next Italian and English, no new hard-coded UI strings.
 - Accessible equivalents for important canvas interactions: controls outside WebGL are keyboard-operable.
 - No externally owned/third-party art in final assets. Code-generated geometric placeholders are acceptable.
+- The Development-only match laboratory is under `src/features/matches` (#20), hidden by `import.meta.env.DEV`. Do not expose its creator-issued all-seat tokens or synthetic catalog through Production, URLs or localStorage; real PvP authentication belongs to #13.
 - Test fallback and narrow screens, avoid requiring WebGL for critical interactions.
 
 ## Backend conventions

@@ -21,4 +21,4 @@ GitHub Issues are the detailed source of truth. Work is committed directly to `m
 | [#8](https://github.com/KeyserDSoze/Game.Edonism/issues/8) | TBD | PvP factions, mayor, corruption, victory | Planned | Requires #6 |
 | [#9](https://github.com/KeyserDSoze/Game.Edonism/issues/9) | TBD | Original art and card assets | Planned | Require individual assets and publication approval |
 
-Next: acquire verified original 46+23+58+Election-Day card files in #19 (#7/#9); clarify #4/R-03/R-07/R-09/R-10 before full #6 rounds/card actions. #13 owns Production identity/storage. #13 owns production identity and persistence. Development fixture routes stay unavailable in Production.
+Next: verify #20 frontend CI and browser protocol tests, then acquire official card assets in #19 (#7/#9), clarify #4/R-03/R-07/R-09/R-10 before full #6 rounds. #13 owns Production identity/storage. Development fixture routes remain unavailable in Production.

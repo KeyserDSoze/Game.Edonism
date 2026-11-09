@@ -96,3 +96,9 @@ La nuova route `POST /api/dev/matches/from-characters` permette di verificare il
 ## Mani azione private nella fixture Development (#18)
 
 La regola stampata prevede di mescolare **58 carte azione più Giorno dell'elezione** e distribuirne **4 a giocatore**. Il backend può ora avviare `POST /api/dev/matches/from-full-deck` con un mazzo di ID tipizzati di prova, le 23 definizioni personaggio e le 46 attività; il mix è deterministico con seed. **Le mani e la pila non vengono serializzate nel match pubblico.** Il giocatore le legge solo da `GET /api/dev/matches/{id}/hand` con il proprio `X-Edonism-Dev-Token`. È un prototipo locale, non login Production: niente gioco/scarto azioni, poteri o elezioni. Consulta [match-engine-slice-5](docs/engineering/match-engine-slice-5.md) e la [issue #19](https://github.com/KeyserDSoze/Game.Edonism/issues/19) per l'acquisizione dei file originali.
+
+## Laboratorio della partita nel browser (solo Development, #20)
+
+La pagina React include ora, **solo quando Vite gira in Development**, un pannello con due posti di prova, creazione di una fixture seeded, movimenti su strade adiacenti validati dal backend, cambio turno e lettura della propria mano con token. Le carte della demo sono dati **sintetici**, non i materiali originali.
+
+Avviare l'API con `ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://127.0.0.1:5080 dotnet run --no-launch-profile --project src/backend/applications/Edonism.Api`, poi `cd src/frontend && npm install && npm run dev`; aprire `http://localhost:5173`. Il proxy Vite inoltra `/api/dev` a porta `5080`. I token della fixture non vengono salvati in storage. [Guida e limiti](docs/engineering/match-ui-dev-bridge.md).

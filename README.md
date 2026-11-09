@@ -80,3 +80,7 @@ Ogni feature/bug passa da GitHub Issue, branch e PR con test. `AGENTS.md` è la 
 La prima verticale del game engine è documentata in [match-engine-slice-1](docs/engineering/match-engine-slice-1.md). L'API di prova si attiva **soltanto** con `ASPNETCORE_ENVIRONMENT=Development` e non è destinata a Internet: permette di creare un fixture con due giocatori e di effettuare un movimento gratuito per turno usando token differenti. Dopo l'ultimo turno il round resta in attesa di risoluzione, perché salario/carte/elezioni non sono ancora implementati.
 
 Le route `/api/dev/matches` non sono disponibili in Production. Il frontend attuale mostra la plancia statica; in futuro useremo l'autenticazione reale e la persistenza per collegare il gioco al server (#13).
+
+## Salario lordo e controllo iniziale delle attività
+
+La prima attività di ogni **fixture** di match Development è controllata dal relativo giocatore, con uno scagnozzo in piedi (15 ancora disponibili). Gli snapshot di `GET /api/dev/matches/{id}` includono `controlledActivities` e `grossSalaryQuotes`: il salario **lordo** è di **2 atoms base + 1 atom per attività controllata con scagnozzo in piedi**. Non è un accredito: saldo, stipendio netto, sindaco, tasse e carte restano da implementare e validare. Vedi [tranche #14](docs/engineering/match-engine-slice-2.md), la parent [#6](https://github.com/KeyserDSoze/Game.Edonism/issues/6) e la conferma regole [#4](https://github.com/KeyserDSoze/Game.Edonism/issues/4).

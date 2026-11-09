@@ -105,7 +105,7 @@ public sealed class DevelopmentConditionalPollingEndpointTests
         Assert.NotEqual(etag, newerTag);
         using var newer = await Read(bob, id, newerTag);
         Assert.Equal(HttpStatusCode.NotModified, newer.StatusCode);
-        using var old = await Read(bob, id, "W/\"edonism-revision-0\\", W/\"irrelevant\\"");
+        using var old = await Read(bob, id, "W/\"edonism-revision-0\", W/\"irrelevant\"");
         Assert.Equal(HttpStatusCode.OK, old.StatusCode);
         using var noMatch = await Read(bob, Guid.NewGuid(), newerTag);
         Assert.Equal(HttpStatusCode.NotFound, noMatch.StatusCode);

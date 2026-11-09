@@ -34,3 +34,5 @@ Le richieste precedenti sono annullate su cambio partita/token, mentre gli handl
 - Playwright live: API ASP.NET Core reale, due browser isolati, tag scambiato fra due credenziali valide senza bypass autorizzazione, aggiornamento su fine turno di Alice e propagazione a Bob.
 
 **Non incluso:** websocket, cancellazione sessione su offline, giochi Production, distribuzione multi-processo, rate limiting Production, carte, tasse o passaggio al secondo round. Fare riferimento all'[issue #30](https://github.com/KeyserDSoze/Game.Edonism/issues/30), al [ledger](development-ledger.md) e ai risultati CI prima di dichiararla completata.
+
+**Evidenza CI del codice:** [run #42721078337](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42721078337) sul commit `ef698de`, 178 xUnit, 30 UI Playwright e 9 live Playwright, tutti i job verdi. Il codice resta Development-only; la #13 richiede comunque identity e storage Production.

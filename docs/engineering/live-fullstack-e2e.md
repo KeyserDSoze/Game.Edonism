@@ -51,3 +51,7 @@ I risultati del test sono verificati dalle risposte ASP.NET Core, **non** da un 
 ## Risultati
 
 [Prima CI del codice #42692382020](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42692382020): **131 xUnit**, **10 Playwright mocked/UI**, **3 Playwright live**, compilazioni .NET/React senza errori o warning .NET, tre job verdi. Link alla CI finale documentale nel commento di chiusura della [#21](https://github.com/KeyserDSoze/Game.Edonism/issues/21).
+
+## Ultima CI del blocco documentale
+
+[GitHub Actions #42693030133](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42693030133), commit `47bee18`: **131/131 xUnit + 10/10 Playwright UI + 3/3 Playwright live**, tre job **success**, build .NET 10 con 0 errori/warning. Questa esecuzione include le istruzioni di sviluppo e i riferimenti al flusso di prova integrato; la feature #21 è verificata e pronta alla chiusura.

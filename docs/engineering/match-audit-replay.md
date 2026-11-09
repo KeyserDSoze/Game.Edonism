@@ -39,3 +39,7 @@ L'ordine del round successivo proviene dal campo pubblico `proposedNextRoundOrde
 - **Playwright live:** browser React/Vite collegato all'API ASP.NET Core Development reale; verifica cronologia/ordine nel DOM contro `MatchSnapshot` ed endpoint di replay autenticato, senza mock HTTP.
 
 La CI completa deve superare i job xUnit, Playwright UI e Playwright live su `main` prima che #24 sia chiusa. La fonte normativa resta il regolamento stampato e le decisioni ancora da approvare sono tracciate nella #4. L'engine e il multiplayer Production restano nelle #6 e #13.
+
+## Verifica finale CI
+
+[GitHub Actions #42705247221](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42705247221) su commit `b1c9671`: `completed/success` per tutti e tre i job, **153/153 xUnit**, **20/20 Playwright UI**, **4/4 Playwright live** collegati all'API .NET reale. Build .NET 10 con 0 errori e 0 warning, TypeScript/Vite verde. Il nuovo audit non autorizza il secondo round, non convalida l'economia e non riabilita in Production le route Development.

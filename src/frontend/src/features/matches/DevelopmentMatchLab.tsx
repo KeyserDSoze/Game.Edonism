@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { streetById } from "@/features/city/board";
 import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
+import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
 
 type DemoCredential = Readonly<{ playerId: string; token: string }>;
 type DemoPlayer = Readonly<{
@@ -25,6 +26,9 @@ type DemoMatch = Readonly<{
   boardActivities: readonly PublicBoardActivity[];
   controlledActivities: readonly PublicControlledActivity[];
   grossSalaryQuotes: readonly PublicGrossSalaryQuote[];
+  turnOrder: readonly string[];
+  proposedNextRoundOrder: readonly string[];
+  events: readonly PublicMatchEvent[];
 }>;
 type DemoSession = Readonly<{
   matchId: string;
@@ -112,6 +116,10 @@ export function DevelopmentMatchLab({
   const isMyTurn = session?.state.phase === 0 && session.state.activePlayerId === actorId;
   const canMove = Boolean(player && isMyTurn && !player.freeMoveUsed && !busy);
   const adjacent = player ? (streetById(player.streetId)?.neighbors ?? []) : [];
+  const publicEvents = session
+    ? visiblePublicAuditEvents(session.state.events ?? [],
+        session.state.players.map((seat) => seat.playerId))
+    : [];
 
   function publishPublicPositions(state: DemoMatch | null) {
     onPublicState(state
@@ -358,6 +366,51 @@ export function DevelopmentMatchLab({
               ) : (
                 <p className="text-xs text-muted-foreground">{t("dev.handLoading")}</p>
               )}
+            </section>
+            <section
+              aria-label={t("dev.auditTitle")}
+              data-testid="dev-audit-panel"
+              className="space-y-3 rounded-xl border border-border p-3"
+            >
+              <p className="text-xs font-semibold">{t("dev.auditTitle")}</p>
+              <ol data-testid="dev-audit-list" className="max-h-44 space-y-2 overflow-y-auto">
+                {publicEvents.map((entry) => (
+                  <li key={entry.revision} data-testid={`dev-audit-event-${entry.revision}`}
+                    data-event-kind={entry.kind}
+                    className="flex items-start gap-2 text-xs">
+                    <span className="min-w-9 rounded bg-muted px-1 py-0.5 text-center font-mono text-muted-foreground">
+                      #{entry.revision}
+                    </span>
+                    <span>
+                      {entry.kind === "match-created"
+                        ? t("dev.auditCreated")
+                        : entry.kind === "free-move"
+                          ? t("dev.auditMove", {
+                              actor: entry.actorId,
+                              from: streetById(entry.fromStreetId!)?.name ?? entry.fromStreetId,
+                              to: streetById(entry.toStreetId!)?.name ?? entry.toStreetId,
+                            })
+                          : entry.kind === "turn-ended"
+                            ? t("dev.auditEnd", { actor: entry.actorId })
+                            : t("dev.auditPending", { actor: entry.actorId })}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+              <div className="border-t border-border pt-3">
+                <p className="mb-2 text-xs font-semibold">{t("dev.nextOrderPreview")}</p>
+                <ol data-testid="dev-next-order" className="flex flex-wrap gap-2 text-xs">
+                  {(session.state.proposedNextRoundOrder ?? []).map((id, index) => (
+                    <li key={id} className="rounded-md bg-muted px-2 py-1">
+                      <span className="mr-1 font-mono text-muted-foreground">{index + 1}.</span>
+                      {id}
+                    </li>
+                  ))}
+                </ol>
+                <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+                  {t("dev.nextOrderWarning")}
+                </p>
+              </div>
             </section>
             <p className="text-[11px] leading-5 text-muted-foreground">{t("dev.warning")}</p>
           </div>

@@ -30,7 +30,7 @@ Aprire **http://localhost:5173**. Vite indirizza le sole richieste `/api/dev` al
 5. Dopo il comando, **solo il risultato server** aggiorna la posizione nel pannello e la selezione della strada 3D. Dopo il movimento gratuito i pulsanti mossa sono disabilitati. Usare «Termina il turno».
 6. Passare al posto `bob` (solo per debugging: nella fixture locale il creator possiede entrambi i token), leggere la sua mano e compiere turno/movimento. Al termine il Domain va in `AwaitingRoundSettlement`. **Non** parte un secondo round perché le sue fasi non sono ancora approvate/implementate (#4/#6).
 
-I Pucciottini mesh nella scena restano **decorativi** e non indicano ancora posizioni dei veri giocatori. Il pannello aggiorna soltanto la selezione della strada per rispecchiare la posizione server.
+**Dalla #22:** quando esiste un match Development, i Pucciottini 3D indicano la **strada pubblica assegnata dal server** a ogni giocatore; i tre segnaposto decorativi rimangono soltanto prima della partita. La scena calcola posizioni di disegno da road rectangles canonici, senza interpretarle come coordinate del movimento. L'elenco accessibile delle posizioni rimane disponibile anche senza WebGL. La selezione di un posto o di una strada per esplorazione non sposta nessun giocatore. Se il server respinge un comando con 409, la scena torna allo stato recuperato dal GET autenticato.
 
 ## Autorità, privacy e errori
 

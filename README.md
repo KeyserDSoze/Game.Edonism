@@ -99,7 +99,7 @@ La regola stampata prevede di mescolare **58 carte azione più Giorno dell'elezi
 
 ## Laboratorio della partita nel browser (solo Development, #20)
 
-La pagina React include ora, **solo quando Vite gira in Development**, un pannello con due posti di prova, creazione di una fixture seeded, movimenti su strade adiacenti validati dal backend, cambio turno e lettura della propria mano con token. Le carte della demo sono dati **sintetici**, non i materiali originali.
+La pagina React include ora, **solo quando Vite gira in Development**, un pannello con due posti di prova, creazione di una fixture seeded, movimenti su strade adiacenti validati dal backend, cambio turno e lettura della propria mano con token. Le carte della demo sono dati **sintetici**, non i materiali originali. Dalla #22, anche i Pucciottini 3D rappresentano i giocatori nelle strade confermate dal backend, con una lista di posizioni accessibile anche senza WebGL. Senza match i personaggi rimangono decorativi.
 
 Avviare l'API con `ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://127.0.0.1:5080 dotnet run --no-launch-profile --project src/backend/applications/Edonism.Api`, poi `cd src/frontend && npm install && npm run dev`; aprire `http://localhost:5173`. Il proxy Vite inoltra `/api/dev` a porta `5080`. I token della fixture non vengono salvati in storage. [Guida e limiti](docs/engineering/match-ui-dev-bridge.md).
 
@@ -108,3 +108,9 @@ Avviare l'API con `ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://127
 Oltre agli xUnit (.NET) e ai Playwright di UI che usano risposte HTTP simulate, GitHub Actions ora esegue **3 Playwright live** contro l'API ASP.NET Core **reale** in Development. Controllano movimenti, turni, revisione server e privacy di due mani con token separati. Il nuovo job `Live React + .NET / Playwright` conserva i due job CI precedenti e si aggiunge ad essi.
 
 Per eseguire i live test locali avviare il backend su `127.0.0.1:5080` come indicato sopra, poi eseguire `cd src/frontend && npm run test:e2e:live`. Non avviare la fixture Development su host pubblici; non sostituisce autenticazione e storage Production. [Dettagli tecnici](docs/engineering/live-fullstack-e2e.md).
+
+## Posizioni dei Pucciottini nella città 3D (#22)
+
+Con una partita Development attiva la scena mostra una miniatura procedurale per **ogni giocatore** sulla geometria della sua strada reale. La posizione è ricavata solo da `players[].streetId` nello snapshot server, mai dalle coordinate/movimenti scelti dal client. Il giocatore di turno ha un anello evidenziato, gli altri conservano colori stabili, e quando condividono una strada sono disposti visivamente lungo il rettangolo stradale della plancia originale. Le posizioni esatte sul rettangolo sono **solo rendering**, non coordinate di gioco o nuove regole. Le strade sconosciute non generano segnaposto fittizi.
+
+L'elenco accessibile sotto il Canvas mostra identità, strada e turno corrente anche senza WebGL. I test mocked e i [test E2E con backend reale](docs/engineering/live-fullstack-e2e.md) verificano che le miniature seguano il server, non il cambio di posto locale, e che un comando respinto non provochi un movimento inventato. Dettagli: [player-markers](docs/engineering/player-markers.md). Le miniature originali rimangono parte della #9/#19.

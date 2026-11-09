@@ -363,3 +363,75 @@ test("real .NET Development audit verification matches the browser history and r
   expect(text).not.toContain("cardIds");
   expect(text).not.toContain("demo:action:");
 });
+
+test("two real isolated browsers join one .NET match and observe each other's turns", async ({ browser }) => {
+  const aliceContext = await browser.newContext();
+  const bobContext = await browser.newContext();
+  try {
+    const alice = await aliceContext.newPage();
+    const bob = await bobContext.newPage();
+    const created = await startRealMatch(alice);
+    const aliceToken = tokenFor(created, "alice");
+    const bobToken = tokenFor(created, "bob");
+    await bob.goto("/");
+    await bob.getByTestId("dev-join-id").fill(created.matchId);
+    await bob.getByTestId("dev-join-token").fill(bobToken);
+    await bob.getByTestId("dev-join").click();
+    await expect(bob.getByTestId("dev-session")).toBeVisible();
+    await expect(bob.getByTestId("dev-seat-bob")).toBeVisible();
+    await expect(bob.getByTestId("dev-seat-alice")).toHaveCount(0);
+    await expect(bob.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    await expect(alice.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    const aliceCards = await alice.getByTestId("dev-hand").locator("li").allTextContents();
+    const bobCards = await bob.getByTestId("dev-hand").locator("li").allTextContents();
+    expect(aliceCards).toHaveLength(4);
+    expect(bobCards).toHaveLength(4);
+    expect(new Set([...aliceCards, ...bobCards]).size).toBe(8);
+    for (const card of aliceCards) {
+      await expect(bob.getByTestId("dev-hand")).not.toContainText(card);
+    }
+    await expect(bob.getByTestId("dev-revision")).toHaveText("0");
+    await expect(bob.getByTestId("dev-end-turn")).toBeDisabled();
+
+    // Alice moves in browser A; browser B observes it through authenticated
+    // polling, not through a shared browser session or a test HTTP mock.
+    const aliceMove = alice.locator('[data-testid^="dev-move-"]:not([disabled])').first();
+    const firstDestination = (await aliceMove.getAttribute("data-testid"))!.slice("dev-move-".length);
+    await aliceMove.click();
+    await expect(alice.getByTestId("dev-revision")).toHaveText("1");
+    await expect(bob.getByTestId("dev-revision")).toHaveText("1", { timeout: 12000 });
+    await expect(bob.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", firstDestination);
+
+    await alice.getByTestId("dev-end-turn").click();
+    await expect(bob.getByTestId("dev-active-player")).toHaveText("bob", { timeout: 12000 });
+    await expect(bob.getByTestId("dev-revision")).toHaveText("2", { timeout: 12000 });
+    await expect(bob.getByTestId("dev-end-turn")).toBeEnabled();
+    await expect(alice.getByTestId("dev-end-turn")).toBeDisabled();
+
+    const bobMove = bob.locator('[data-testid^="dev-move-"]:not([disabled])').first();
+    const secondDestination = (await bobMove.getAttribute("data-testid"))!.slice("dev-move-".length);
+    await bobMove.click();
+    await expect(bob.getByTestId("dev-revision")).toHaveText("3");
+    await expect(alice.getByTestId("dev-revision")).toHaveText("3", { timeout: 12000 });
+    await expect(alice.getByTestId("match-player-bob")).toHaveAttribute("data-street-id", secondDestination);
+
+    await bob.getByTestId("dev-end-turn").click();
+    await expect(alice.getByTestId("dev-revision")).toHaveText("4", { timeout: 12000 });
+    await expect(alice.getByTestId("dev-audit-event-4"))
+      .toHaveAttribute("data-event-kind", "round-settlement-pending");
+    await expect(bob.getByTestId("dev-end-turn")).toBeDisabled();
+
+    for (const [page, token] of [[alice, aliceToken], [bob, bobToken]] as const) {
+      const values = await page.evaluate(() => ({
+        local: Object.values(localStorage),
+        session: Object.values(sessionStorage),
+        url: location.href,
+      }));
+      expect(JSON.stringify(values)).not.toContain(token);
+      expect(await page.getByTestId("dev-session").textContent()).not.toContain(token);
+    }
+  } finally {
+    await aliceContext.close();
+    await bobContext.close();
+  }
+});

@@ -14,7 +14,7 @@ type MockOptions = {
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
-  const tokenToSeat = new Map([["alice-token", "alice"], ["bob-token", "bob"]]);
+  const tokenToSeat = new Map([["a".repeat(64), "alice"], ["b".repeat(64), "bob"]]);
   const streets: Record<Seat, string> = {
     alice: "gauss",
     bob: options.unknownStreet ? "unmapped-road" : options.sameStreet ? "gauss" : "einstein",
@@ -105,8 +105,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           matchId: snapshot().matchId,
           state: snapshot(),
           credentials: [
-            { playerId: "alice", token: "alice-token" },
-            { playerId: "bob", token: "bob-token" },
+            { playerId: "alice", token: "a".repeat(64) },
+            { playerId: "bob", token: "b".repeat(64) },
           ],
         },
       });
@@ -186,7 +186,16 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     return route.fulfill({ status: 404 });
   });
 
-  return { observedHeaders };
+  return {
+    observedHeaders,
+    // Simulate a distinct server actor's command between browser polls.
+    advanceOtherActor: () => {
+      revision++;
+      active = "bob";
+      auditEvents.push({ revision, round: 1, kind: "turn-ended",
+        actorId: "alice", fromStreetId: null, toStreetId: null });
+    },
+  };
 }
 
 test("Development match HUD uses the server for moving and ending both turns", async ({ page }) => {
@@ -235,11 +244,11 @@ test("two Development seat tokens fetch disjoint private hands without browser s
   await expect(page.getByTestId("dev-hand")).not.toContainText("demo:action:01");
 
   expect(observedHeaders.filter((r) => r.path.endsWith("/hand")).map((r) => r.token))
-    .toEqual(["alice-token", "bob-token"]);
+    .toEqual(["a".repeat(64), "b".repeat(64)]);
   const keys = await page.evaluate(() => Object.keys(window.localStorage));
   expect(keys.some((k) => /token|card|hand|match/i.test(k))).toBe(false);
-  expect(await page.getByTestId("dev-session").textContent()).not.toContain("alice-token");
-  expect(await page.getByTestId("dev-session").textContent()).not.toContain("bob-token");
+  expect(await page.getByTestId("dev-session").textContent()).not.toContain("a".repeat(64));
+  expect(await page.getByTestId("dev-session").textContent()).not.toContain("b".repeat(64));
 });
 
 test("HTTP 409 refreshes authoritative snapshot instead of guessing a move", async ({ page }) => {
@@ -382,8 +391,8 @@ test("controlled lots, cards and standing henchmen stay server-owned after moves
   await expect(bob).toHaveAttribute("data-owner-id", "bob");
 
   const visible = await page.getByTestId("match-activity-roster").innerText();
-  expect(visible).not.toContain("alice-token");
-  expect(visible).not.toContain("bob-token");
+  expect(visible).not.toContain("a".repeat(64));
+  expect(visible).not.toContain("b".repeat(64));
   expect(visible).not.toContain("demo:action:");
 });
 
@@ -478,8 +487,8 @@ test("unknown private audit event kinds never render, and revisions do not leak 
   await expect(page.getByTestId("dev-audit-list")).not.toContainText("private-action");
   const text = await page.getByTestId("dev-audit-panel").innerText();
   expect(text).not.toContain("demo:action:");
-  expect(text).not.toContain("alice-token");
-  expect(text).not.toContain("bob-token");
+  expect(text).not.toContain("a".repeat(64));
+  expect(text).not.toContain("b".repeat(64));
 });
 
 test("409 reconciliation does not invent audit events and works without WebGL in English", async ({ page }) => {
@@ -504,4 +513,81 @@ test("409 reconciliation does not invent audit events and works without WebGL in
   await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
   await expect(page.getByTestId("dev-next-order")).toContainText("bob");
   await expect(page.getByTestId("dev-audit-panel")).toContainText("no next round");
+});
+
+test("join by seat token accepts only the server's identity and keeps one private hand", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const matchId = await page.getByTestId("dev-match-id").textContent();
+  expect(matchId?.trim()).toBe("00000000-0000-0000-0000-000000000020");
+  await expect(page.getByTestId("dev-copy-seat-alice")).toBeVisible();
+  await expect(page.getByTestId("dev-copy-seat-bob")).toBeVisible();
+  await page.getByTestId("dev-join-id").fill(matchId!.trim());
+  await page.getByTestId("dev-join-token").fill("b".repeat(64));
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-seat-alice")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-hand")).not.toContainText("demo:action:01");
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  await expect(page.getByTestId("dev-join-token")).toHaveValue("");
+  const values = await page.evaluate(() => ({
+    local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+    url: location.href,
+  }));
+  expect(JSON.stringify(values)).not.toContain("b".repeat(64));
+  expect(await page.getByTestId("dev-session").textContent()).not.toContain("b".repeat(64));
+});
+
+test("invalid Development match token does not establish a seat or reveal public state", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-join-id").fill("00000000-0000-0000-0000-000000000020");
+  await page.getByTestId("dev-join-token").fill("INVALID");
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-error")).toContainText("non validi");
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await page.getByTestId("dev-join-token").fill("0".repeat(64));
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-error")).toContainText("Accesso negato");
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+});
+
+test("a separate server actor's turn is polled into the UI without a local command", async ({ page }) => {
+  const fake = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-active-player")).toHaveText("alice");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  fake.advanceOtherActor();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1", { timeout: 8000 });
+  await expect(page.getByTestId("dev-active-player")).toHaveText("bob");
+  await expect(page.getByTestId("dev-audit-event-1")).toHaveAttribute("data-event-kind", "turn-ended");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+});
+
+test("Development join is usable on mobile in English without WebGL", async ({ page }) => {
+  await page.addInitScript(() => {
+    const nativeGetContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = (function (this: HTMLCanvasElement,
+      contextId: string, ...args: unknown[]) {
+      if (contextId === "webgl" || contextId === "webgl2") return null;
+      return Reflect.apply(nativeGetContext, this, [contextId, ...args]);
+    }) as typeof HTMLCanvasElement.prototype.getContext;
+  });
+  await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-join-id").fill("00000000-0000-0000-0000-000000000020");
+  await page.getByTestId("dev-join-token").fill("b".repeat(64));
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-join-form")).toContainText("Join the match");
+  await expect(page.getByTestId("city-renderer").getByRole("status")).toContainText("3D is not available");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
 });

@@ -35,3 +35,7 @@ Nel laboratorio React l'utente seleziona il proprio posto (il creator può scegl
 - `real-match.spec.ts` (Playwright full-stack): il browser Bob entra e ruota il proprio token contro ASP.NET Core reale, la copia precedente smette di funzionare e il round continua con due client indipendenti.
 
 Il [ledger](development-ledger.md) e la [issue #28](https://github.com/KeyserDSoze/Game.Edonism/issues/28) indicano i job CI effettivamente superati; non dichiarare Production-ready il meccanismo.
+
+## Riconciliazione dei browser dopo una revoca (#31)
+
+Una copia già aperta con il bearer precedente non deve continuare a mostrarsi **autorizzata** dopo che un altro browser ha ruotato il token. La [guida di riconciliazione](development-revocation-reconciliation.md) descrive come il client riconosce il 404 da un endpoint protetto, cancella gli accessi e le mani locali del solo posto revocato, conserva gli altri posti del creator e consente di riunirsi con il nuovo token. La cancellazione dei componenti non cancella eventuali screenshot o dati già memorizzati fuori dall'app.

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using Edonism.Domain.Matches;
+using Edonism.Domain.World;
 using Edonism.Infrastructure.World;
 
 namespace Edonism.Api.Development;
@@ -38,9 +39,18 @@ public sealed class DevelopmentMatchStore
     /// Development-only: the creator receives ALL seat credentials. Real multiplayer
     /// authentication and durable storage are separate and tracked in issue #13.
     /// </summary>
-    public DevMatchCreated Create(IReadOnlyList<MatchParticipantSeed> participants)
+    public DevMatchCreated Create(IReadOnlyList<MatchParticipantSeed> participants) =>
+        Register(GameMatch.CreateFromTrustedSetup(Guid.NewGuid(), BoardCatalog.LoadDefault(), participants));
+
+    public DevMatchCreated CreateWithCards(
+        IReadOnlyList<MatchParticipantCardSeed> participants,
+        IReadOnlyCollection<ActivityCardId> catalog,
+        int seed) =>
+        Register(GameMatch.CreateFromTrustedCardSetup(
+            Guid.NewGuid(), BoardCatalog.LoadDefault(), participants, catalog, seed));
+
+    private DevMatchCreated Register(GameMatch match)
     {
-        var match = GameMatch.CreateFromTrustedSetup(Guid.NewGuid(), BoardCatalog.LoadDefault(), participants);
         var secrets = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         var credentials = new List<DevSeatCredential>();
         foreach (var player in match.Snapshot().Players)

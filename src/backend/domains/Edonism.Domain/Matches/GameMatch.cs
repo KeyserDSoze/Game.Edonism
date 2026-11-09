@@ -9,6 +9,9 @@ namespace Edonism.Domain.Matches;
 /// </summary>
 public sealed record MatchParticipantSeed(string PlayerId, string StartingSlotId);
 
+/// <summary>A trusted Development fixture's character-associated starting card.</summary>
+public sealed record MatchParticipantCardSeed(string PlayerId, string StartingCardId);
+
 public enum MatchPhase
 {
     PlayerTurns,
@@ -45,6 +48,7 @@ public sealed record MatchSnapshot(
     IReadOnlyList<MatchPlayerSnapshot> Players,
     IReadOnlyList<MatchControlledActivitySnapshot> ControlledActivities,
     IReadOnlyList<MatchGrossSalaryQuote> GrossSalaryQuotes,
+    IReadOnlyList<PlacedActivityCard> BoardActivities,
     IReadOnlyList<MatchAuditEvent> Events);
 
 public sealed record MatchCommandResult(bool Accepted, string Code, MatchSnapshot State);
@@ -67,16 +71,19 @@ public sealed class GameMatch
     private readonly List<MatchControlledActivitySnapshot> _controlledActivities;
     private readonly List<string> _turnOrder;
     private readonly List<MatchAuditEvent> _events = [];
+    private readonly IReadOnlyList<PlacedActivityCard> _boardActivities;
 
     private int _turnIndex;
 
     private GameMatch(Guid matchId, BoardDefinition board, List<MatchPlayerSnapshot> players,
-        List<MatchControlledActivitySnapshot> controlledActivities)
+        List<MatchControlledActivitySnapshot> controlledActivities,
+        IReadOnlyList<PlacedActivityCard> boardActivities)
     {
         MatchId = matchId;
         _board = board;
         _players = players;
         _controlledActivities = controlledActivities;
+        _boardActivities = Array.AsReadOnly(boardActivities.ToArray());
         _turnOrder = players.Select(p => p.PlayerId).ToList();
         _events.Add(new MatchAuditEvent(0, 1, "match-created", "system", null, null));
     }
@@ -90,7 +97,48 @@ public sealed class GameMatch
     public static GameMatch CreateFromTrustedSetup(
         Guid matchId,
         BoardDefinition board,
-        IReadOnlyList<MatchParticipantSeed> participants)
+        IReadOnlyList<MatchParticipantSeed> participants) =>
+        CreateFromPreconfiguredSlots(matchId, board, participants, []);
+
+    /// <summary>
+    /// Only the server may supply the character-associated card IDs and the complete
+    /// 46-card typed catalog. Compose 30 cards and derive initial slots from the
+    /// selected cards; do not trust client-supplied player positions.
+    /// Rulebook2 p.4, #16. The catalog is still a Development fixture, not official data.
+    /// </summary>
+    public static GameMatch CreateFromTrustedCardSetup(
+        Guid matchId,
+        BoardDefinition board,
+        IReadOnlyList<MatchParticipantCardSeed> participants,
+        IReadOnlyCollection<ActivityCardId> catalog,
+        int seed)
+    {
+        ArgumentNullException.ThrowIfNull(board);
+        ArgumentNullException.ThrowIfNull(participants);
+        if (participants.Count is < 2 or > MaxPrintedPlayers ||
+            participants.Any(p => p is null ||
+                string.IsNullOrWhiteSpace(p.PlayerId) ||
+                string.IsNullOrWhiteSpace(p.StartingCardId)) ||
+            participants.Select(p => p.PlayerId).Distinct(StringComparer.Ordinal).Count() != participants.Count)
+        {
+            throw new ArgumentException("A card setup needs 2–8 distinct valid players.",
+                nameof(participants));
+        }
+
+        var setup = ActivitySetupComposer.Compose(board, catalog,
+            participants.Select(p => p.StartingCardId).ToArray(), seed);
+        var slotsByCard = setup.Activities.ToDictionary(c => c.CardId, StringComparer.Ordinal);
+        var placedPlayers = participants.Select(p =>
+            new MatchParticipantSeed(p.PlayerId, slotsByCard[p.StartingCardId].SlotId)).ToArray();
+
+        return CreateFromPreconfiguredSlots(matchId, board, placedPlayers, setup.Activities);
+    }
+
+    private static GameMatch CreateFromPreconfiguredSlots(
+        Guid matchId,
+        BoardDefinition board,
+        IReadOnlyList<MatchParticipantSeed> participants,
+        IReadOnlyList<PlacedActivityCard> boardActivities)
     {
         ArgumentNullException.ThrowIfNull(board);
         ArgumentNullException.ThrowIfNull(participants);
@@ -134,7 +182,7 @@ public sealed class GameMatch
             new MatchControlledActivitySnapshot(p.StartingSlotId, p.PlayerId,
                 HenchmanPosture.Standing)).ToList();
 
-        return new GameMatch(matchId, board, players, controlledActivities);
+        return new GameMatch(matchId, board, players, controlledActivities, boardActivities);
     }
 
     public MatchSnapshot Snapshot() => new(
@@ -149,6 +197,7 @@ public sealed class GameMatch
         Array.AsReadOnly(_players.ToArray()),
         Array.AsReadOnly(_controlledActivities.ToArray()),
         GrossSalaryRules.Quote(_board, _players, _controlledActivities),
+        _boardActivities,
         Array.AsReadOnly(_events.ToArray()));
 
     public MatchCommandResult TryFreeMove(string actorId, string destinationStreetId, long expectedRevision)

@@ -1,8 +1,13 @@
 using Edonism.Domain.Matches;
+using Edonism.Domain.World;
 
 namespace Edonism.Api.Development;
 
 public sealed record CreateDevelopmentMatchRequest(IReadOnlyList<MatchParticipantSeed> Players);
+public sealed record CreateCardDevelopmentMatchRequest(
+    IReadOnlyList<MatchParticipantCardSeed> Players,
+    IReadOnlyList<ActivityCardId> AvailableActivities,
+    int Seed);
 public sealed record DevelopmentFreeMoveRequest(string DestinationStreetId, long ExpectedRevision);
 public sealed record DevelopmentEndTurnRequest(long ExpectedRevision);
 
@@ -26,6 +31,23 @@ public static class DevelopmentMatchEndpoints
             catch (ArgumentException)
             {
                 return Results.BadRequest(new { code = "invalid_preview_setup" });
+            }
+        });
+
+        // Only in Development; test fixtures can supply synthetic card IDs and
+        // receive the credentials for all seats. No production catalogue is implied.
+        group.MapPost("/from-cards", (
+            CreateCardDevelopmentMatchRequest request, DevelopmentMatchStore store) =>
+        {
+            try
+            {
+                var created = store.CreateWithCards(
+                    request.Players, request.AvailableActivities, request.Seed);
+                return Results.Created($"/api/dev/matches/{created.MatchId}", created);
+            }
+            catch (ArgumentException)
+            {
+                return Results.BadRequest(new { code = "invalid_card_setup" });
             }
         });
 

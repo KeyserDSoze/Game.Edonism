@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { streetById } from "@/features/city/board";
+import type { PublicPlayerPositions } from "@/features/city/playerMarkers";
 
 type DemoCredential = Readonly<{ playerId: string; token: string }>;
 type DemoPlayer = Readonly<{
@@ -90,8 +91,11 @@ async function responseJson<T>(response: Response): Promise<T> {
  */
 export function DevelopmentMatchLab({
   onStreetSelect,
+  onPublicState,
 }: {
   onStreetSelect: (id: string) => void;
+  /** A public-only server snapshot projection for the 3D scene and DOM fallback. */
+  onPublicState: (state: PublicPlayerPositions | null) => void;
 }) {
   const { t } = useTranslation();
   const [session, setSession] = useState<DemoSession | null>(null);
@@ -105,6 +109,18 @@ export function DevelopmentMatchLab({
   const isMyTurn = session?.state.phase === 0 && session.state.activePlayerId === actorId;
   const canMove = Boolean(player && isMyTurn && !player.freeMoveUsed && !busy);
   const adjacent = player ? (streetById(player.streetId)?.neighbors ?? []) : [];
+
+  function publishPublicPositions(state: DemoMatch | null) {
+    onPublicState(state
+      ? {
+          activePlayerId: state.activePlayerId,
+          players: state.players.map((seat) => ({
+            playerId: seat.playerId,
+            streetId: seat.streetId,
+          })),
+        }
+      : null);
+  }
 
   useEffect(() => {
     if (!session?.matchId || !token) {
@@ -145,10 +161,12 @@ export function DevelopmentMatchLab({
         throw new Error("invalid_dev_fixture");
       }
       setSession(created);
+      publishPublicPositions(created.state);
       setActorId(created.credentials[0].playerId);
       onStreetSelect(created.state.players[0].streetId);
     } catch {
       setSession(null);
+      publishPublicPositions(null);
       setActorId("");
       setError(t("dev.createError"));
     } finally {
@@ -183,11 +201,15 @@ export function DevelopmentMatchLab({
           }),
         );
         setSession((previous) => previous && { ...previous, state: refreshed });
+        publishPublicPositions(refreshed);
+        const confirmedStreet = refreshed.players.find((seat) => seat.playerId === actorId)?.streetId;
+        if (confirmedStreet && streetById(confirmedStreet)) onStreetSelect(confirmedStreet);
         setError(t("dev.conflict"));
         return;
       }
       const next = await responseJson<DemoMatch>(response);
       setSession((previous) => previous && { ...previous, state: next });
+      publishPublicPositions(next);
       if (kind === "free-move" && player) {
         const newStreet = next.players.find((seat) => seat.playerId === actorId)?.streetId;
         if (newStreet) onStreetSelect(newStreet);

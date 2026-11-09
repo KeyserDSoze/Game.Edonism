@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CityScene } from "@/features/city/CityScene";
 import { cityBoard, slotById, slotsOnStreet, streetById } from "@/features/city/board";
+import { playerMarkerPlacements, type PublicPlayerPositions } from "@/features/city/playerMarkers";
 import { useTheme, type Theme } from "@/features/settings/useTheme";
 import { changeLanguage } from "@/i18n";
 
@@ -25,6 +26,11 @@ export default function App() {
   const { theme, setTheme } = useTheme();
   const [selectedStreetId, setSelectedStreetId] = useState("gauss");
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>("N-01");
+  // Only a public projection supplied by the Development API: never tokens/hands.
+  const [publicPlayers, setPublicPlayers] = useState<PublicPlayerPositions | null>(null);
+  const playerMarkers = publicPlayers
+    ? playerMarkerPlacements(publicPlayers.players, publicPlayers.activePlayerId)
+    : [];
   const currentStreet = streetById(selectedStreetId) ?? cityBoard.streets[0];
   const currentSlot = selectedSlotId ? slotById(selectedSlotId) : undefined;
   const streetSlots = slotsOnStreet(selectedStreetId);
@@ -123,6 +129,8 @@ export default function App() {
                 selectedSlotId={selectedSlotId}
                 onStreetSelect={chooseStreet}
                 onSlotSelect={chooseSlot}
+                playerMarkers={playerMarkers}
+                hasActiveMatch={publicPlayers !== null}
               />
               <div className="pointer-events-none absolute left-3 top-3 rounded-lg border border-white/15 bg-slate-950/70 px-3 py-2 text-[11px] font-semibold tracking-wide text-teal-100 backdrop-blur sm:left-5 sm:top-5">
                 <span aria-hidden="true" className="mr-2 inline-block size-2 rounded-full bg-emerald-300" />
@@ -137,6 +145,33 @@ export default function App() {
               <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary" />
               {t("city.notice")}
             </CardContent>
+            {publicPlayers && (
+              <div
+                className="mx-3 mb-4 rounded-xl border border-border bg-muted/30 p-3 sm:mx-5"
+                role="group"
+                aria-label={t("city.playerPositions")}
+                data-testid="match-player-legend"
+                aria-live="polite"
+              >
+                <p className="mb-2 text-xs font-semibold">{t("city.playerPositions")}</p>
+                <ul className="flex flex-wrap gap-2">
+                  {playerMarkers.map((marker) => (
+                    <li
+                      key={marker.playerId}
+                      data-testid={`match-player-${marker.playerId}`}
+                      data-street-id={marker.streetId}
+                      data-active={marker.isActive ? "true" : "false"}
+                      className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-2 text-xs"
+                    >
+                      <span aria-hidden="true" className="size-3 shrink-0 rounded-full" style={{ backgroundColor: marker.color }} />
+                      <strong>{marker.playerId}</strong>
+                      <span className="text-muted-foreground">{streetById(marker.streetId)?.name}</span>
+                      {marker.isActive && <span className="font-semibold text-primary">{t("city.activePlayerMarker")}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </Card>
 
           <aside aria-label={t("city.inspect")} className="min-w-0 space-y-5">
@@ -230,7 +265,7 @@ export default function App() {
             </Card>
             {DevelopmentMatchLab && (
               <Suspense fallback={null}>
-                <DevelopmentMatchLab onStreetSelect={chooseStreet} />
+                <DevelopmentMatchLab onStreetSelect={chooseStreet} onPublicState={setPublicPlayers} />
               </Suspense>
             )}
           </aside>

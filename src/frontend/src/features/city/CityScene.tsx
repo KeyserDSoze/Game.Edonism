@@ -3,12 +3,16 @@ import { Canvas } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
 import { useTranslation } from "react-i18next";
 import { cityBoard, toScene, type ActivitySlot, type RoadArea, type Street } from "./board";
+import type { PlayerMarkerPlacement } from "./playerMarkers";
 
 type SceneProps = {
   selectedStreetId: string;
   selectedSlotId: string | null;
   onStreetSelect: (streetId: string) => void;
   onSlotSelect: (slotId: string) => void;
+  /** Server-originated public match positions; never client-selected coordinates. */
+  playerMarkers: readonly PlayerMarkerPlacement[];
+  hasActiveMatch: boolean;
 };
 
 const blockColors = ["#e9cbb3", "#dce6da", "#c8dce5", "#f0dfbd", "#d5c9da", "#e4dacb"];
@@ -127,6 +131,33 @@ function Pucciottino({ x, z, color }: { x: number; z: number; color: string }) {
   );
 }
 
+/** A Pucciottino now represents a PUBLIC server player street, not an action. */
+function PlayerPucciottino({ marker }: { marker: PlayerMarkerPlacement }) {
+  return (
+    <group position={[marker.x, 0, marker.z]}>
+      {marker.isActive && (
+        <mesh position={[0, 0.13, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.37, 0.05, 8, 24]} />
+          <meshStandardMaterial color="#fce29d" emissive="#e8b85d" emissiveIntensity={0.7} />
+        </mesh>
+      )}
+      <Pucciottino x={0} z={0} color={marker.color} />
+      <Html
+        center
+        position={[0, 1.05, 0]}
+        distanceFactor={12}
+        style={{ pointerEvents: "none", whiteSpace: "nowrap" }}
+      >
+        <span className={marker.isActive
+          ? "rounded-md border border-yellow-300 bg-slate-950/95 px-1.5 py-0.5 text-[11px] font-bold text-white shadow"
+          : "rounded-md border border-white/30 bg-slate-900/90 px-1.5 py-0.5 text-[11px] font-medium text-white shadow"}>
+          {marker.playerId}
+        </span>
+      </Html>
+    </group>
+  );
+}
+
 function RoadLabel({ street }: { street: Street }) {
   const [x, z] = toScene(street.label);
   return (
@@ -143,7 +174,7 @@ function RoadLabel({ street }: { street: Street }) {
   );
 }
 
-function World({ selectedStreetId, selectedSlotId, onStreetSelect, onSlotSelect }: SceneProps) {
+function World({ selectedStreetId, selectedSlotId, onStreetSelect, onSlotSelect, playerMarkers, hasActiveMatch }: SceneProps) {
   const roads = useMemo(() => cityBoard.roads, []);
   const slots = useMemo(() => cityBoard.slots, []);
   const [pucciX1, pucciZ1] = toScene({ x: 130, y: 225 });
@@ -172,9 +203,15 @@ function World({ selectedStreetId, selectedSlotId, onStreetSelect, onSlotSelect 
         <Building key={slot.id} slot={slot} selected={slot.id === selectedSlotId} onSelect={onSlotSelect} />
       ))}
       <CityHall />
-      <Pucciottino x={pucciX1} z={pucciZ1} color="#f2ad86" />
-      <Pucciottino x={pucciX2} z={pucciZ2} color="#a7cdd2" />
-      <Pucciottino x={pucciX3} z={pucciZ3} color="#d7b8e5" />
+      {hasActiveMatch
+        ? playerMarkers.map((marker) => <PlayerPucciottino key={marker.playerId} marker={marker} />)
+        : (
+          <>
+            <Pucciottino x={pucciX1} z={pucciZ1} color="#f2ad86" />
+            <Pucciottino x={pucciX2} z={pucciZ2} color="#a7cdd2" />
+            <Pucciottino x={pucciX3} z={pucciZ3} color="#d7b8e5" />
+          </>
+        )}
       {cityBoard.streets.map((street) => <RoadLabel key={street.id} street={street} />)}
       <OrbitControls enablePan={false} minDistance={13} maxDistance={32} minPolarAngle={0.33} maxPolarAngle={Math.PI / 2.15} target={[0, 0.18, 0]} />
     </Canvas>

@@ -38,8 +38,10 @@ const resources = {
         worldValue: "Anteprima statica",
         notice: "Topologia ripresa dalla plancia originale. Gli edifici sono modelli temporanei: non rappresentano carte attività assegnate.",
         noRules: "La selezione delle strade è solo esplorativa. Nessuna partita, economia o azione PvP è ancora attiva.",
+        playerPositions: "Posizioni dei giocatori · server",
+        activePlayerMarker: "In turno",
         figurinestitle: "I Pucciottini",
-        figurinesdescription: "Piccoli personaggi 3D illustrativi. Non rappresentano ancora giocatori o posizioni di partita.",
+        figurinesdescription: "Senza partita i Pucciottini sono decorativi; nel laboratorio Development rappresentano le strade dei giocatori confermate dal server.",
         accessibility: "Le strade e gli spazi si possono selezionare anche senza WebGL, tramite pulsanti accessibili.",
       },
       dev: {
@@ -104,8 +106,10 @@ const resources = {
         worldValue: "Static preview",
         notice: "Topology comes from the original board. Buildings are temporary models, not assigned activity cards.",
         noRules: "Street selection is just exploration. No match, economy or PvP action is active yet.",
+        playerPositions: "Player positions · server",
+        activePlayerMarker: "Current turn",
         figurinestitle: "The Pucciottini",
-        figurinesdescription: "Illustrative little 3D characters. They do not represent players or in-match positions yet.",
+        figurinesdescription: "Without a match Pucciottini are decorative; in the Development lab they show player streets confirmed by the server.",
         accessibility: "Accessible buttons let you select streets and spaces without WebGL.",
       },
       dev: {

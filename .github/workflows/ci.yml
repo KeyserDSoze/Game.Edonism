@@ -53,3 +53,57 @@ jobs:
             src/frontend/playwright-report/
           retention-days: 7
           if-no-files-found: ignore
+
+  fullstack:
+    name: Live React + .NET / Playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Restore .NET
+        run: dotnet restore Edonism.slnx
+      - name: Build .NET
+        run: dotnet build Edonism.slnx -c Release --no-restore
+      - name: Install frontend dependencies
+        working-directory: src/frontend
+        run: npm install --no-audit --no-fund
+      - name: Install Chromium
+        working-directory: src/frontend
+        run: npx playwright install --with-deps chromium
+      - name: Start local Development API
+        shell: bash
+        run: |
+          ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://127.0.0.1:5080 \
+            dotnet run --no-build -c Release --no-launch-profile \
+              --project src/backend/applications/Edonism.Api \
+              > "${RUNNER_TEMP}/edonism-dev-api.log" 2>&1 &
+          echo $! > "${RUNNER_TEMP}/edonism-dev-api.pid"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:5080/health >/dev/null 2>&1; then
+              echo "Development API ready on loopback"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "${RUNNER_TEMP}/edonism-dev-api.log"
+          exit 1
+      - name: Browser vs real .NET API (no mocked responses)
+        working-directory: src/frontend
+        run: npm run test:e2e:live
+      - name: Upload Development full-stack diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fullstack-diagnostics
+          path: |
+            src/frontend/test-results/
+            src/frontend/playwright-report/
+            ${{ runner.temp }}/edonism-dev-api.log
+          if-no-files-found: ignore
+          retention-days: 7

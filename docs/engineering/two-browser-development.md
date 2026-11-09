@@ -48,3 +48,7 @@ Il risultato della CI finale va registrato nel ledger e nel commento di chiusura
 ## Verifica finale della tranche
 
 [GitHub Actions #42709228987](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42709228987), commit `adc536a`, **completed/success** con tutti i job verdi: **155/155 xUnit**, **24/24 Playwright UI mocked**, **5/5 Playwright live** con due browser e backend .NET reale. Il test del setup full-deck è stato corretto per usare la vera strada iniziale invece di ipotizzarla; il test di revision conflict verifica ora il **polling che aggiorna e disabilita** il pulsante, mentre i 409 continuano a essere esercitati direttamente via API e in Playwright mocked. Nessuna route Production è stata aggiunta.
+
+## Persistenza opzionale del server di prova (#26)
+
+La #26 aggiunge una modalità **opt-in** di checkpoint cifrati per non perdere la partita se si riavvia il processo ASP.NET Core Development. **Non** cambia il form d'ingresso o i token nel browser: dopo un refresh completo serve ancora reinserire manualmente il token; il creator possiede tuttora tutti i posti. Per attivarla e conservare la stessa chiave su riavvio vedi [checkpoint Development](development-checkpoints.md). Senza configurazione restano tutti i limiti di volatilità della #25.

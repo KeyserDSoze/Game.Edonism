@@ -50,3 +50,5 @@ npm run test:e2e:live
 ```
 
 - The two-browser Development lab (#25) uses an in-memory single-seat join (match UUID + bearer token) and server-authenticated polling. No token in URLs, logs, localStorage/sessionStorage or React's public 3D projection. Never treat the creator's all-seat credentials or clipboard access as Production identity. Gate all Dev routes and this lab from Production; test real browser isolation, monotonic revisions and 409 reconciliation.
+
+- Encrypted Development checkpoints (#26) are opt-in, single-process and NEVER Production persistence. The Domain checkpoint contains secret action hands/draw pile: never return it from APIs, logs, telemetry, browser JSON or fixtures committed to Git. Store only SHA-256 of 256-bit random bearer tokens inside AES-256-GCM ciphertext. Changing event kinds/phase/quotas requires a version bump and restore validation/tests; do not imply public audit replay #24 alone can restore secret state. Keep keys out of Git; do not enable this mode by default in CI.

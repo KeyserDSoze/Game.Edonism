@@ -20,3 +20,8 @@ TestResults/
 .env.*
 !.env.example
 .DS_Store
+
+# Private Development match checkpoints (#26). Never commit encrypted blobs/temps.
+*.edonism
+*.tmp
+.edonism-dev-matches/

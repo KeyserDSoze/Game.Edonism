@@ -8,38 +8,40 @@ on:
 permissions:
   contents: read
 
-# A single serial gate makes a success result meaningful: both .NET and browser
-# tests must run before the workflow can be green (see issue #15).
 jobs:
-  fullstack:
-    name: .NET 10 + React / Playwright
+  backend:
+    name: .NET 10 / xUnit
     runs-on: ubuntu-latest
-    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - name: Restore .NET
+      - name: Restore
         run: dotnet restore Edonism.slnx
-      - name: Build .NET
+      - name: Build
         run: dotnet build Edonism.slnx -c Release --no-restore
       - name: xUnit
         run: dotnet test Edonism.slnx -c Release --no-build
-      - name: Install frontend packages
+
+  frontend:
+    name: React / Playwright
+    runs-on: ubuntu-latest
+    defaults:
+      run:
         working-directory: src/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install packages
         run: npm install --no-audit --no-fund
       - name: Typecheck and bundle
-        working-directory: src/frontend
         run: npm run build
       - name: Install Chromium
-        working-directory: src/frontend
         run: npx playwright install --with-deps chromium
       - name: Playwright E2E
-        working-directory: src/frontend
         run: npm run test:e2e
       - name: Upload Playwright diagnostics
         if: failure()

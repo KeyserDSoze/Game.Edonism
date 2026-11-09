@@ -59,3 +59,7 @@ I job CI conservano Playwright UI e Playwright live (inclusi **due browser indip
 - [#24](match-audit-replay.md) — verificatore del solo registro pubblico del primo round
 - [#25](two-browser-development.md) — ingresso da un secondo browser, token effimeri
 - [#4](../game-design/open-questions.md) — regole ancora da validare; il checkpoint non le anticipa
+
+## Risultato verificato su `main`
+
+[CI #42712968317](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42712968317), commit `1733823`: **165/165 xUnit .NET 10**, **24/24 Playwright UI**, **5/5 Playwright live**, tre job `success`, build .NET 10 con **0 warning e 0 errori**. Questa esecuzione include anche README, AGENTS, la guida di sicurezza e la configurazione di opt-in; non abilita alcuna nuova route Production. La parent #13 resta aperta.

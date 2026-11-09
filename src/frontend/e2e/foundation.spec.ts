@@ -1,9 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear());
-});
-
 test("city shell and selectable hex work without a backend", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /Una città da costruire/i })).toBeVisible();

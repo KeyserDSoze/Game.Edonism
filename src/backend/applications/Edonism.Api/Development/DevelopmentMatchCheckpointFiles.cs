@@ -45,7 +45,7 @@ public sealed class DevelopmentMatchCheckpointFiles
         // On Unix, keep both ciphertext and directory private to this user.
         // The directory guards initial temp-file creation before permissions are set.
         if (!OperatingSystem.IsWindows())
-            Directory.SetUnixFileMode(_directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(_directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 
     private string PathFor(Guid matchId) =>

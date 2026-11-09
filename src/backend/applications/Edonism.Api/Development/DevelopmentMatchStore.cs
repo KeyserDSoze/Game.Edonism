@@ -19,11 +19,17 @@ public sealed class DevelopmentMatchStore
         _checkpointFiles = checkpointFiles;
     }
 
-    private sealed class Entry(GameMatch match, Dictionary<string, byte[]> secrets)
+    private sealed class Entry
     {
+        public Entry(GameMatch match, Dictionary<string, byte[]> tokenDigests)
+        {
+            Match = match;
+            TokenDigests = tokenDigests;
+        }
+
         public readonly object Gate = new();
-        public GameMatch Match { get; set; } = match;
-        public Dictionary<string, byte[]> TokenDigests { get; } = secrets;
+        public GameMatch Match { get; set; }
+        public Dictionary<string, byte[]> TokenDigests { get; }
 
         public string? ResolveActor(string? token)
         {
@@ -33,7 +39,7 @@ public sealed class DevelopmentMatchStore
             catch (FormatException) { return null; }
 
             var suppliedDigest = SHA256.HashData(supplied);
-            foreach (var (playerId, candidate) in secrets)
+            foreach (var (playerId, candidate) in TokenDigests)
             {
                 if (CryptographicOperations.FixedTimeEquals(candidate, suppliedDigest)) return playerId;
             }

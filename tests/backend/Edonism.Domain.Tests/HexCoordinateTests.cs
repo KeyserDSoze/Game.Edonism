@@ -1,4 +1,5 @@
 using Edonism.Domain.World;
+using Xunit;
 
 namespace Edonism.Domain.Tests;
 

@@ -25,4 +25,6 @@ app.MapGet("/api/v1/meta", () => Results.Ok(new
 }));
 app.Run();
 
-public partial class Program;
+public partial class Program
+{
+}

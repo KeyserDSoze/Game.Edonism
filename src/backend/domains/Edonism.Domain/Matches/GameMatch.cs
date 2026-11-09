@@ -65,7 +65,7 @@ public sealed record MatchCommandResult(bool Accepted, string Code, MatchSnapsho
 /// Round resolution deliberately pauses before salary, draws, votes and taxes (#6).
 /// Calls must be serialized by an application service/store; snapshots are copied.
 /// </summary>
-public sealed class GameMatch
+public sealed partial class GameMatch
 {
     private const int MaxPrintedPlayers = 8;
     private const int InitialAtoms = 4;

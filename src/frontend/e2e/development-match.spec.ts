@@ -42,6 +42,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       fromStreetId: null, toStreetId: null },
   ];
   const observedHeaders: Array<{ path: string; token: string | undefined }> = [];
+  const observedPolls: Array<{ status: number; supplied: string | null; etag: string }> = [];
 
   const snapshot = () => ({
     matchId: "00000000-0000-0000-0000-000000000020",
@@ -182,7 +183,13 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     }
 
     if (request.method() === "GET") {
-      return route.fulfill({ status: 200, json: snapshot() });
+      const etag = `W/"edonism-revision-${revision}"`;
+      const supplied = request.headers()["if-none-match"] ?? null;
+      const status = supplied === etag ? 304 : 200;
+      observedPolls.push({ status, supplied, etag });
+      return route.fulfill(status === 304
+        ? { status, headers: { ETag: etag, "Cache-Control": "no-store" }, body: "" }
+        : { status, headers: { ETag: etag, "Cache-Control": "no-store" }, json: snapshot() });
     }
 
     const payload = request.postDataJSON() as {
@@ -241,6 +248,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
 
   return {
     observedHeaders,
+    observedPolls,
     // Simulate a distinct server actor's command between browser polls.
     advanceOtherActor: () => {
       revision++;
@@ -801,4 +809,32 @@ test("a delayed option response for Alice cannot enable actions on Bob's seat", 
   await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
   await page.getByTestId("dev-seat-alice").click();
   await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+});
+
+test("authorized conditional polling uses 304 until a second actor changes the revision", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const { observedPolls, advanceOtherActor } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect.poll(() => observedPolls.some(p => p.status === 200 && p.etag ===
+    'W/"edonism-revision-0"'), { timeout: 10000 }).toBe(true);
+  await expect.poll(() => observedPolls.some(p => p.status === 304 && p.supplied ===
+    'W/"edonism-revision-0"'), { timeout: 10000 }).toBe(true);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  advanceOtherActor();
+  // Simulate focus returning after a background tab: refresh immediately.
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(page.getByTestId("dev-revision")).toHaveText("1", { timeout: 10000 });
+  await expect.poll(() => observedPolls.some(p => p.status === 200 && p.supplied ===
+    'W/"edonism-revision-0"' && p.etag === 'W/"edonism-revision-1"'),
+  { timeout: 10000 }).toBe(true);
+  await expect.poll(() => observedPolls.some(p => p.status === 304 && p.supplied ===
+    'W/"edonism-revision-1"'), { timeout: 10000 }).toBe(true);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  const keys = await page.evaluate(() => [...Object.keys(localStorage), ...Object.keys(sessionStorage)]);
+  expect(keys.some(k => /match|token|etag/i.test(k))).toBe(false);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
 });

@@ -651,3 +651,63 @@ test("real .NET Domain turn-options control what two browsers may send", async (
     await context.close();
   }
 });
+
+test("real .NET conditional snapshots: 304 authorized, revision update and browser polling", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const api = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const first = await request.get(api, { headers: auth(aliceToken) });
+  expect(first.status()).toBe(200);
+  const etag = first.headers()["etag"];
+  expect(etag).toBe('W/"edonism-revision-0"');
+  expect(first.headers()["cache-control"]).toContain("no-store");
+
+  const unchanged = await request.get(api, {
+    headers: { ...auth(bobToken), "If-None-Match": etag },
+  });
+  expect(unchanged.status()).toBe(304);
+  expect((await unchanged.body()).length).toBe(0);
+  const unauthenticated = await request.get(api, { headers: { "If-None-Match": etag } });
+  expect(unauthenticated.status()).toBe(404);
+
+  const guestContext = await browser.newContext();
+  try {
+    const guest = await guestContext.newPage();
+    const polls: Array<{ path: string; tag: string | undefined }> = [];
+    guest.on("request", req => {
+      if (new URL(req.url()).pathname === `/api/dev/matches/${created.matchId}`
+        && req.method() === "GET") {
+        polls.push({ path: req.url(), tag: req.headers()["if-none-match"] });
+      }
+    });
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(created.matchId);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-seat-bob")).toBeVisible();
+    await expect.poll(() => polls.some(p => p.tag === etag),
+      { timeout: 12000 }).toBe(true);
+    await page.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-revision")).toHaveText("1", { timeout: 12000 });
+    const updated = await request.get(api, {
+      headers: { ...auth(bobToken), "If-None-Match": etag },
+    });
+    expect(updated.status()).toBe(200);
+    const nextEtag = updated.headers()["etag"];
+    expect(nextEtag).toBe('W/"edonism-revision-1"');
+    const nextBody = await updated.json() as PublicMatch;
+    expect(nextBody.activePlayerId).toBe("bob");
+    await expect.poll(() => polls.some(p => p.tag === nextEtag),
+      { timeout: 12000 }).toBe(true);
+    const storage = await guest.evaluate(() => ({
+      url: location.href, local: Object.values(localStorage), session: Object.values(sessionStorage),
+    }));
+    expect(JSON.stringify(storage)).not.toContain(bobToken);
+    expect(JSON.stringify(storage)).not.toContain(nextEtag);
+  } finally {
+    await guestContext.close();
+  }
+});

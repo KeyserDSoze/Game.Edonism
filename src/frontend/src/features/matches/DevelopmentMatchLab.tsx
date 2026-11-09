@@ -138,6 +138,11 @@ export function DevelopmentMatchLab({
   const currentMatchId = useRef<string | null>(null);
   const currentRevision = useRef(-1);
   const commandInFlight = useRef(false);
+  // In-memory, actor-bound conditional HTTP tag. Never write credentials,
+  // private cards or ETags to local/session storage.
+  const lastPublicTag = useRef<{
+    matchId: string; token: string; revision: number; value: string;
+  } | null>(null);
 
   const token = session?.credentials.find((seat) => seat.playerId === actorId)?.token;
   const player = session?.state.players.find((seat) => seat.playerId === actorId);
@@ -239,8 +244,9 @@ export function DevelopmentMatchLab({
     return () => controller.abort();
   }, [session?.matchId, token]);
 
-  // Keep a single active poll and abandon requests on seat/match change.
-  // Visibility and command guards avoid background traffic or stale overwrites.
+  // No periodic full snapshots if the public revision is unchanged.
+  // A 304 still follows a bearer-authenticated server read. Resume polling
+  // promptly when the tab becomes visible or the network comes back.
   useEffect(() => {
     const matchId = session?.matchId;
     const actorToken = token;
@@ -252,29 +258,57 @@ export function DevelopmentMatchLab({
         || document.visibilityState === "hidden") return;
       polling = true;
       try {
+        const headers: Record<string, string> = {
+          "X-Edonism-Dev-Token": actorToken,
+        };
+        const tagged = lastPublicTag.current;
+        if (tagged?.matchId === matchId && tagged.token === actorToken
+          && tagged.revision === currentRevision.current) {
+          headers["If-None-Match"] = tagged.value;
+        }
         const response = await fetch(`/api/dev/matches/${matchId}`, {
-          headers: { "X-Edonism-Dev-Token": actorToken },
+          headers,
           signal: controller.signal,
           cache: "no-store",
         });
+        // A conditional GET never returns JSON on 304, nor advances UI state.
+        if (response.status === 304) return;
         if (response.ok) {
           const next = (await response.json()) as DemoMatch;
           if (!controller.signal.aborted && !commandInFlight.current
-            && currentMatchId.current === matchId)
+            && currentMatchId.current === matchId
+            && next.matchId === matchId && Number.isInteger(next.revision)
+            && next.revision >= currentRevision.current) {
             acceptServerState(next, matchId);
+            const value = response.headers.get("ETag");
+            const expected = `W/"edonism-revision-${next.revision}"`;
+            lastPublicTag.current = value === expected
+              ? { matchId, token: actorToken, revision: next.revision, value }
+              : null;
+          }
         }
       } catch {
-        // Network glitches do not invent a state. The next poll can retry.
+        // Network glitches do not invent state; online/focus/next poll retries.
       } finally {
         polling = false;
       }
     };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void check();
+    };
+    const onOnline = () => void check();
     const handle = window.setInterval(() => void check(), 1500);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    window.addEventListener("online", onOnline);
     return () => {
       controller.abort();
       window.clearInterval(handle);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      window.removeEventListener("online", onOnline);
     };
-    // Match and actor token identity control subscription lifetime, not revision.
+    // Match and token identity control subscription lifetime, not revision.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.matchId, token]);
 
@@ -286,6 +320,7 @@ export function DevelopmentMatchLab({
     setRotationNotice(null);
     setHand(null);
     setOptionLease(null);
+    lastPublicTag.current = null;
     currentMatchId.current = null;
     currentRevision.current = -1;
     setSession(null);
@@ -336,6 +371,7 @@ export function DevelopmentMatchLab({
     setRotationNotice(null);
     setHand(null);
     setOptionLease(null);
+    lastPublicTag.current = null;
     currentMatchId.current = null;
     currentRevision.current = -1;
     setSession(null);

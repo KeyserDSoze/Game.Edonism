@@ -69,8 +69,17 @@ public sealed class DevelopmentMultiSeatEndpointTests
         using (var result = await rejected.Content.ReadFromJsonAsync<JsonDocument>())
             Assert.Equal("not_your_turn", result!.RootElement.GetProperty("code").GetString());
 
+        // The full-deck draw decides Alice's initial street. Never hardcode
+        // Gauss/Planck as the seeded starting location in an integration test.
+        using var firstRead = await alice.GetAsync($"/api/dev/matches/{id}");
+        using var initial = await firstRead.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert.NotNull(initial);
+        var aliceStreet = initial.RootElement.GetProperty("players")[0]
+            .GetProperty("streetId").GetString();
+        var destination = Edonism.Infrastructure.World.BoardCatalog.LoadDefault().Streets
+            .Single(s => s.Id == aliceStreet).Neighbors[0];
         using var move = await alice.PostAsJsonAsync($"/api/dev/matches/{id}/free-move",
-            new { destinationStreetId = "planck", expectedRevision = 0 });
+            new { destinationStreetId = destination, expectedRevision = 0 });
         Assert.Equal(HttpStatusCode.OK, move.StatusCode);
         using var bobRead = await bob.GetAsync($"/api/dev/matches/{id}");
         using var aliceRead = await alice.GetAsync($"/api/dev/matches/{id}");
@@ -84,7 +93,7 @@ public sealed class DevelopmentMultiSeatEndpointTests
         using (var doc = JsonDocument.Parse(bobJson))
         {
             Assert.Equal(1, doc.RootElement.GetProperty("revision").GetInt64());
-            Assert.Equal("planck", doc.RootElement.GetProperty("players")[0]
+            Assert.Equal(destination, doc.RootElement.GetProperty("players")[0]
                 .GetProperty("streetId").GetString());
         }
 

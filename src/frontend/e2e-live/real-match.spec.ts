@@ -303,11 +303,15 @@ test("real .NET rejects stale revisions and out-of-turn commands without mutatio
   expect(state.controlledActivities).toEqual(created.state.controlledActivities);
   expect(state.grossSalaryQuotes).toEqual(created.state.grossSalaryQuotes);
 
-  // The UI is stale because we used an external real HTTP client. Attempt
-  // a command to trigger the application's 409 → authoritative GET path.
-  await page.getByTestId("dev-end-turn").click();
-  await expect(page.getByTestId("dev-error")).toContainText("stato aggiornato");
-  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  // With #25 the browser is no longer reliably stale: authenticated
+  // background polling learns that Alice ended her turn and disables her
+  // command, instead of sending an unnecessary 409-producing mutation.
+  // The direct HTTP checks above still assert server-side 409 semantics;
+  // the mocked UI suite exercises the separate 409 recovery path.
+  await expect(page.getByTestId("dev-revision")).toHaveText("1", { timeout: 12000 });
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  await expect(page.getByTestId("dev-audit-event-1"))
+    .toHaveAttribute("data-event-kind", "turn-ended");
   await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-active", "false");
   await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
   await expect(page.getByTestId("match-player-alice"))

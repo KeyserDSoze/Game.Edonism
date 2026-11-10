@@ -47,3 +47,7 @@ xUnit HTTP copre primo comando/retry, stesso UUID con payload differente, 24 con
 Rimane fuori: riconciliazione delle azioni delle carte, multi-instance Production, identity/account, persistenza DB, settlement e regole non ancora approvate #4/#6/#13. Le ricevute in Development **non** sostituiscono il ledger di eventi o la futura infrastruttura Production.
 
 Tracking: [issue #35](https://github.com/KeyserDSoze/Game.Edonism/issues/35), [ledger](development-ledger.md). Chiudere solo dopo xUnit, Playwright UI e Playwright live verdi sul commit HEAD di `main`.
+
+## Evidenza CI e tracking
+
+Il codice del backend, il browser e le regressioni principali sono verificati dalla [CI #42734120193](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42734120193): **203 xUnit + 41 Playwright UI + 15 Playwright live, tutti e tre i job verdi**. È stato poi aggiunto un test .NET di non-notifica per retry già accettati: nella [CI #42734308114](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42734308114) sono già verdi **204 xUnit**, mentre il relativo gate browser è da completare. La chiusura della [#35](https://github.com/KeyserDSoze/Game.Edonism/issues/35) richiede infine la CI verde sull'ultimo commit `main`.

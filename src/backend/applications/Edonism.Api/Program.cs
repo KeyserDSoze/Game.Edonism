@@ -42,6 +42,17 @@ if (app.Environment.IsDevelopment())
     {
         if (context.Request.Path.StartsWithSegments("/api/dev/matches"))
         {
+            // Model binding may throw BadHttpRequestException, after which
+            // DeveloperExceptionPage clears and recreates the 400 response.
+            // OnStarting survives that header reset and reasserts privacy
+            // for the final status, including malformed JSON and 304.
+            context.Response.OnStarting(() =>
+            {
+                context.Response.Headers.CacheControl = "no-store";
+                context.Response.Headers.Pragma = "no-cache";
+                context.Response.Headers.Expires = "0";
+                return Task.CompletedTask;
+            });
             context.Response.Headers.CacheControl = "no-store";
             context.Response.Headers.Pragma = "no-cache";
             context.Response.Headers.Expires = "0";

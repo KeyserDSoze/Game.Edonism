@@ -83,6 +83,75 @@ public sealed class DevelopmentCheckpointPersistenceTests
     }
 
     [Fact]
+    public void AtomicBootstrapSurvivesEncryptedRestartAndTokenRotation()
+    {
+        using var temp = new TempDirectory();
+        var live = new DevelopmentMatchStore(temp.Files());
+        var created = Create(live);
+        var id = created.MatchId;
+        var oldBobToken = created.Credentials.Single(c => c.PlayerId == "bob").Token;
+        var aliceToken = created.Credentials.Single(c => c.PlayerId == "alice").Token;
+        Assert.True(live.TryEndTurn(id, aliceToken, 0, out var ended));
+        Assert.True(ended!.Accepted);
+        Assert.True(live.TryRotateSeatToken(id, oldBobToken, out var rotated));
+
+        var restarted = new DevelopmentMatchStore(temp.Files());
+        Assert.False(restarted.TryBootstrapSeat(id, oldBobToken, out _));
+        Assert.True(restarted.TryBootstrapSeat(id, rotated!.Token, out var bootstrap));
+        Assert.NotNull(bootstrap);
+        Assert.Equal(id, bootstrap.MatchId);
+        Assert.Equal("bob", bootstrap.PlayerId);
+        Assert.Equal("bob", bootstrap.Hand.PlayerId);
+        Assert.Equal("bob", bootstrap.TurnOptions.PlayerId);
+        Assert.Equal(1, bootstrap.State.Revision);
+        Assert.Equal(bootstrap.State.Revision, bootstrap.TurnOptions.Revision);
+        Assert.True(bootstrap.TurnOptions.CanEndTurn);
+        Assert.Equal(4, bootstrap.Hand.CardIds.Count);
+        Assert.DoesNotContain(oldBobToken, System.Text.Json.JsonSerializer.Serialize(bootstrap));
+        Assert.DoesNotContain(rotated.Token, System.Text.Json.JsonSerializer.Serialize(bootstrap));
+
+        Assert.True(restarted.TryBootstrapSeat(id, aliceToken, out var alice));
+        Assert.NotNull(alice);
+        Assert.False(alice.TurnOptions.CanEndTurn);
+        Assert.Empty(alice.Hand.CardIds.Intersect(bootstrap.Hand.CardIds));
+        Assert.True(restarted.TryRead(id, aliceToken, out var unchanged));
+        Assert.Equal(1, unchanged!.Revision);
+        Assert.Equal(2, unchanged.Events.Count);
+    }
+
+    [Fact]
+    public void AtomicBootstrapDoesNotMixRevisionsUnderConcurrentEndTurn()
+    {
+        var store = new DevelopmentMatchStore();
+        var created = Create(store);
+        var aliceToken = created.Credentials.Single(c => c.PlayerId == "alice").Token;
+        var bobToken = created.Credentials.Single(c => c.PlayerId == "bob").Token;
+        Parallel.For(0, 80, index =>
+        {
+            if (index == 13)
+            {
+                Assert.True(store.TryEndTurn(created.MatchId, aliceToken, 0, out var outcome));
+                Assert.True(outcome!.Accepted);
+                return;
+            }
+
+            var token = index % 2 == 0 ? aliceToken : bobToken;
+            Assert.True(store.TryBootstrapSeat(created.MatchId, token, out var bundle));
+            Assert.NotNull(bundle);
+            Assert.Equal(bundle.State.Revision, bundle.TurnOptions.Revision);
+            Assert.Equal(bundle.State.MatchId, bundle.Hand.MatchId);
+            Assert.Equal(bundle.PlayerId, bundle.Hand.PlayerId);
+            Assert.Equal(bundle.PlayerId, bundle.TurnOptions.PlayerId);
+            Assert.Equal(bundle.State.ActivePlayerId == bundle.PlayerId,
+                bundle.TurnOptions.CanEndTurn);
+            Assert.Equal(4, bundle.Hand.CardIds.Count);
+        });
+        Assert.True(store.TryRead(created.MatchId, bobToken, out var after));
+        Assert.Equal(1, after!.Revision);
+        Assert.True(after.ActivePlayerId == "bob");
+    }
+
+    [Fact]
     public void RestoredMatchTurnOptionsStayActorScopedAndRevisionBound()
     {
         using var temp = new TempDirectory();

@@ -21,6 +21,7 @@ public sealed record DevSeatBootstrap(
 
 public sealed class DevelopmentMatchStore
 {
+    private const int MaxRetainedReceipts = 64;
     private readonly DevelopmentMatchCheckpointFiles? _checkpointFiles;
 
     public DevelopmentMatchStore(DevelopmentMatchCheckpointFiles? checkpointFiles = null)
@@ -30,15 +31,18 @@ public sealed class DevelopmentMatchStore
 
     private sealed class Entry
     {
-        public Entry(GameMatch match, Dictionary<string, byte[]> tokenDigests)
+        public Entry(GameMatch match, Dictionary<string, byte[]> tokenDigests,
+            IReadOnlyList<DevCommandReceipt>? receipts = null)
         {
             Match = match;
             TokenDigests = tokenDigests;
+            CommandReceipts = receipts?.ToList() ?? [];
         }
 
         public readonly object Gate = new();
         public GameMatch Match { get; set; }
         public Dictionary<string, byte[]> TokenDigests { get; }
+        public List<DevCommandReceipt> CommandReceipts { get; }
 
         // A bounded list of in-flight conditional HTTP reads. On every state
         // change, signal all waiters asynchronously; on timeout or cancellation,
@@ -157,7 +161,30 @@ public sealed class DevelopmentMatchStore
                 if (digest.Length != 32) return false;
                 hashes.Add(id, digest);
             }
-            entry = _matches.GetOrAdd(matchId, _ => new Entry(match, hashes));
+            // The encrypted v2 metadata is a trust boundary. Every receipt
+            // must point to a real committed public event, for the same actor
+            // and command, and duplicate client keys for one actor are invalid.
+            var receipts = data.CommandReceipts?.ToArray() ?? [];
+            var events = data.Checkpoint.State.Events;
+            if (receipts.Length > MaxRetainedReceipts
+                || receipts.Any(r => r is null
+                    || !playerIds.Contains(r.ActorId)
+                    || !Guid.TryParseExact(r.Key, "D", out var parsed) || parsed == Guid.Empty
+                    || r.Key != parsed.ToString("D")
+                    || r.ExpectedRevision < 0 || r.AcceptedRevision != r.ExpectedRevision + 1
+                    || r.AcceptedRevision > match.Revision
+                    || (r.Kind != "free-move" && r.Kind != "end-turn")
+                    || (r.Kind == "free-move" && string.IsNullOrWhiteSpace(r.DestinationStreetId))
+                    || (r.Kind == "end-turn" && r.DestinationStreetId is not null)
+                    || !events.Any(e => e.Revision == r.AcceptedRevision
+                        && e.ActorId == r.ActorId && (
+                            r.Kind == "free-move"
+                                ? e.Kind == "free-move" && e.ToStreetId == r.DestinationStreetId
+                                : e.Kind is "turn-ended" or "round-settlement-pending")))
+                || receipts.Select(r => (r.ActorId, r.Key)).Distinct().Count() != receipts.Length)
+                return false;
+
+            entry = _matches.GetOrAdd(matchId, _ => new Entry(match, hashes, receipts));
             return true;
         }
         catch (Exception ex) when (ex is InvalidDataException or ArgumentException
@@ -201,7 +228,8 @@ public sealed class DevelopmentMatchStore
                 [actor] = digest
             };
             // Never change the live actor digest on failed encryption or I/O.
-            _checkpointFiles?.Save(entry.Match.CaptureCheckpoint(), nextDigests);
+            _checkpointFiles?.Save(entry.Match.CaptureCheckpoint(), nextDigests,
+                entry.CommandReceipts);
             entry.TokenDigests[actor] = digest;
             // A revocation changes no public revision, but old subscribers
             // must wake and reauthenticate instead of waiting for gameplay.
@@ -339,24 +367,34 @@ public sealed class DevelopmentMatchStore
         }
     }
 
+    /// <summary>
+    /// Optional per-actor UUID makes an accepted command safe to retry after
+    /// a lost HTTP response. Replays are identified before Domain execution;
+    /// the receipt is persisted with the new match checkpoint atomically.
+    /// </summary>
     public bool TryFreeMove(
         Guid matchId, string? token, string destinationStreetId, long expectedRevision,
-        out MatchCommandResult? outcome) =>
-        TryExecute(matchId, token,
+        out MatchCommandResult? outcome, string? idempotencyKey = null) =>
+        TryExecute(matchId, token, "free-move", destinationStreetId, expectedRevision,
             (match, actor) => match.TryFreeMove(actor, destinationStreetId, expectedRevision),
-            out outcome);
+            out outcome, idempotencyKey);
 
     public bool TryEndTurn(
-        Guid matchId, string? token, long expectedRevision, out MatchCommandResult? outcome) =>
-        TryExecute(matchId, token,
+        Guid matchId, string? token, long expectedRevision,
+        out MatchCommandResult? outcome, string? idempotencyKey = null) =>
+        TryExecute(matchId, token, "end-turn", null, expectedRevision,
             (match, actor) => match.TryEndTurn(actor, expectedRevision),
-            out outcome);
+            out outcome, idempotencyKey);
 
     private bool TryExecute(
         Guid matchId,
         string? token,
+        string kind,
+        string? destinationStreetId,
+        long expectedRevision,
         Func<GameMatch, string, MatchCommandResult> action,
-        out MatchCommandResult? outcome)
+        out MatchCommandResult? outcome,
+        string? idempotencyKey)
     {
         outcome = null;
         if (!TryGetEntry(matchId, out var entry)) return false;
@@ -364,8 +402,35 @@ public sealed class DevelopmentMatchStore
         {
             var actorId = entry.ResolveActor(token);
             if (actorId is null) return false;
-            // A durable command is copy-on-write: persist the new checkpoint
-            // BEFORE publishing the mutated match. Failed saves are not visible.
+
+            string? normalizedKey = null;
+            if (idempotencyKey is not null)
+            {
+                if (!Guid.TryParseExact(idempotencyKey, "D", out var parsed)
+                    || parsed == Guid.Empty)
+                {
+                    outcome = new MatchCommandResult(
+                        false, "invalid_idempotency_key", entry.Match.Snapshot());
+                    return true;
+                }
+                normalizedKey = parsed.ToString("D");
+                var previous = entry.CommandReceipts.FindLast(r =>
+                    r.ActorId == actorId && r.Key == normalizedKey);
+                if (previous is not null)
+                {
+                    var identical = previous.Kind == kind
+                        && previous.DestinationStreetId == destinationStreetId
+                        && previous.ExpectedRevision == expectedRevision;
+                    outcome = new MatchCommandResult(identical,
+                        identical ? "idempotent_replay" : "idempotency_key_reused",
+                        entry.Match.Snapshot());
+                    return true;
+                }
+            }
+
+            // A durable command is copy-on-write. Persist the new checkpoint
+            // AND the accepted receipt before publishing either. If encryption
+            // or disk fails, neither the mutation nor receipt becomes visible.
             var target = _checkpointFiles is null
                 ? entry.Match
                 : GameMatch.RestoreFromCheckpoint(BoardCatalog.LoadDefault(),
@@ -373,13 +438,26 @@ public sealed class DevelopmentMatchStore
             outcome = action(target, actorId);
             if (outcome.Accepted)
             {
+                var next = entry.CommandReceipts.ToList();
+                if (normalizedKey is not null)
+                {
+                    next.Add(new DevCommandReceipt(
+                        actorId, normalizedKey, kind, destinationStreetId,
+                        expectedRevision, outcome.State.Revision));
+                    if (next.Count > MaxRetainedReceipts) next.RemoveAt(0);
+                }
+
                 if (_checkpointFiles is not null)
                 {
-                    _checkpointFiles.Save(target.CaptureCheckpoint(), entry.TokenDigests);
+                    _checkpointFiles.Save(target.CaptureCheckpoint(), entry.TokenDigests, next);
                     entry.Match = target;
                 }
-                // Wake only for a successfully committed mutation; rejected
-                // commands and failed encrypted writes are never announced.
+                if (normalizedKey is not null)
+                {
+                    entry.CommandReceipts.Clear();
+                    entry.CommandReceipts.AddRange(next);
+                }
+                // An idempotent replay never advances state or wakes long polls.
                 entry.NotifySubscribers();
             }
             return true;

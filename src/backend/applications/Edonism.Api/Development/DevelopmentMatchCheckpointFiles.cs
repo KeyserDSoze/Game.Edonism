@@ -10,15 +10,28 @@ namespace Edonism.Api.Development;
 /// No unencrypted hands, deck or bearer credentials are ever written.
 /// NOT a Production multiplayer database or identity provider.
 /// </summary>
+/// <summary>
+/// Non-secret transport receipt: associates a client command UUID with the
+/// successfully committed revision. NEVER include a bearer or private hand.
+/// This is an application protocol receipt, not a Domain match event.
+/// </summary>
+public sealed record DevCommandReceipt(
+    string ActorId, string Key, string Kind, string? DestinationStreetId,
+    long ExpectedRevision, long AcceptedRevision);
+
 public sealed record PersistedDevelopmentMatch(
     int FormatVersion,
     Guid MatchId,
     GameMatchCheckpoint Checkpoint,
-    IReadOnlyDictionary<string, string> TokenDigests);
+    IReadOnlyDictionary<string, string> TokenDigests,
+    IReadOnlyList<DevCommandReceipt>? CommandReceipts = null);
 
 public sealed class DevelopmentMatchCheckpointFiles
 {
-    private const int FileVersion = 1;
+    private const int FileVersion = 2;
+    // Version 1 encrypted checkpoints predate idempotency receipts and are
+    // still readable. On next write they are atomically migrated to v2.
+    private const int LegacyFileVersion = 1;
     private const int NonceBytes = 12;
     private const int TagBytes = 16;
     private const int MaxPayloadBytes = 1024 * 1024;
@@ -51,7 +64,9 @@ public sealed class DevelopmentMatchCheckpointFiles
     private string PathFor(Guid matchId) =>
         Path.Combine(_directory, $"{matchId:N}.edonism");
 
-    public void Save(GameMatchCheckpoint checkpoint, IReadOnlyDictionary<string, byte[]> tokenDigests)
+    public void Save(
+        GameMatchCheckpoint checkpoint, IReadOnlyDictionary<string, byte[]> tokenDigests,
+        IReadOnlyList<DevCommandReceipt>? commandReceipts = null)
     {
         ArgumentNullException.ThrowIfNull(checkpoint);
         ArgumentNullException.ThrowIfNull(tokenDigests);
@@ -61,7 +76,7 @@ public sealed class DevelopmentMatchCheckpointFiles
         var digests = tokenDigests.ToDictionary(kv => kv.Key,
             kv => Convert.ToHexString(kv.Value), StringComparer.Ordinal);
         var payload = JsonSerializer.SerializeToUtf8Bytes(new PersistedDevelopmentMatch(
-            FileVersion, id, checkpoint, digests));
+            FileVersion, id, checkpoint, digests, commandReceipts ?? []));
         if (payload.Length > MaxPayloadBytes)
             throw new InvalidDataException("Checkpoint payload too large.");
 
@@ -123,7 +138,10 @@ public sealed class DevelopmentMatchCheckpointFiles
             using (var aes = new AesGcm(_key, TagBytes))
                 aes.Decrypt(nonce, ciphertext, tag, plaintext, matchId.ToByteArray());
             var result = JsonSerializer.Deserialize<PersistedDevelopmentMatch>(plaintext);
-            if (result is null || result.FormatVersion != FileVersion
+            if (result is null
+                || result.FormatVersion is not (LegacyFileVersion or FileVersion)
+                || (result.FormatVersion == FileVersion && result.CommandReceipts is null)
+                || (result.FormatVersion == LegacyFileVersion && result.CommandReceipts is { Count: > 0 })
                 || result.MatchId != matchId || result.Checkpoint is null
                 || result.Checkpoint.State is null || result.Checkpoint.State.MatchId != matchId
                 || result.TokenDigests is null)

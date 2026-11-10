@@ -1043,3 +1043,72 @@ test("real .NET long poll: two browsers wake on first-round turn instead of wait
     await context.close();
   }
 });
+
+test("real .NET: lost command ACK is retried with same UUID and commits exactly one turn", async ({
+  page, request,
+}) => {
+  const match = await startRealMatch(page);
+  const aliceToken = tokenFor(match, "alice");
+  const id = match.matchId;
+  const api = `http://127.0.0.1:5080/api/dev/matches/${id}`;
+  const commandPath = `/api/dev/matches/${id}/end-turn`;
+  const attemptedKeys: string[] = [];
+  let intercepted = 0;
+
+  // Unlike the mock UI tests, the first request actually reaches the real
+  // .NET API and commits; only the HTTP response is destroyed en route.
+  await page.route(`**${commandPath}`, async route => {
+    const requestHeaders = route.request().headers();
+    attemptedKeys.push(requestHeaders["idempotency-key"] ?? "");
+    intercepted++;
+    if (intercepted === 1) {
+      const actual = await route.fetch();
+      expect(actual.status()).toBe(200);
+      await route.abort("failed");
+    } else {
+      await route.continue();
+    }
+  });
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1", { timeout: 12000 });
+  await expect(page.getByTestId("dev-active-player")).toHaveText("bob");
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(2);
+  expect(attemptedKeys).toHaveLength(2);
+  expect(attemptedKeys[0]).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  expect(attemptedKeys[1]).toBe(attemptedKeys[0]);
+
+  const current = await request.get(api, { headers: auth(aliceToken) });
+  expect(current.status()).toBe(200);
+  const state = await current.json() as PublicMatch;
+  expect(state.revision).toBe(1);
+  expect(state.events).toHaveLength(2);
+  expect(state.events[1].kind).toBe("turn-ended");
+
+  // An explicit third request with the same actor/key/payload is still 200
+  // and returns current state without appending an event or second turn.
+  const replay = await request.post(`${api}/end-turn`, {
+    headers: { ...auth(aliceToken), "Idempotency-Key": attemptedKeys[0] },
+    data: { expectedRevision: 0 },
+  });
+  expect(replay.status()).toBe(200);
+  expect(replay.headers()["cache-control"]).toBe("no-store");
+  expect((await replay.json() as PublicMatch).revision).toBe(1);
+
+  const wrongPayload = await request.post(`${api}/end-turn`, {
+    headers: { ...auth(aliceToken), "Idempotency-Key": attemptedKeys[0] },
+    data: { expectedRevision: 1 },
+  });
+  expect(wrongPayload.status()).toBe(409);
+  const repeated = await request.get(api, { headers: auth(aliceToken) });
+  const last = await repeated.json() as PublicMatch;
+  expect(last.revision).toBe(1);
+  expect(last.events).toHaveLength(2);
+
+  const storage = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(storage)).not.toContain(aliceToken);
+  expect(JSON.stringify(storage)).not.toContain(attemptedKeys[0]);
+});

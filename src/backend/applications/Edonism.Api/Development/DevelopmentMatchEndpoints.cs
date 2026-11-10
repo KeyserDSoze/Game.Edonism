@@ -148,7 +148,7 @@ public static class DevelopmentMatchEndpoints
             if (!store.TryRead(matchId, token, out var snapshot))
                 return Results.NotFound(new { code = "match_not_found" });
 
-            var etag = $"W/\"edonism-revision-{snapshot!.Revision}\\"";
+            var etag = $"W/\"edonism-revision-{snapshot!.Revision}\"";
             var conditions = context.Request.Headers.IfNoneMatch.ToString().Split(',');
             var unchanged = conditions.Any(value => value.Trim() == etag || value.Trim() == "*");
             if (conditions.Any(value => value.Trim() == etag)
@@ -159,7 +159,7 @@ public static class DevelopmentMatchEndpoints
                 if (!result.Found)
                     return Results.NotFound(new { code = "match_not_found" });
                 snapshot = result.State!;
-                etag = $"W/\"edonism-revision-{snapshot.Revision}\\"";
+                etag = $"W/\"edonism-revision-{snapshot.Revision}\"";
                 unchanged = conditions.Any(value => value.Trim() == etag || value.Trim() == "*");
             }
 

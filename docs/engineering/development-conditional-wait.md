@@ -46,3 +46,7 @@ Al cambio di posto, token o partita, il controller dell'effetto annulla il long 
 Solo Development: nessun broadcast inter-processo, Redis/pubsub, account, infrastruttura di push, identificazione o persistenza Production (#13). Non aggiunge settlement, politica, carte/effetti né modifica #4/#6. I client non devono considerare una notifica come autorizzazione: ogni comando è ancora validato dal Domain .NET e da `expectedRevision`.
 
 Vedi [issue #34](https://github.com/KeyserDSoze/Game.Edonism/issues/34) e [development-ledger.md](development-ledger.md). Chiudere la issue solo dopo CI verde sul commit finale `main`.
+
+## Evidenza CI del codice
+
+[Run #42730622300](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42730622300), commit `c17b5f1`: **194 xUnit, 39 Playwright UI, 14 Playwright live**, tre gate superati. Il codice è Development-only e non risolve il coordinamento di server diversi o la #13. Per chiudere la issue il commit finale di documentazione deve superare la stessa CI su `main`.

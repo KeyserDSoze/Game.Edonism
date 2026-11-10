@@ -900,3 +900,79 @@ test("real .NET atomic join provides matching state, private hand and options in
     await context.close();
   }
 });
+
+test("real .NET: private bearer issuance, hands, 304 and errors never permit HTTP caching", async ({
+  page, request,
+}) => {
+  const creation = page.waitForResponse(response =>
+    new URL(response.url()).pathname === "/api/dev/matches/from-full-deck"
+    && response.request().method() === "POST");
+  const match = await startRealMatch(page);
+  const issued = await creation;
+  const check = (headers: Record<string, string>) => {
+    expect(headers["cache-control"]).toBe("no-store");
+    expect(headers["pragma"]).toBe("no-cache");
+    expect(headers["expires"]).toBe("0");
+  };
+  expect(issued.status()).toBe(201);
+  check(issued.headers());
+  const aliceToken = tokenFor(match, "alice");
+  const bobToken = tokenFor(match, "bob");
+  const issueBody = await issued.text();
+  expect(issueBody).toContain(aliceToken);
+  expect(issueBody).toContain(bobToken);
+  const api = `http://127.0.0.1:5080/api/dev/matches/${match.matchId}`;
+
+  const snapshot = await request.get(api, { headers: auth(aliceToken) });
+  expect(snapshot.status()).toBe(200);
+  check(snapshot.headers());
+  const etag = snapshot.headers()["etag"];
+  expect(etag).toBe('W/"edonism-revision-0"');
+  const unchanged = await request.get(api, {
+    headers: { ...auth(aliceToken), "If-None-Match": etag },
+  });
+  expect(unchanged.status()).toBe(304);
+  check(unchanged.headers());
+  expect((await unchanged.body()).length).toBe(0);
+
+  for (const suffix of ["/hand", "/seat", "/turn-options", "/audit"]) {
+    const own = await request.get(api + suffix, { headers: auth(bobToken) });
+    expect(own.status()).toBe(200);
+    check(own.headers());
+  }
+
+  const wrongTurn = await request.post(api + "/end-turn", {
+    headers: auth(bobToken), data: { expectedRevision: 0 },
+  });
+  expect(wrongTurn.status()).toBe(409);
+  check(wrongTurn.headers());
+  const finishedAlice = await request.post(api + "/end-turn", {
+    headers: auth(aliceToken), data: { expectedRevision: 0 },
+  });
+  expect(finishedAlice.status()).toBe(200);
+  check(finishedAlice.headers());
+
+  const rotate = await request.post(api + "/rotate-token", { headers: auth(bobToken) });
+  expect(rotate.status()).toBe(200);
+  check(rotate.headers());
+  const replacement = await rotate.json() as { playerId: string; token: string };
+  expect(replacement.playerId).toBe("bob");
+  expect(replacement.token).toMatch(/^[A-F0-9]{64}$/);
+  const forbidden = await request.get(api + "/hand", { headers: auth(bobToken) });
+  expect(forbidden.status()).toBe(404);
+  check(forbidden.headers());
+  const newHand = await request.get(api + "/hand", { headers: auth(replacement.token) });
+  expect(newHand.status()).toBe(200);
+  check(newHand.headers());
+  const badFixture = await request.post("http://127.0.0.1:5080/api/dev/matches/from-full-deck", {
+    headers: { "Content-Type": "application/json" }, data: "{",
+  });
+  expect(badFixture.status()).toBe(400);
+  check(badFixture.headers());
+
+  const stored = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage), session: Object.values(sessionStorage),
+  }));
+  for (const token of [aliceToken, bobToken, replacement.token])
+    expect(JSON.stringify(stored)).not.toContain(token);
+});

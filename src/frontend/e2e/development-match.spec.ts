@@ -96,6 +96,18 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   });
 
   await page.route("**/api/dev/matches/**", async (route) => {
+    // Mirror the server-wide #33 cache policy in browser mocks. Only the
+    // full-stack suite can assert the actual ASP.NET Core response headers.
+    const reply = (payload: NonNullable<Parameters<typeof route.fulfill>[0]>) =>
+      route.fulfill({
+        ...payload,
+        headers: {
+          ...payload.headers,
+          "Cache-Control": "no-store",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
+      });
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
@@ -116,7 +128,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       expect(fixture.characters).toHaveLength(23);
       expect(fixture.actionCardIds).toHaveLength(58);
       expect(fixture.electionDayCardId).toBe("demo:election-day");
-      return route.fulfill({
+      return reply({
         status: 201,
         json: {
           matchId: snapshot().matchId,
@@ -136,12 +148,12 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         delayedRevokedResponse = true;
         await new Promise((resolve) => setTimeout(resolve, 900));
       }
-      return route.fulfill({ status: 404, json: { code: "match_not_found" } });
+      return reply({ status: 404, json: { code: "match_not_found" } });
     }
 
     if (path.endsWith("/seat")) {
       if (options.bootstrapUnavailable)
-        return route.fulfill({ status: 503, json: { code: "unavailable" } });
+        return reply({ status: 503, json: { code: "unavailable" } });
       const seatHasTurn = phase === 0 && active === seat;
       const adjacent: Record<string, string[]> = {
         gauss: ["planck", "newton", "main-square"],
@@ -152,7 +164,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         boson: ["newton", "meson"],
         "main-square": ["gauss", "einstein"],
       };
-      return route.fulfill({
+      return reply({
         status: 200, headers: { "Cache-Control": "no-store" },
         json: {
           matchId: snapshot().matchId,
@@ -183,7 +195,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
       if (options.noTurnOptions)
-        return route.fulfill({ status: 503, json: { code: "unavailable" } });
+        return reply({ status: 503, json: { code: "unavailable" } });
       const neighbors: Record<string, string[]> = {
         gauss: ["planck", "newton", "main-square"],
         planck: ["gauss", "einstein", "meson"],
@@ -194,7 +206,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         "main-square": ["gauss", "einstein"],
       };
       const isTurn = active === seat && phase === 0;
-      return route.fulfill({
+      return reply({
         status: 200, headers: { "Cache-Control": "no-store" },
         json: {
           matchId: snapshot().matchId,
@@ -207,7 +219,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path.endsWith("/hand")) {
-      return route.fulfill({
+      return reply({
         status: 200,
         json: {
           matchId: snapshot().matchId,
@@ -226,7 +238,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         + (rotationSequence % 16).toString(16).toUpperCase();
       tokenToSeat.delete(token!);
       tokenToSeat.set(fresh, seat);
-      return route.fulfill({
+      return reply({
         status: 200,
         headers: { "Cache-Control": "no-store" },
         json: { playerId: seat, token: fresh },
@@ -237,12 +249,12 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       const etag = `W/"edonism-revision-${revision}"`;
       if (snapshotFailure) {
         observedPolls.push({ status: 503, supplied: null, etag });
-        return route.fulfill({ status: 503, json: { code: "temporarily_unavailable" } });
+        return reply({ status: 503, json: { code: "temporarily_unavailable" } });
       }
       const supplied = request.headers()["if-none-match"] ?? null;
       const status = supplied === etag ? 304 : 200;
       observedPolls.push({ status, supplied, etag });
-      return route.fulfill(status === 304
+      return reply(status === 304
         ? { status, headers: { ETag: etag, "Cache-Control": "no-store" }, body: "" }
         : { status, headers: { ETag: etag, "Cache-Control": "no-store" }, json: snapshot() });
     }
@@ -255,16 +267,16 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     if (options.conflictOnFirstMove && path.endsWith("/free-move") && !conflictRaised) {
       conflictRaised = true;
       revision = 3; // A competing actor/worker updated the server.
-      return route.fulfill({ status: 409, json: { code: "revision_conflict" } });
+      return reply({ status: 409, json: { code: "revision_conflict" } });
     }
 
     if (payload.expectedRevision !== revision || active !== seat || phase !== 0) {
-      return route.fulfill({ status: 409, json: { code: "revision_conflict" } });
+      return reply({ status: 409, json: { code: "revision_conflict" } });
     }
 
     if (path.endsWith("/free-move")) {
       if (moved[seat]) {
-        return route.fulfill({ status: 409, json: { code: "free_move_already_used" } });
+        return reply({ status: 409, json: { code: "free_move_already_used" } });
       }
       const neighbors: Record<string, string[]> = {
         gauss: ["planck", "newton", "main-square"],
@@ -272,7 +284,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         einstein: ["newton", "planck", "main-square"],
       };
       if (!(neighbors[streets[seat]] ?? []).includes(payload.destinationStreetId ?? "")) {
-        return route.fulfill({ status: 409, json: { code: "not_adjacent" } });
+        return reply({ status: 409, json: { code: "not_adjacent" } });
       }
       const fromStreet = streets[seat];
       streets[seat] = payload.destinationStreetId!;
@@ -280,7 +292,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       revision++;
       auditEvents.push({ revision, round: 1, kind: "free-move",
         actorId: seat, fromStreetId: fromStreet, toStreetId: streets[seat] });
-      return route.fulfill({ status: 200, json: snapshot() });
+      return reply({ status: 200, json: snapshot() });
     }
 
     if (path.endsWith("/end-turn")) {
@@ -295,10 +307,10 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         auditEvents.push({ revision, round: 1, kind: "round-settlement-pending",
           actorId: seat, fromStreetId: null, toStreetId: null });
       }
-      return route.fulfill({ status: 200, json: snapshot() });
+      return reply({ status: 200, json: snapshot() });
     }
 
-    return route.fulfill({ status: 404 });
+    return reply({ status: 404 });
   });
 
   return {
@@ -1032,4 +1044,40 @@ test("inconsistent or failed atomic bootstrap never installs a session or privat
   await mockMatchApi(page, { bootstrapUnavailable: true });
   await page.getByTestId("dev-join").click();
   await expect(page.getByTestId("dev-session")).toHaveCount(0);
+});
+
+test("mocked private responses remain no-store across creator seat changes", async ({ page }) => {
+  const responses: Array<{ path: string; status: number; headers: Record<string, string> }> = [];
+  page.on("response", response => {
+    const path = new URL(response.url()).pathname;
+    if (path.startsWith("/api/dev/matches/"))
+      responses.push({ path, status: response.status(), headers: response.headers() });
+  });
+  await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-hand")).not.toContainText("demo:action:01");
+  await page.getByTestId("dev-seat-alice").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await expect.poll(() => responses.filter(r => r.path.endsWith("/hand")).length)
+    .toBeGreaterThanOrEqual(3);
+  const selected = responses.filter(r => r.path.endsWith("/hand")
+    || r.path.endsWith("/from-full-deck"));
+  expect(selected.some(r => r.status === 201)).toBe(true);
+  for (const response of selected) {
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.headers["pragma"]).toBe("no-cache");
+    expect(response.headers["expires"]).toBe("0");
+  }
+  const storage = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage), session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(storage)).not.toContain("a".repeat(64));
+  expect(JSON.stringify(storage)).not.toContain("b".repeat(64));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
 });

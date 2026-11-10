@@ -37,3 +37,7 @@ La suite Playwright mocked riflette gli header nei fixture, e assicura che cambi
 La policy è una tranche preparatoria della [#13](https://github.com/KeyserDSoze/Game.Edonism/issues/13), non un'implementazione di account, login, autorizzazione Production, persistenza multi-instance o politiche di cache della futura infrastruttura.
 
 Tracciamento: [issue #33](https://github.com/KeyserDSoze/Game.Edonism/issues/33) e [ledger](development-ledger.md). La chiusura avviene **solo dopo** CI su ultimo `main` con xUnit, Playwright mocked e Playwright live tutti verdi.
+
+## Evidenza di verifica CI
+
+[Run #42727812398](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42727812398) sul commit di codice `418dd95`: **187 xUnit, 37 Playwright UI, 13 Playwright live, tre job success**. I test di produzione delle risposte HTTP includono anche il caso nel quale ASP.NET Core ricostruisce la risposta 400 per un JSON malformato. L'ultimo commit documentale deve superare gli stessi gate prima di chiudere #33.

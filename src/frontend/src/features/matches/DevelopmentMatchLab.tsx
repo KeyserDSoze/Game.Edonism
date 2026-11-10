@@ -49,6 +49,14 @@ type ActorTurnOptions = Readonly<{
   freeMoveStreetIds: readonly string[];
 }>;
 
+type DevSeatBootstrap = Readonly<{
+  matchId: string;
+  playerId: string;
+  state: DemoMatch;
+  hand: PrivateHand;
+  turnOptions: ActorTurnOptions;
+}>;
+
 const quotaAndExtras = [
   ["public-financing", 5, 2],
   ["private-financing", 5, 2],
@@ -148,6 +156,11 @@ export function DevelopmentMatchLab({
   const currentActorScope = useRef<{
     matchId: string; seatId: string; token: string;
   } | null>(null);
+  // Atomic join carries the first hand and options at the same revision.
+  const bootstrappedSeat = useRef<{
+    matchId: string; seatId: string; token: string; revision: number;
+    handPending: boolean; optionsPending: boolean;
+  } | null>(null);
 
   const token = session?.credentials.find((seat) => seat.playerId === actorId)?.token;
   const player = session?.state.players.find((seat) => seat.playerId === actorId);
@@ -231,11 +244,18 @@ export function DevelopmentMatchLab({
   // Revision-bound actor options: fail closed when an HTTP result is stale,
   // unavailable or belongs to an old seat/token. No optimistic game actions.
   useEffect(() => {
-    setOptionLease(null);
     const matchId = session?.matchId;
     const revision = session?.state.revision;
     const actorToken = token;
     const seatId = actorId;
+    const initial = bootstrappedSeat.current;
+    if (initial?.optionsPending && initial.matchId === matchId
+      && initial.token === actorToken && initial.seatId === seatId
+      && initial.revision === revision) {
+      initial.optionsPending = false;
+      return; // Already validated with the initial /seat response.
+    }
+    setOptionLease(null);
     if (!matchId || revision === undefined || !actorToken || !seatId) return;
     const controller = new AbortController();
     void fetch(`/api/dev/matches/${matchId}/turn-options`, {
@@ -267,6 +287,13 @@ export function DevelopmentMatchLab({
   // Read the current actor's private hand on seat change; credentials are NEVER
   // copied into URL or Web Storage. Joined sessions contain exactly one seat.
   useEffect(() => {
+    const initial = bootstrappedSeat.current;
+    if (initial?.handPending && initial.matchId === session?.matchId
+      && initial.token === token && initial.seatId === actorId
+      && initial.revision === session?.state.revision) {
+      initial.handPending = false;
+      return; // Keep the hand returned in the same locked /seat read.
+    }
     if (!session?.matchId || !token) {
       setHand(null);
       return;
@@ -380,6 +407,7 @@ export function DevelopmentMatchLab({
     setHand(null);
     setOptionLease(null);
     lastPublicTag.current = null;
+    bootstrappedSeat.current = null;
     currentActorScope.current = null;
     currentMatchId.current = null;
     currentRevision.current = -1;
@@ -437,6 +465,7 @@ export function DevelopmentMatchLab({
     setHand(null);
     setOptionLease(null);
     lastPublicTag.current = null;
+    bootstrappedSeat.current = null;
     currentActorScope.current = null;
     currentMatchId.current = null;
     currentRevision.current = -1;
@@ -444,23 +473,32 @@ export function DevelopmentMatchLab({
     publishPublicPositions(null);
     try {
       const headers = { "X-Edonism-Dev-Token": secret };
-      // The identity MUST be resolved from the token-bound private-hand endpoint,
-      // not from a playerId typed or guessed in the browser.
-      const [publicResponse, handResponse] = await Promise.all([
-        fetch(`/api/dev/matches/${id}`, { headers, cache: "no-store" }),
-        fetch(`/api/dev/matches/${id}/hand`, { headers, cache: "no-store" }),
-      ]);
-      const [state, privateHand] = await Promise.all([
-        responseJson<DemoMatch>(publicResponse),
-        responseJson<PrivateHand>(handResponse),
-      ]);
-      if (state.matchId.toLowerCase() !== id || privateHand.matchId.toLowerCase() !== id
-        || !state.players.some((p) => p.playerId === privateHand.playerId))
-        throw new Error("invalid_seat");
-      const actor = privateHand.playerId;
+      // One server lock authenticates the bearer and captures all three
+      // projections at a single revision. Never trust a browser-supplied ID.
+      const bootstrap = await responseJson<DevSeatBootstrap>(await fetch(
+        `/api/dev/matches/${id}/seat`, { headers, cache: "no-store" },
+      ));
+      const { state, hand: privateHand, turnOptions: options } = bootstrap;
+      const actor = bootstrap.playerId;
+      if (bootstrap.matchId.toLowerCase() !== id || state.matchId.toLowerCase() !== id
+        || privateHand.matchId.toLowerCase() !== id || options.matchId.toLowerCase() !== id
+        || privateHand.playerId !== actor || options.playerId !== actor
+        || !state.players.some((p) => p.playerId === actor)
+        || !Number.isInteger(state.revision) || state.revision < 0
+        || options.revision !== state.revision || typeof options.canEndTurn !== "boolean"
+        || !Array.isArray(privateHand.cardIds)
+        || !privateHand.cardIds.every((card) => typeof card === "string")
+        || !Array.isArray(options.freeMoveStreetIds)
+        || !options.freeMoveStreetIds.every((street) => typeof street === "string"))
+        throw new Error("invalid_seat_bootstrap");
       currentMatchId.current = state.matchId;
       currentRevision.current = state.revision;
       currentActorScope.current = { matchId: state.matchId, seatId: actor, token: secret };
+      bootstrappedSeat.current = {
+        matchId: state.matchId, seatId: actor, token: secret, revision: state.revision,
+        handPending: true, optionsPending: true,
+      };
+      setOptionLease({ token: secret, options });
       setSession({
         matchId: state.matchId,
         state,

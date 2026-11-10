@@ -13,6 +13,8 @@ type MockOptions = {
   missingBoardCard?: boolean;
   unknownSecretEvent?: boolean;
   playerCount?: number;
+  brokenSeatBootstrap?: "wrong-player" | "wrong-revision";
+  bootstrapUnavailable?: boolean;
   noTurnOptions?: boolean;
   invalidTurnOptions?: boolean;
   delayFirstAliceOptions?: boolean;
@@ -135,6 +137,44 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         await new Promise((resolve) => setTimeout(resolve, 900));
       }
       return route.fulfill({ status: 404, json: { code: "match_not_found" } });
+    }
+
+    if (path.endsWith("/seat")) {
+      if (options.bootstrapUnavailable)
+        return route.fulfill({ status: 503, json: { code: "unavailable" } });
+      const seatHasTurn = phase === 0 && active === seat;
+      const adjacent: Record<string, string[]> = {
+        gauss: ["planck", "newton", "main-square"],
+        planck: ["gauss", "einstein", "meson"],
+        einstein: ["newton", "planck", "main-square"],
+        newton: ["gauss", "einstein", "boson"],
+        meson: ["planck", "boson"],
+        boson: ["newton", "meson"],
+        "main-square": ["gauss", "einstein"],
+      };
+      return route.fulfill({
+        status: 200, headers: { "Cache-Control": "no-store" },
+        json: {
+          matchId: snapshot().matchId,
+          playerId: options.brokenSeatBootstrap === "wrong-player" ? "alice" : seat,
+          state: snapshot(),
+          hand: {
+            matchId: snapshot().matchId,
+            playerId: seat,
+            cardIds: Array.from({ length: 4 }, (_, index) =>
+              `demo:action:${String((seat === "alice" ? 1
+                : 21 + (seats.indexOf(seat) - 1) * 4) + index).padStart(2, "0")}`),
+          },
+          turnOptions: {
+            matchId: snapshot().matchId,
+            playerId: seat,
+            revision: options.brokenSeatBootstrap === "wrong-revision" ? revision + 1 : revision,
+            canEndTurn: seatHasTurn,
+            freeMoveStreetIds: seatHasTurn && !moved[seat]
+              ? adjacent[streets[seat]] ?? [] : [],
+          },
+        },
+      });
     }
 
     if (path.endsWith("/turn-options")) {
@@ -954,4 +994,42 @@ test("late 404 for old revoked actor cannot invalidate another live seat", async
   await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
   await expect(page.getByTestId("dev-session")).toBeVisible();
   await expect(page.getByTestId("dev-error")).toHaveCount(0);
+});
+
+test("atomic join bootstraps one seat hand and turn permissions without duplicate reads", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-join-id").fill("00000000-0000-0000-0000-000000000020");
+  await page.getByTestId("dev-join-token").fill("b".repeat(64));
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  const paths = observedHeaders.map((x) => x.path);
+  expect(paths.filter((x) => x.endsWith("/seat"))).toHaveLength(1);
+  expect(paths.filter((x) => x.endsWith("/hand") || x.endsWith("/turn-options"))).toHaveLength(0);
+  expect(observedHeaders.find(x => x.path.endsWith("/seat"))?.token).toBe("b".repeat(64));
+  await expect(page.getByTestId("dev-seat-alice")).toHaveCount(0);
+  const body = await page.locator("body").innerText();
+  expect(body).not.toContain("b".repeat(64));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+});
+
+test("inconsistent or failed atomic bootstrap never installs a session or private hand", async ({ page }) => {
+  await mockMatchApi(page, { brokenSeatBootstrap: "wrong-revision" });
+  await page.goto("/");
+  await page.getByTestId("dev-join-id").fill("00000000-0000-0000-0000-000000000020");
+  await page.getByTestId("dev-join-token").fill("b".repeat(64));
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-error")).toContainText("Accesso negato");
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+  await mockMatchApi(page, { brokenSeatBootstrap: "wrong-player" });
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await mockMatchApi(page, { bootstrapUnavailable: true });
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
 });

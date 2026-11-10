@@ -827,3 +827,76 @@ test("real .NET: creator keeps Alice when remote Bob rotates their capability", 
     await guestContext.close();
   }
 });
+
+test("real .NET atomic join provides matching state, private hand and options in one request", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const bobToken = tokenFor(created, "bob");
+  const aliceToken = tokenFor(created, "alice");
+  const api = `http://127.0.0.1:5080/api/dev/matches/${id}`;
+
+  const denied = await request.get(`${api}/seat`);
+  expect(denied.status()).toBe(404);
+  const own = await request.get(`${api}/seat?playerId=alice`, { headers: auth(bobToken) });
+  expect(own.status()).toBe(200);
+  expect(own.headers()["cache-control"]).toContain("no-store");
+  const bootstrap = await own.json() as {
+    matchId: string; playerId: string; state: PublicMatch; hand: Hand;
+    turnOptions: { playerId: string; revision: number; canEndTurn: boolean; freeMoveStreetIds: string[] };
+  };
+  expect(bootstrap.matchId).toBe(id);
+  expect(bootstrap.playerId).toBe("bob");
+  expect(bootstrap.hand.playerId).toBe("bob");
+  expect(bootstrap.turnOptions.playerId).toBe("bob");
+  expect(bootstrap.turnOptions.revision).toBe(bootstrap.state.revision);
+  expect(bootstrap.turnOptions.canEndTurn).toBe(false);
+  expect(bootstrap.hand.cardIds).toHaveLength(4);
+  const raw = await own.text();
+  expect(raw).not.toContain(bobToken);
+  expect(raw).not.toContain(aliceToken);
+  expect(raw).not.toContain("tokenDigests");
+  const aliceHand = await request.get(`${api}/hand`, { headers: auth(aliceToken) });
+  const aliceCards = (await aliceHand.json() as Hand).cardIds;
+  for (const secret of aliceCards) expect(bootstrap.hand.cardIds).not.toContain(secret);
+
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const guest = await context.newPage();
+    const requests: string[] = [];
+    guest.on("request", req => {
+      if (req.url().includes(`/api/dev/matches/${id}/`))
+        requests.push(new URL(req.url()).pathname);
+    });
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(id);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-seat-bob")).toBeVisible();
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    expect(await guest.getByTestId("dev-hand").locator("li").allTextContents())
+      .toEqual(bootstrap.hand.cardIds);
+    expect(requests.filter(path => path.endsWith("/seat"))).toHaveLength(1);
+    expect(requests.filter(path => path.endsWith("/hand") || path.endsWith("/turn-options")))
+      .toHaveLength(0);
+
+    await page.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-revision")).toHaveText("1", { timeout: 12000 });
+    await expect(guest.getByTestId("dev-end-turn")).toBeEnabled();
+    await guest.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-revision")).toHaveText("2");
+    const updated = await request.get(`${api}/seat`, { headers: auth(bobToken) });
+    expect(updated.status()).toBe(200);
+    const after = await updated.json() as typeof bootstrap;
+    expect(after.state.revision).toBe(2);
+    expect(after.turnOptions.revision).toBe(2);
+    expect(after.turnOptions.canEndTurn).toBe(false);
+    const storage = await guest.evaluate(() => ({
+      local: Object.values(localStorage), session: Object.values(sessionStorage), url: location.href,
+    }));
+    expect(JSON.stringify(storage)).not.toContain(bobToken);
+  } finally {
+    await context.close();
+  }
+});

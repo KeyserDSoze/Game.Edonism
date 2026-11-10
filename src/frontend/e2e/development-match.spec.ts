@@ -18,6 +18,8 @@ type MockOptions = {
   noTurnOptions?: boolean;
   invalidTurnOptions?: boolean;
   delayFirstAliceOptions?: boolean;
+  dropFirstEndTurnResponse?: boolean;
+  http503FirstEndTurn?: boolean;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
@@ -39,6 +41,11 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayRevokedResponse = false;
   let delayedRevokedResponse = false;
   let delayedAliceOptions = false;
+  let firstResponseDropped = false;
+  let firstHttp503 = false;
+  const acceptedKeys = new Map<string, {
+    kind: string; expectedRevision: number; destinationStreetId?: string;
+  }>();
   const auditEvents: Array<{
     revision: number; round: number; kind: string; actorId: string;
     fromStreetId: string | null; toStreetId: string | null;
@@ -46,7 +53,9 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     { revision: 0, round: 1, kind: "match-created", actorId: "system",
       fromStreetId: null, toStreetId: null },
   ];
-  const observedHeaders: Array<{ path: string; token: string | undefined }> = [];
+  const observedHeaders: Array<{
+    path: string; token: string | undefined; idempotencyKey: string | undefined;
+  }> = [];
   const observedPolls: Array<{ status: number; supplied: string | null; etag: string; prefer: string | null }> = [];
 
   const snapshot = () => ({
@@ -112,7 +121,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     const url = new URL(request.url());
     const path = url.pathname;
     const token = request.headers()["x-edonism-dev-token"];
-    observedHeaders.push({ path, token });
+    observedHeaders.push({ path, token, idempotencyKey: request.headers()["idempotency-key"] });
 
     if (path.endsWith("/from-full-deck")) {
       if (options.creationFails) return route.abort("failed");
@@ -263,6 +272,33 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       expectedRevision: number;
       destinationStreetId?: string;
     };
+    const key = request.headers()["idempotency-key"];
+    const kind = path.endsWith("/free-move") ? "free-move" : "end-turn";
+    const receiptId = `${seat}:${key}`;
+    const previous = key ? acceptedKeys.get(receiptId) : undefined;
+    if (previous) {
+      if (previous.kind !== kind || previous.expectedRevision !== payload.expectedRevision
+        || previous.destinationStreetId !== payload.destinationStreetId)
+        return reply({ status: 409, json: { code: "idempotency_key_reused" } });
+      return reply({ status: 200, json: snapshot() });
+    }
+    if (options.http503FirstEndTurn && kind === "end-turn" && !firstHttp503) {
+      firstHttp503 = true;
+      return reply({ status: 503, json: { code: "temporarily_unavailable" } });
+    }
+    const complete = () => {
+      if (key) acceptedKeys.set(receiptId, {
+        kind, expectedRevision: payload.expectedRevision,
+        destinationStreetId: payload.destinationStreetId,
+      });
+      if (options.dropFirstEndTurnResponse && kind === "end-turn"
+        && !firstResponseDropped) {
+        firstResponseDropped = true;
+        // Server has committed but the HTTP ACK is lost in transit.
+        return route.abort("failed");
+      }
+      return reply({ status: 200, json: snapshot() });
+    };
 
     if (options.conflictOnFirstMove && path.endsWith("/free-move") && !conflictRaised) {
       conflictRaised = true;
@@ -292,7 +328,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       revision++;
       auditEvents.push({ revision, round: 1, kind: "free-move",
         actorId: seat, fromStreetId: fromStreet, toStreetId: streets[seat] });
-      return reply({ status: 200, json: snapshot() });
+      return complete();
     }
 
     if (path.endsWith("/end-turn")) {
@@ -307,7 +343,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         auditEvents.push({ revision, round: 1, kind: "round-settlement-pending",
           actorId: seat, fromStreetId: null, toStreetId: null });
       }
-      return reply({ status: 200, json: snapshot() });
+      return complete();
     }
 
     return reply({ status: 404 });
@@ -1129,4 +1165,46 @@ test("conditional wait preference remains scoped to current bearer after seat ro
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
   const matches = observedPolls.filter(p => p.supplied !== null && p.prefer !== null);
   expect(matches.every(p => p.prefer === "wait=5")).toBe(true);
+});
+
+test("lost HTTP ACK retries end-turn with identical UUID but only one authoritative event", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { dropFirstEndTurnResponse: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-active-player")).toHaveText("bob");
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(2);
+  const posts = observedHeaders.filter(x => x.path.endsWith("/end-turn"));
+  expect(posts).toHaveLength(2);
+  expect(posts[0].idempotencyKey).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  expect(posts[1].idempotencyKey).toBe(posts[0].idempotencyKey);
+  expect(posts[0].token).toBe(posts[1].token);
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+  const storage = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(storage)).not.toContain(posts[0].token);
+  expect(JSON.stringify(storage)).not.toContain(posts[0].idempotencyKey);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("HTTP 503 does not retry, mutate, or grant optimistic command success", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { http503FirstEndTurn: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-error")).toBeVisible();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-active-player")).toHaveText("alice");
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  const posts = observedHeaders.filter(x => x.path.endsWith("/end-turn"));
+  expect(posts).toHaveLength(1);
+  expect(posts[0].idempotencyKey).toBeTruthy();
 });

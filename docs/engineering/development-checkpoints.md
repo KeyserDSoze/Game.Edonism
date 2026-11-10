@@ -67,3 +67,9 @@ I job CI conservano Playwright UI e Playwright live (inclusi **due browser indip
 ## Rotazione del bearer di posto (#28)
 
 La [rotazione Development](development-seat-rotation.md) sostituisce un solo token di posto alla volta, scrivendo il nuovo digest cifrato *prima* della revoca in memoria. La revisione del gioco e il checkpoint delle carte non cambiano. Non si possono recuperare vecchi token o ottenere un nuovo token senza essere già in possesso di quello corrente. Il creator non riceve in automatico i token ruotati da altri browser. L'endpoint non esiste in Production.
+
+## Ricevute di comandi idempotenti (formato cifrato v2, #35)
+
+Il formato del **payload cifrato** passa da v1 a v2, mantenendo lo stesso envelope AES-256-GCM `EDONDM01`. Il payload v2 contiene `CommandReceipts`: massimo 64 ricevute di trasporto per match, senza token o carte. `DevelopmentMatchStore` salva la ricevuta e il `GameMatchCheckpoint` dell'azione accettata in un'unica operazione di cifratura + atomic rename, poi aggiorna lo stato in memoria e notifica il long polling. Un fallimento del file system non pubblica né evento né ricevuta.
+
+I file v1 esistenti restano leggibili; non contengono ricevute e vengono migrati automaticamente a v2 al primo comando accettato o rotazione token. Sul restore, le ricevute v2 sono validate contro il log eventi pubblico (UUID canonico, attore valido, tipo, destinazione, `ExpectedRevision + 1 = AcceptedRevision`, evento audit corrispondente e nessun duplicato per attore + UUID). Una ricevuta inconsistente impedisce il caricamento del match. Il `GameMatchCheckpoint` del Domain **resta v1**: non viene modificata alcuna fase o regola di gioco.

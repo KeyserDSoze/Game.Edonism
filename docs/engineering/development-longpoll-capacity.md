@@ -48,3 +48,7 @@ Dopo un 429 ricevuto dalla lettura pubblica, `DevelopmentMatchLab` non tratta l'
 **Playwright live**: quattro long poll reali di Alice contro API .NET 10, quinto rifiutato rapidamente con 429 e header di privacy; il browser indipendente di Bob continua a ricevere il nuovo turno quando Alice esegue `end-turn`, con storico revisionale coerente.
 
 **Fuori scope:** rate limiting globale, identity Production, DB/multi-instance pubsub, SignalR e regole #4/#6. Parent [#13](https://github.com/KeyserDSoze/Game.Edonism/issues/13) resta aperta. Checklist di tracking: [#36](https://github.com/KeyserDSoze/Game.Edonism/issues/36). Gate di chiusura: tre job CI xUnit/Playwright mocked/live verdi sul commit HEAD di `main`.
+
+## CI verificata del codice e conclusioni
+
+La [run #42747353267](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42747353267) sul commit `b64b368` è **completed/success sui tre job**: **208 xUnit**, **42 Playwright mocked UI**, **16 Playwright full-stack reale**. La suite prova quota 4/32 in-memory, 429 con Retry-After e nessuna credenziale/ETag, rotazione, cancellazione, fairness tra attori, e che il browser Bob vede il turno di Alice anche mentre le richieste Alice sono al limite. Nell'ultimo test live si conteggia anche il subscriber già attivo nel browser creator, senza assumere erroneamente quattro slot liberi prima del test. Per chiudere la issue, anche il commit di aggiornamento del ledger deve passare gli stessi gate su `main`.

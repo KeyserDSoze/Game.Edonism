@@ -40,6 +40,155 @@ public sealed class DevelopmentCheckpointPersistenceTests
             ActionDeckFixture.ActionIds(), ActionDeckFixture.ElectionDayId, 2026);
 
     [Fact]
+    public void AcceptedIdempotencyReceiptPersistsAtomicallyAndReplaysAfterRestart()
+    {
+        using var temp = new TempDirectory();
+        var first = new DevelopmentMatchStore(temp.Files());
+        var created = Create(first);
+        var alice = created.Credentials[0].Token;
+        var bob = created.Credentials[1].Token;
+        var id = created.MatchId;
+        var aliceKey = Guid.NewGuid().ToString("D");
+
+        Assert.True(first.TryEndTurn(id, alice, 0, out var accepted, aliceKey));
+        Assert.True(accepted!.Accepted);
+        Assert.Equal(1, accepted.State.Revision);
+
+        var encrypted = File.ReadAllText(Path.Combine(temp.PathOnDisk, id.ToString("N") + ".edonism"));
+        Assert.DoesNotContain(alice, encrypted);
+        Assert.DoesNotContain(bob, encrypted);
+        Assert.DoesNotContain(aliceKey, encrypted);
+        var persisted = temp.Files().Load(id);
+        Assert.NotNull(persisted);
+        Assert.Equal(2, persisted.FormatVersion);
+        Assert.Single(persisted.CommandReceipts!);
+        Assert.Equal("alice", persisted.CommandReceipts![0].ActorId);
+        Assert.Equal(aliceKey, persisted.CommandReceipts![0].Key);
+        Assert.Equal(1, persisted.CommandReceipts![0].AcceptedRevision);
+
+        var restarted = new DevelopmentMatchStore(temp.Files());
+        Assert.True(restarted.TryEndTurn(id, alice, 0, out var replay, aliceKey));
+        Assert.True(replay!.Accepted);
+        Assert.Equal(1, replay.State.Revision);
+        Assert.Equal(2, replay.State.Events.Count);
+        Assert.True(restarted.TryEndTurn(id, alice, 1, out var mismatched, aliceKey));
+        Assert.False(mismatched!.Accepted);
+        Assert.Equal("idempotency_key_reused", mismatched.Code);
+
+        // Identical UUID belongs to a DIFFERENT actor and is not a replay.
+        Assert.True(restarted.TryEndTurn(id, bob, 1, out var next, aliceKey));
+        Assert.True(next!.Accepted);
+        Assert.Equal(2, next.State.Revision);
+        var onceMore = new DevelopmentMatchStore(temp.Files());
+        Assert.True(onceMore.TryEndTurn(id, bob, 1, out var bobReplay, aliceKey));
+        Assert.True(bobReplay!.Accepted);
+        Assert.Equal(2, bobReplay.State.Revision);
+        Assert.Equal(3, bobReplay.State.Events.Count);
+    }
+
+    [Fact]
+    public void FailedEncryptedCommandCannotPublishReceiptOrWakeAStaleRevision()
+    {
+        using var temp = new TempDirectory();
+        var store = new DevelopmentMatchStore(temp.Files());
+        var created = Create(store);
+        var alice = created.Credentials[0].Token;
+        var id = created.MatchId;
+        var key = Guid.NewGuid().ToString("D");
+        Directory.Delete(temp.PathOnDisk, recursive: true);
+        File.WriteAllText(temp.PathOnDisk, "force atomic checkpoint write failure");
+
+        Assert.ThrowsAny<IOException>(() =>
+            store.TryEndTurn(id, alice, 0, out _, key));
+        Assert.True(store.TryRead(id, alice, out var notApplied));
+        Assert.Equal(0, notApplied!.Revision);
+        Assert.Single(notApplied.Events);
+
+        File.Delete(temp.PathOnDisk);
+        Directory.CreateDirectory(temp.PathOnDisk);
+        Assert.True(store.TryEndTurn(id, alice, 0, out var accepted, key));
+        Assert.True(accepted!.Accepted);
+        Assert.Equal(1, accepted.State.Revision);
+        var newStore = new DevelopmentMatchStore(temp.Files());
+        Assert.True(newStore.TryEndTurn(id, alice, 0, out var replay, key));
+        Assert.True(replay!.Accepted);
+        Assert.Equal(1, replay.State.Revision);
+        Assert.Equal(2, replay.State.Events.Count);
+    }
+
+    [Fact]
+    public void ValidLegacyEncryptedV1CheckpointCanBeReadAndMigratesToV2OnCommand()
+    {
+        using var temp = new TempDirectory();
+        var first = new DevelopmentMatchStore(temp.Files());
+        var created = Create(first);
+        var id = created.MatchId;
+        var alice = created.Credentials[0].Token;
+        var previous = temp.Files().Load(id);
+        Assert.NotNull(previous);
+
+        // Build an authentic v1 encrypted payload with no CommandReceipts
+        // property, as issued before #35. The envelope and AES AAD are
+        // unchanged: the version refers to the trusted plaintext metadata.
+        var legacyPayload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            FormatVersion = 1,
+            MatchId = id,
+            Checkpoint = previous.Checkpoint,
+            TokenDigests = previous.TokenDigests
+        });
+        var nonce = RandomNumberGenerator.GetBytes(12);
+        var cipher = new byte[legacyPayload.Length];
+        var tag = new byte[16];
+        using (var aes = new AesGcm(Convert.FromHexString(temp.KeyHex), 16))
+            aes.Encrypt(nonce, legacyPayload, cipher, tag, id.ToByteArray());
+        var bytes = new byte[8 + 12 + 16 + cipher.Length];
+        "EDONDM01"u8.CopyTo(bytes);
+        nonce.CopyTo(bytes, 8);
+        tag.CopyTo(bytes, 20);
+        cipher.CopyTo(bytes, 36);
+        File.WriteAllBytes(Path.Combine(temp.PathOnDisk, id.ToString("N") + ".edonism"), bytes);
+        CryptographicOperations.ZeroMemory(legacyPayload);
+
+        var legacyStore = new DevelopmentMatchStore(temp.Files());
+        Assert.True(legacyStore.TryRead(id, alice, out var unchanged));
+        Assert.Equal(0, unchanged!.Revision);
+        var key = Guid.NewGuid().ToString("D");
+        Assert.True(legacyStore.TryEndTurn(id, alice, 0, out var accepted, key));
+        Assert.True(accepted!.Accepted);
+
+        var migrated = temp.Files().Load(id);
+        Assert.NotNull(migrated);
+        Assert.Equal(2, migrated.FormatVersion);
+        Assert.Single(migrated.CommandReceipts!);
+        var subsequent = new DevelopmentMatchStore(temp.Files());
+        Assert.True(subsequent.TryEndTurn(id, alice, 0, out var replay, key));
+        Assert.True(replay!.Accepted);
+        Assert.Equal(1, replay.State.Revision);
+    }
+
+    [Fact]
+    public void EncryptedCheckpointWithForgedReceiptDoesNotRestore()
+    {
+        using var temp = new TempDirectory();
+        var first = new DevelopmentMatchStore(temp.Files());
+        var created = Create(first);
+        var data = temp.Files().Load(created.MatchId);
+        Assert.NotNull(data);
+        var digests = data.TokenDigests.ToDictionary(kv => kv.Key,
+            kv => Convert.FromHexString(kv.Value), StringComparer.Ordinal);
+        // AES authentication alone is not proof that a receipt corresponds
+        // to an actual canonical event, actor and accepted revision.
+        temp.Files().Save(data.Checkpoint, digests,
+        [
+            new DevCommandReceipt("bob", Guid.NewGuid().ToString("D"),
+                "end-turn", null, 0, 1)
+        ]);
+        var forged = new DevelopmentMatchStore(temp.Files());
+        Assert.False(forged.TryRead(created.MatchId, created.Credentials[0].Token, out _));
+    }
+
+    [Fact]
     public void StorageRoundTripsDifferentActorsPrivateHandsAndCommandsAfterRestart()
     {
         using var temp = new TempDirectory();

@@ -10,6 +10,15 @@ namespace Edonism.Api.Development;
 public sealed record DevSeatCredential(string PlayerId, string Token);
 public sealed record DevMatchCreated(Guid MatchId, MatchSnapshot State, IReadOnlyList<DevSeatCredential> Credentials);
 
+/// <summary>
+/// A single authenticated Development read under one match lock. The only
+/// private projection is the bearer holder's hand. Never persist or expose
+/// this DTO as a public, multi-seat or Production match snapshot.
+/// </summary>
+public sealed record DevSeatBootstrap(
+    Guid MatchId, string PlayerId, MatchSnapshot State,
+    MatchPrivateHandSnapshot Hand, MatchTurnOptions TurnOptions);
+
 public sealed class DevelopmentMatchStore
 {
     private readonly DevelopmentMatchCheckpointFiles? _checkpointFiles;
@@ -195,6 +204,33 @@ public sealed class DevelopmentMatchStore
         {
             if (entry.ResolveActor(token) is null) return false;
             snapshot = entry.Match.Snapshot();
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Atomic, actor-bound read for a browser joining a Development match.
+    /// Revocation, commands and checkpoint replacement share the same lock.
+    /// The public snapshot, private hand and legal options are one instant,
+    /// not independent HTTP reads that could straddle a revision change.
+    /// </summary>
+    public bool TryBootstrapSeat(Guid matchId, string? token, out DevSeatBootstrap? bootstrap)
+    {
+        bootstrap = null;
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            var actorId = entry.ResolveActor(token);
+            if (actorId is null) return false;
+            var hand = entry.Match.PrivateHandForActor(actorId);
+            var options = entry.Match.TurnOptionsForActor(actorId);
+            if (hand is null || options is null) return false;
+            var state = entry.Match.Snapshot();
+            if (options.Revision != state.Revision
+                || options.MatchId != matchId || hand.MatchId != matchId
+                || hand.PlayerId != actorId || options.PlayerId != actorId)
+                throw new InvalidOperationException("Development seat projections diverged.");
+            bootstrap = new DevSeatBootstrap(matchId, actorId, state, hand, options);
             return true;
         }
     }

@@ -108,6 +108,18 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "match_not_found" });
         });
 
+        // A single Development bootstrap joins state, this actor's private
+        // hand and the Domain's permissions at one revision under one lock.
+        // Authorization comes only from the bearer header, never query playerId.
+        group.MapGet("/{matchId:guid}/seat", (Guid matchId, HttpContext context,
+            DevelopmentMatchStore store) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return store.TryBootstrapSeat(matchId, Token(context), out var bootstrap)
+                ? Results.Ok(bootstrap)
+                : Results.NotFound(new { code = "match_not_found" });
+        });
+
         // Actor-scoped first-round options from the Domain, never from 3D/UI
         // geometry. This projection intentionally has no cards or token data.
         group.MapGet("/{matchId:guid}/turn-options", (Guid matchId, HttpContext context,

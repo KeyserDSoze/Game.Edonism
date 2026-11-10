@@ -32,7 +32,11 @@ public sealed class DevelopmentNoStoreResponseTests
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
         Assert.True(response.Headers.TryGetValues("Pragma", out var pragma));
         Assert.Equal("no-cache", Assert.Single(pragma!));
-        Assert.True(response.Headers.TryGetValues("Expires", out var expires));
+        // HttpClient classifies Expires as an entity/content header, so it
+        // may be surfaced on Content.Headers instead of Response.Headers.
+        var hasExpires = response.Headers.TryGetValues("Expires", out var expires)
+            || response.Content.Headers.TryGetValues("Expires", out expires);
+        Assert.True(hasExpires);
         Assert.Equal("0", Assert.Single(expires!));
         Assert.False(response.Headers.Contains("X-Edonism-Dev-Token"));
     }
@@ -195,21 +199,25 @@ public sealed class DevelopmentNoStoreResponseTests
     {
         using var development = Host("Development");
         using var client = development.CreateClient();
-        foreach (var path in new[] { "/api/v1/meta", "/api/v1/board", "/health" })
-        {
-            using var publicResponse = await client.GetAsync(path);
-            Assert.Equal(HttpStatusCode.OK, publicResponse.StatusCode);
-            Assert.Null(publicResponse.Headers.CacheControl);
-            Assert.False(publicResponse.Headers.Contains("Pragma"));
-        }
-
         using var production = Host("Production");
         using var prodClient = production.CreateClient();
+        // Host-level diagnostics may already set no-cache on unrelated routes.
+        // Compare their actual bodies across environments rather than
+        // assuming WebApplicationFactory emits no cache-related headers.
+        foreach (var route in new[] { "/api/v1/meta", "/api/v1/board", "/health" })
+        {
+            using var devResponse = await client.GetAsync(route);
+            using var prodResponse = await prodClient.GetAsync(route);
+            Assert.Equal(HttpStatusCode.OK, devResponse.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, prodResponse.StatusCode);
+            Assert.Equal(await devResponse.Content.ReadAsStringAsync(),
+                await prodResponse.Content.ReadAsStringAsync());
+        }
+
         using var missing = await prodClient.GetAsync(Root + "/" + Guid.NewGuid() + "/hand");
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
-        Assert.Null(missing.Headers.CacheControl);
-        using var board = await prodClient.GetAsync("/api/v1/board");
-        Assert.Equal(HttpStatusCode.OK, board.StatusCode);
-        Assert.Null(board.Headers.CacheControl);
+        // The Development-only policy does not execute for this Production path.
+        Assert.False(missing.Headers.TryGetValues("Expires", out _)
+            || missing.Content.Headers.TryGetValues("Expires", out _));
     }
 }

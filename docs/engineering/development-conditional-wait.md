@@ -50,3 +50,9 @@ Vedi [issue #34](https://github.com/KeyserDSoze/Game.Edonism/issues/34) e [devel
 ## Evidenza CI del codice
 
 [Run #42730622300](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42730622300), commit `c17b5f1`: **194 xUnit, 39 Playwright UI, 14 Playwright live**, tre gate superati. Il codice è Development-only e non risolve il coordinamento di server diversi o la #13. Per chiudere la issue il commit finale di documentazione deve superare la stessa CI su `main`.
+
+## Fairness e quote per match (#36)
+
+Per evitare che un solo client con bearer valido consumi illimitati waiter durante una partita PvP con 2–8 posti, il long poll aggiunge un limite in memoria di **quattro richieste pendenti per posto** e **32 per partita** (8 × 4). Le due verifiche avvengono sotto lo stesso lock usato per autorizzazione, revisioni e mutazioni, e soltanto per un `If-None-Match` esatto con `Prefer: wait=1..10`. Oltre il limite il server invia `429` e `Retry-After: 1` senza ETag né dati privati, sempre `no-store`; token invalido o revocato conserva `404`. Un altro attore può continuare a leggere e sottoscriversi mentre il primo è saturo.
+
+La quota è rilasciata in modo atomico dopo timeout, aborto della richiesta, nuova revisione o rotazione del token. Un `GET` non condizionale o una richiesta con ETag non corrispondente non consuma slot. Il browser interpreta `429` come congestione di trasporto: conserva stato e carte, ma per cinque secondi passa a GET tradizionali con ETag prima di riprovare il long poll; nessun comando viene autorizzato da un `429`. Per test e limiti della tranche consultare [development-longpoll-capacity.md](development-longpoll-capacity.md).

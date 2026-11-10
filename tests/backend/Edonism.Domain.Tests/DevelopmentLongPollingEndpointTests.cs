@@ -168,7 +168,10 @@ public sealed class DevelopmentLongPollingEndpointTests
             aborted.Token);
         await Task.Delay(100);
         aborted.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await pending);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            using var response = await pending;
+        });
 
         using var move = await alice.PostAsJsonAsync($"/api/dev/matches/{id}/end-turn",
             new { expectedRevision = 0 });

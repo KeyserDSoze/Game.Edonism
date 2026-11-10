@@ -1123,7 +1123,7 @@ test("conditional wait preference remains scoped to current bearer after seat ro
   await expect.poll(() => observedPolls.some(p => p.prefer === "wait=5"),
     { timeout: 9000 }).toBe(true);
   await page.getByTestId("dev-rotate-token").click();
-  await expect(page.getByTestId("dev-rotate-success")).toBeVisible();
+  await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
   await expect(page.getByTestId("dev-revision")).toHaveText("0");

@@ -158,6 +158,13 @@ public static class DevelopmentMatchEndpoints
                     TimeSpan.FromSeconds(seconds), context.RequestAborted);
                 if (!result.Found)
                     return Results.NotFound(new { code = "match_not_found" });
+                if (result.Saturated)
+                {
+                    // Authenticated congestion, NOT a session revocation.
+                    // The #33 response policy adds no-store to this 429 too.
+                    context.Response.Headers["Retry-After"] = "1";
+                    return Results.StatusCode(StatusCodes.Status429TooManyRequests);
+                }
                 snapshot = result.State!;
                 etag = $"W/\"edonism-revision-{snapshot.Revision}\"";
                 unchanged = conditions.Any(value => value.Trim() == etag || value.Trim() == "*");

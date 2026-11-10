@@ -19,9 +19,23 @@ public sealed record DevSeatBootstrap(
     Guid MatchId, string PlayerId, MatchSnapshot State,
     MatchPrivateHandSnapshot Hand, MatchTurnOptions TurnOptions);
 
+/// <summary>
+/// An actor-authenticated conditional read. Saturation is never an
+/// authorization grant or a match snapshot; retry after bounded backoff.
+/// </summary>
+public sealed record DevRevisionWaitResult(
+    bool Found, MatchSnapshot? State, bool Saturated = false);
+
 public sealed class DevelopmentMatchStore
 {
     private const int MaxRetainedReceipts = 64;
+    // Development single-process fairness: allow several tabs per player,
+    // but never let one bearer monopolize a multi-seat match.
+    public const int MaxPendingWaitsPerActor = 4;
+    public const int MaxPendingWaitsPerMatch = 32;
+
+    private sealed record RevisionWaiter(
+        string ActorId, TaskCompletionSource<bool> Signal);
     private readonly DevelopmentMatchCheckpointFiles? _checkpointFiles;
 
     public DevelopmentMatchStore(DevelopmentMatchCheckpointFiles? checkpointFiles = null)
@@ -47,12 +61,12 @@ public sealed class DevelopmentMatchStore
         // A bounded list of in-flight conditional HTTP reads. On every state
         // change, signal all waiters asynchronously; on timeout or cancellation,
         // each waiter removes itself. No retained idle-match continuations.
-        public readonly List<TaskCompletionSource<bool>> RevisionWaiters = [];
+        public readonly List<RevisionWaiter> RevisionWaiters = [];
 
         public void NotifySubscribers()
         {
             foreach (var waiter in RevisionWaiters)
-                waiter.TrySetResult(true);
+                waiter.Signal.TrySetResult(true);
             RevisionWaiters.Clear();
         }
 
@@ -257,43 +271,54 @@ public sealed class DevelopmentMatchStore
     /// moves nor rotations can be missed between the check and subscription.
     /// Each wake/timeout revalidates the bearer before returning even 304.
     /// </summary>
-    public async Task<(bool Found, MatchSnapshot? State)> WaitForRevisionAsync(
+    public async Task<DevRevisionWaitResult> WaitForRevisionAsync(
         Guid matchId, string? token, long knownRevision, TimeSpan timeout,
         CancellationToken cancellationToken = default)
     {
-        if (!TryGetEntry(matchId, out var entry)) return (false, null);
-        var waiter = new TaskCompletionSource<bool>(
+        if (!TryGetEntry(matchId, out var entry)) return new(false, null);
+        var signal = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        RevisionWaiter? subscription = null;
         lock (entry.Gate)
         {
-            if (entry.ResolveActor(token) is null) return (false, null);
+            // Always authorize BEFORE capacity checks: a forged/revoked token
+            // must not enumerate the number of subscribers or get an ETag.
+            var actorId = entry.ResolveActor(token);
+            if (actorId is null) return new(false, null);
             var snapshot = entry.Match.Snapshot();
-            if (snapshot.Revision != knownRevision) return (true, snapshot);
-            entry.RevisionWaiters.Add(waiter);
+            if (snapshot.Revision != knownRevision) return new(true, snapshot);
+            if (entry.RevisionWaiters.Count >= MaxPendingWaitsPerMatch
+                || entry.RevisionWaiters.Count(x => x.ActorId == actorId)
+                    >= MaxPendingWaitsPerActor)
+                return new(true, null, Saturated: true);
+
+            subscription = new RevisionWaiter(actorId, signal);
+            entry.RevisionWaiters.Add(subscription);
         }
 
         try
         {
             try
             {
-                await waiter.Task.WaitAsync(timeout, cancellationToken);
+                // No match lock held while waiting and no busy loop.
+                await signal.Task.WaitAsync(timeout, cancellationToken);
             }
             catch (TimeoutException)
             {
-                // A quiet match is not an error: the endpoint returns 304.
+                // No change: return the current revision for HTTP 304.
             }
         }
         finally
         {
             lock (entry.Gate)
-                entry.RevisionWaiters.Remove(waiter);
+                entry.RevisionWaiters.Remove(subscription!);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
         lock (entry.Gate)
         {
-            if (entry.ResolveActor(token) is null) return (false, null);
-            return (true, entry.Match.Snapshot());
+            if (entry.ResolveActor(token) is null) return new(false, null);
+            return new(true, entry.Match.Snapshot());
         }
     }
 

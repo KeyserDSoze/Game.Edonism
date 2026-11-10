@@ -335,6 +335,7 @@ export function DevelopmentMatchLab({
     let polling = false;
     let pendingRequest: AbortController | null = null;
     let retryWhenVisible = false;
+    let waitCooldownUntil = 0;
     const check = async () => {
       if (polling || controller.signal.aborted || commandInFlight.current
         || document.visibilityState === "hidden") return;
@@ -347,10 +348,10 @@ export function DevelopmentMatchLab({
         if (tagged?.matchId === matchId && tagged.token === actorToken
           && tagged.revision === currentRevision.current) {
           headers["If-None-Match"] = tagged.value;
-          // Wait for a new revision or revocation rather than fetching the
-          // unchanged public snapshot every 1.5 s. An unsupported server
-          // still answers 304 and the normal poll remains a safe fallback.
-          headers["Prefer"] = "wait=5";
+          // A saturated Development match can reject a long poll with 429.
+          // Fall back to ordinary conditional GETs for a bounded cooldown
+          // instead of repeatedly allocating new pending waiters.
+          if (Date.now() >= waitCooldownUntil) headers["Prefer"] = "wait=5";
         }
         const request = new AbortController();
         pendingRequest = request;
@@ -364,6 +365,13 @@ export function DevelopmentMatchLab({
         if (response.status === 404) {
           if (!controller.signal.aborted && !pendingRequest?.signal.aborted)
             reconcileRevokedSeat(matchId, seatId, actorToken);
+          return;
+        }
+        // 429 means the long-poll queue is full, NOT that the bearer
+        // expired. Keep the current hand, ETag and game state, then use
+        // short ordinary conditional GETs until the cooldown expires.
+        if (response.status === 429) {
+          waitCooldownUntil = Date.now() + 5000;
           return;
         }
         // A conditional GET never returns JSON on 304, nor advances UI state.

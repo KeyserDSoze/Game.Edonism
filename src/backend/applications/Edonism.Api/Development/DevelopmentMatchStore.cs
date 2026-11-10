@@ -40,6 +40,18 @@ public sealed class DevelopmentMatchStore
         public GameMatch Match { get; set; }
         public Dictionary<string, byte[]> TokenDigests { get; }
 
+        // A bounded list of in-flight conditional HTTP reads. On every state
+        // change, signal all waiters asynchronously; on timeout or cancellation,
+        // each waiter removes itself. No retained idle-match continuations.
+        public readonly List<TaskCompletionSource<bool>> RevisionWaiters = [];
+
+        public void NotifySubscribers()
+        {
+            foreach (var waiter in RevisionWaiters)
+                waiter.TrySetResult(true);
+            RevisionWaiters.Clear();
+        }
+
         public string? ResolveActor(string? token)
         {
             if (string.IsNullOrWhiteSpace(token) || token.Length != 64) return null;
@@ -191,6 +203,9 @@ public sealed class DevelopmentMatchStore
             // Never change the live actor digest on failed encryption or I/O.
             _checkpointFiles?.Save(entry.Match.CaptureCheckpoint(), nextDigests);
             entry.TokenDigests[actor] = digest;
+            // A revocation changes no public revision, but old subscribers
+            // must wake and reauthenticate instead of waiting for gameplay.
+            entry.NotifySubscribers();
             replacement = new DevSeatCredential(actor, newToken);
             return true;
         }
@@ -205,6 +220,52 @@ public sealed class DevelopmentMatchStore
             if (entry.ResolveActor(token) is null) return false;
             snapshot = entry.Match.Snapshot();
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Await a later public revision without holding the match lock. Waiters
+    /// are registered atomically with the initial revision check, so neither
+    /// moves nor rotations can be missed between the check and subscription.
+    /// Each wake/timeout revalidates the bearer before returning even 304.
+    /// </summary>
+    public async Task<(bool Found, MatchSnapshot? State)> WaitForRevisionAsync(
+        Guid matchId, string? token, long knownRevision, TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryGetEntry(matchId, out var entry)) return (false, null);
+        var waiter = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (entry.Gate)
+        {
+            if (entry.ResolveActor(token) is null) return (false, null);
+            var snapshot = entry.Match.Snapshot();
+            if (snapshot.Revision != knownRevision) return (true, snapshot);
+            entry.RevisionWaiters.Add(waiter);
+        }
+
+        try
+        {
+            try
+            {
+                await waiter.Task.WaitAsync(timeout, cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                // A quiet match is not an error: the endpoint returns 304.
+            }
+        }
+        finally
+        {
+            lock (entry.Gate)
+                entry.RevisionWaiters.Remove(waiter);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (entry.Gate)
+        {
+            if (entry.ResolveActor(token) is null) return (false, null);
+            return (true, entry.Match.Snapshot());
         }
     }
 
@@ -310,10 +371,16 @@ public sealed class DevelopmentMatchStore
                 : GameMatch.RestoreFromCheckpoint(BoardCatalog.LoadDefault(),
                     entry.Match.CaptureCheckpoint());
             outcome = action(target, actorId);
-            if (outcome.Accepted && _checkpointFiles is not null)
+            if (outcome.Accepted)
             {
-                _checkpointFiles.Save(target.CaptureCheckpoint(), entry.TokenDigests);
-                entry.Match = target;
+                if (_checkpointFiles is not null)
+                {
+                    _checkpointFiles.Save(target.CaptureCheckpoint(), entry.TokenDigests);
+                    entry.Match = target;
+                }
+                // Wake only for a successfully committed mutation; rejected
+                // commands and failed encrypted writes are never announced.
+                entry.NotifySubscribers();
             }
             return true;
         }

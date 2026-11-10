@@ -137,24 +137,36 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "hand_not_found" });
         });
 
-        // The bearer is validated before handling a conditional GET; a revoked
-        // token can never receive 304 and infer that a match exists. The tag
-        // exposes ONLY the public revision, never a private hand or credential.
-        group.MapGet("/{matchId:guid}", (Guid matchId, HttpContext context, DevelopmentMatchStore store) =>
+        // Prefer: wait=N activates a bounded, authenticated conditional
+        // long poll ONLY when the supplied ETag matches the current revision.
+        // A waiter reauthenticates after wake (including token revocation).
+        // No match lock or request thread remains blocked during the wait.
+        group.MapGet("/{matchId:guid}", async (Guid matchId, HttpContext context,
+            DevelopmentMatchStore store) =>
         {
-            if (!store.TryRead(matchId, Token(context), out var snapshot))
+            var token = Token(context);
+            if (!store.TryRead(matchId, token, out var snapshot))
                 return Results.NotFound(new { code = "match_not_found" });
 
-            var etag = $"W/\"edonism-revision-{snapshot!.Revision}\"";
-            context.Response.Headers.ETag = etag;
-            // An ETag is scoped to this URL and reflects the current match
-            // revision. Match/token changes remain the caller's responsibility.
+            var etag = $"W/\\"edonism-revision-{snapshot!.Revision}\\"";
             var conditions = context.Request.Headers.IfNoneMatch.ToString().Split(',');
-            return conditions.Any(condition => condition.Trim() == etag || condition.Trim() == "*")
+            var unchanged = conditions.Any(value => value.Trim() == etag || value.Trim() == "*");
+            if (unchanged && BoundedWaitSeconds(context.Request.Headers.Prefer.ToString()) is int seconds)
+            {
+                var result = await store.WaitForRevisionAsync(matchId, token, snapshot.Revision,
+                    TimeSpan.FromSeconds(seconds), context.RequestAborted);
+                if (!result.Found)
+                    return Results.NotFound(new { code = "match_not_found" });
+                snapshot = result.State!;
+                etag = $"W/\\"edonism-revision-{snapshot.Revision}\\"";
+                unchanged = conditions.Any(value => value.Trim() == etag || value.Trim() == "*");
+            }
+
+            context.Response.Headers.ETag = etag;
+            return unchanged
                 ? Results.StatusCode(StatusCodes.Status304NotModified)
                 : Results.Ok(snapshot);
         });
-
 
         // Issue #28: a seat holder can invalidate only their own Development
         // capability. No playerId/body input and no publicly cached response.
@@ -193,6 +205,19 @@ public static class DevelopmentMatchEndpoints
     }
 
     private static string Token(HttpContext context) => context.Request.Headers[TokenHeader].ToString();
+
+    private static int? BoundedWaitSeconds(string prefer)
+    {
+        // Ignore arbitrary/invalid preferences rather than allowing clients
+        // to hold connections indefinitely. An out-of-range wait is a normal
+        // conditional GET (304), not a request with a clamped long timeout.
+        if (!prefer.StartsWith("wait=", StringComparison.OrdinalIgnoreCase))
+            return null;
+        var candidate = prefer["wait=".Length..];
+        return int.TryParse(candidate, out var seconds) && seconds is >= 1 and <= 10
+            ? seconds
+            : null;
+    }
     private static IResult Result(MatchCommandResult result) =>
         result.Accepted
             ? Results.Ok(result.State)

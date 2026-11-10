@@ -47,7 +47,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       fromStreetId: null, toStreetId: null },
   ];
   const observedHeaders: Array<{ path: string; token: string | undefined }> = [];
-  const observedPolls: Array<{ status: number; supplied: string | null; etag: string }> = [];
+  const observedPolls: Array<{ status: number; supplied: string | null; etag: string; prefer: string | null }> = [];
 
   const snapshot = () => ({
     matchId: "00000000-0000-0000-0000-000000000020",
@@ -248,12 +248,12 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     if (request.method() === "GET") {
       const etag = `W/"edonism-revision-${revision}"`;
       if (snapshotFailure) {
-        observedPolls.push({ status: 503, supplied: null, etag });
+        observedPolls.push({ status: 503, supplied: null, etag, prefer: request.headers()["prefer"] ?? null });
         return reply({ status: 503, json: { code: "temporarily_unavailable" } });
       }
       const supplied = request.headers()["if-none-match"] ?? null;
       const status = supplied === etag ? 304 : 200;
-      observedPolls.push({ status, supplied, etag });
+      observedPolls.push({ status, supplied, etag, prefer: request.headers()["prefer"] ?? null });
       return reply(status === 304
         ? { status, headers: { ETag: etag, "Cache-Control": "no-store" }, body: "" }
         : { status, headers: { ETag: etag, "Cache-Control": "no-store" }, json: snapshot() });
@@ -1080,4 +1080,53 @@ test("mocked private responses remain no-store across creator seat changes", asy
   expect(JSON.stringify(storage)).not.toContain("b".repeat(64));
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);
+});
+
+test("conditional polling uses Prefer wait only for authenticated, known revisions", async ({ page }) => {
+  const { observedPolls, advanceOtherActor } = await mockMatchApi(page);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect.poll(() => observedPolls.some(p =>
+    p.status === 200 && p.supplied === null && p.prefer === null),
+    { timeout: 8000 }).toBe(true);
+  await expect.poll(() => observedPolls.some(p => p.status === 304
+    && p.supplied === 'W/"edonism-revision-0"' && p.prefer === "wait=5"),
+  { timeout: 9000 }).toBe(true);
+
+  advanceOtherActor();
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByTestId("dev-revision")).toHaveText("1", { timeout: 10000 });
+  await expect.poll(() => observedPolls.some(p =>
+    p.status === 200 && p.prefer === "wait=5"
+      && p.supplied === 'W/"edonism-revision-0"'
+      && p.etag === 'W/"edonism-revision-1"'), { timeout: 9000 }).toBe(true);
+  await expect.poll(() => observedPolls.some(p =>
+    p.status === 304 && p.supplied === 'W/"edonism-revision-1"'
+      && p.prefer === "wait=5"), { timeout: 9000 }).toBe(true);
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  const storage = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage), session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(storage)).not.toContain("a".repeat(64));
+  expect(JSON.stringify(storage)).not.toContain("b".repeat(64));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("conditional wait preference remains scoped to current bearer after seat rotation", async ({ page }) => {
+  const { observedPolls } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect.poll(() => observedPolls.some(p => p.prefer === "wait=5"),
+    { timeout: 9000 }).toBe(true);
+  await page.getByTestId("dev-rotate-token").click();
+  await expect(page.getByTestId("dev-rotate-success")).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  const matches = observedPolls.filter(p => p.supplied !== null && p.prefer !== null);
+  expect(matches.every(p => p.prefer === "wait=5")).toBe(true);
 });

@@ -182,11 +182,11 @@ public static class DevelopmentMatchEndpoints
         group.MapPost("/{matchId:guid}/free-move", (
             Guid matchId, DevelopmentFreeMoveRequest request, HttpContext context, DevelopmentMatchStore store) =>
         {
+            if (!TryCommandKey(context, out var key))
+                return Results.BadRequest(new { code = "invalid_idempotency_key" });
             if (!store.TryFreeMove(matchId, Token(context), request.DestinationStreetId,
-                    request.ExpectedRevision, out var result))
-            {
+                    request.ExpectedRevision, out var result, key))
                 return Results.NotFound(new { code = "match_not_found" });
-            }
 
             return Result(result!);
         });
@@ -194,10 +194,11 @@ public static class DevelopmentMatchEndpoints
         group.MapPost("/{matchId:guid}/end-turn", (
             Guid matchId, DevelopmentEndTurnRequest request, HttpContext context, DevelopmentMatchStore store) =>
         {
-            if (!store.TryEndTurn(matchId, Token(context), request.ExpectedRevision, out var result))
-            {
+            if (!TryCommandKey(context, out var key))
+                return Results.BadRequest(new { code = "invalid_idempotency_key" });
+            if (!store.TryEndTurn(matchId, Token(context), request.ExpectedRevision,
+                    out var result, key))
                 return Results.NotFound(new { code = "match_not_found" });
-            }
 
             return Result(result!);
         });
@@ -206,6 +207,21 @@ public static class DevelopmentMatchEndpoints
     }
 
     private static string Token(HttpContext context) => context.Request.Headers[TokenHeader].ToString();
+
+    private static bool TryCommandKey(HttpContext context, out string? key)
+    {
+        // Optional opt-in: historical Development clients without a key retain
+        // their original optimistic-concurrency behavior. Never use the key
+        // as an authorization credential or allow it in the query string.
+        key = null;
+        var supplied = context.Request.Headers["Idempotency-Key"];
+        if (supplied.Count == 0) return true;
+        if (supplied.Count != 1 || !Guid.TryParseExact(supplied.ToString(), "D", out var parsed)
+            || parsed == Guid.Empty)
+            return false;
+        key = parsed.ToString("D");
+        return true;
+    }
 
     private static int? BoundedWaitSeconds(string prefer)
     {

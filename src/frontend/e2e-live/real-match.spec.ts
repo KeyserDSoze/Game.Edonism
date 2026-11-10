@@ -1136,8 +1136,9 @@ test("real .NET: full Alice long-poll quota returns 429 without starving Bob bro
     await expect(guest.getByTestId("dev-seat-bob")).toBeVisible();
     await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
 
-    // Four concurrent authenticated requests occupy only Alice's slots.
-    // Bob's browser is free to poll even while Alice is at quota.
+    // The creator's own Alice browser can already hold one long poll,
+    // so up to three of the following four requests may be pending. A
+    // surplus 429 is expected and must never affect Bob's separate quota.
     const all = Array.from({ length: 4 }, () => request.get(api, {
       headers: waiting,
       timeout: 8000,
@@ -1154,7 +1155,15 @@ test("real .NET: full Alice long-poll quota returns 429 without starving Bob bro
 
     await page.getByTestId("dev-end-turn").click();
     const done = await Promise.all(all);
+    expect(done.filter(r => r.status() === 200).length).toBeGreaterThanOrEqual(3);
     for (const response of done) {
+      if (response.status() === 429) {
+        // The creator's own in-flight poll may be the fourth subscriber.
+        expect(response.headers()["retry-after"]).toBe("1");
+        expect(response.headers()["cache-control"]).toBe("no-store");
+        expect(response.headers()["etag"]).toBeUndefined();
+        continue;
+      }
       expect(response.status()).toBe(200);
       expect(response.headers()["etag"]).toBe('W/"edonism-revision-1"');
       expect((await response.json() as PublicMatch).revision).toBe(1);

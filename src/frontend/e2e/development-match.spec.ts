@@ -20,6 +20,7 @@ type MockOptions = {
   delayFirstAliceOptions?: boolean;
   dropFirstEndTurnResponse?: boolean;
   http503FirstEndTurn?: boolean;
+  overloadFirstConditionalWait?: boolean;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
@@ -43,6 +44,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayedAliceOptions = false;
   let firstResponseDropped = false;
   let firstHttp503 = false;
+  let firstOverloadedPoll = false;
   const acceptedKeys = new Map<string, {
     kind: string; expectedRevision: number; destinationStreetId?: string;
   }>();
@@ -261,6 +263,12 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         return reply({ status: 503, json: { code: "temporarily_unavailable" } });
       }
       const supplied = request.headers()["if-none-match"] ?? null;
+      if (options.overloadFirstConditionalWait && !firstOverloadedPoll
+        && supplied === etag && request.headers()["prefer"] === "wait=5") {
+        firstOverloadedPoll = true;
+        observedPolls.push({ status: 429, supplied, etag, prefer: "wait=5" });
+        return reply({ status: 429, headers: { "Retry-After": "1" }, body: "" });
+      }
       const status = supplied === etag ? 304 : 200;
       observedPolls.push({ status, supplied, etag, prefer: request.headers()["prefer"] ?? null });
       return reply(status === 304
@@ -1207,4 +1215,52 @@ test("HTTP 503 does not retry, mutate, or grant optimistic command success", asy
   const posts = observedHeaders.filter(x => x.path.endsWith("/end-turn"));
   expect(posts).toHaveLength(1);
   expect(posts[0].idempotencyKey).toBeTruthy();
+});
+
+test("saturated conditional polling recovers without revoking private hand or retry storm", async ({ page }) => {
+  const { observedPolls } = await mockMatchApi(page,
+    { overloadFirstConditionalWait: true });
+  const throttled: Array<{ status: number; headers: Record<string, string> }> = [];
+  page.on("response", response => {
+    const path = new URL(response.url()).pathname;
+    if (path === "/api/dev/matches/00000000-0000-0000-0000-000000000020"
+      && response.status() === 429) {
+      throttled.push({ status: response.status(), headers: response.headers() });
+    }
+  });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-seat-alice")).toBeVisible();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+
+  await expect.poll(() => observedPolls.some(p =>
+    p.status === 429 && p.prefer === "wait=5"), { timeout: 10000 }).toBe(true);
+  await expect.poll(() => observedPolls.some(p =>
+    p.status === 304 && p.prefer === null && p.supplied === 'W/"edonism-revision-0"'),
+  { timeout: 10000 }).toBe(true);
+  expect(throttled).toHaveLength(1);
+  expect(throttled[0].headers["retry-after"]).toBe("1");
+  expect(throttled[0].headers["cache-control"]).toBe("no-store");
+  expect(throttled[0].headers["pragma"]).toBe("no-cache");
+  expect(observedPolls.filter(p => p.status === 429)).toHaveLength(1);
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-active-player")).toHaveText("bob");
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(2);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+  const data = await page.evaluate(() => ({
+    url: location.href,
+    local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(data)).not.toContain("a".repeat(64));
+  expect(JSON.stringify(data)).not.toContain("b".repeat(64));
 });

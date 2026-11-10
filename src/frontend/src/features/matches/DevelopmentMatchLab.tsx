@@ -616,46 +616,75 @@ export function DevelopmentMatchLab({
     if (kind === "free-move"
       && (!destinationStreetId || !turnOptions.freeMoveStreetIds.includes(destinationStreetId)))
       return;
+    const matchId = session.matchId;
+    const playerId = actorId;
+    const actorToken = token;
+    const expectedRevision = session.state.revision;
+    // One UUID per user intention, NEVER per network attempt. ASP.NET persists
+    // accepted receipts atomically with the match before acknowledging success.
+    const commandId = crypto.randomUUID();
+    const payload = JSON.stringify(
+      kind === "free-move"
+        ? { destinationStreetId, expectedRevision }
+        : { expectedRevision },
+    );
+    const isCurrentActor = () => {
+      const current = currentActorScope.current;
+      return current?.matchId === matchId && current?.seatId === playerId
+        && current?.token === actorToken;
+    };
+    const send = () => fetch(`/api/dev/matches/${matchId}/${kind}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Edonism-Dev-Token": actorToken,
+        "Idempotency-Key": commandId,
+      },
+      body: payload,
+      cache: "no-store",
+    });
     commandInFlight.current = true;
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(`/api/dev/matches/${session.matchId}/${kind}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Edonism-Dev-Token": token,
-        },
-        body: JSON.stringify(
-          kind === "free-move"
-            ? { destinationStreetId, expectedRevision: session.state.revision }
-            : { expectedRevision: session.state.revision },
-        ),
-        cache: "no-store",
-      });
+      let response: Response;
+      try {
+        response = await send();
+      } catch {
+        // Only a transport failure is ambiguous: server may have committed
+        // without delivering the ACK. Retry ONCE with the identical key,
+        // actor, revision, command and body. Never retry a 409, 404 or 5xx.
+        if (!isCurrentActor() || currentRevision.current !== expectedRevision)
+          return;
+        response = await send();
+      }
+      if (!isCurrentActor()) return;
       if (response.status === 404) {
-        reconcileRevokedSeat(session.matchId, actorId, token);
+        reconcileRevokedSeat(matchId, playerId, actorToken);
         return;
       }
       if (response.status === 409) {
-        // Server wins on optimistic concurrency. Never guess the next state.
+        // The server wins; key re-use with altered parameters also returns
+        // 409. Refresh from the server, never invent or replay a turn locally.
         const refreshed = await responseJson<DemoMatch>(
-          await fetch(`/api/dev/matches/${session.matchId}`, {
-            headers: { "X-Edonism-Dev-Token": token },
+          await fetch(`/api/dev/matches/${matchId}`, {
+            headers: { "X-Edonism-Dev-Token": actorToken },
             cache: "no-store",
           }),
         );
-        if (acceptServerState(refreshed, session.matchId)) {
-          const confirmedStreet = refreshed.players.find((seat) => seat.playerId === actorId)?.streetId;
+        if (!isCurrentActor()) return;
+        if (acceptServerState(refreshed, matchId)) {
+          const confirmedStreet = refreshed.players.find((seat) => seat.playerId === playerId)?.streetId;
           if (confirmedStreet && streetById(confirmedStreet)) onStreetSelect(confirmedStreet);
         }
         setError(t("dev.conflict"));
         return;
       }
       const next = await responseJson<DemoMatch>(response);
-      const applied = acceptServerState(next, session.matchId);
+      if (!isCurrentActor()) return;
+      const applied = acceptServerState(next, matchId);
       if (applied && kind === "free-move" && player) {
-        const newStreet = next.players.find((seat) => seat.playerId === actorId)?.streetId;
+        const newStreet = next.players.find((seat) => seat.playerId === playerId)?.streetId;
         if (newStreet) onStreetSelect(newStreet);
       }
     } catch {

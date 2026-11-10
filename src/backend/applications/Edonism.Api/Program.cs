@@ -30,6 +30,27 @@ builder.Services.AddCors(options => options.AddPolicy("frontend", policy =>
 }));
 
 var app = builder.Build();
+
+// Issue #33: the Development match endpoints may issue all-seat bearer
+// capabilities or actor-private hands. Apply response privacy headers BEFORE
+// routing/model binding so 201/200/304/400/404/409 (even bad JSON and unknown
+// paths under this prefix) are never cacheable by compliant HTTP caches.
+// Do not expose this Development-specific middleware in Production.
+if (app.Environment.IsDevelopment())
+{
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Path.StartsWithSegments("/api/dev/matches"))
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers.Pragma = "no-cache";
+            context.Response.Headers.Expires = "0";
+        }
+
+        await next();
+    });
+}
+
 app.UseCors("frontend");
 app.MapHealthChecks("/health");
 app.MapGet("/api/v1/meta", () => Results.Ok(new

@@ -114,7 +114,6 @@ public static class DevelopmentMatchEndpoints
         group.MapGet("/{matchId:guid}/seat", (Guid matchId, HttpContext context,
             DevelopmentMatchStore store) =>
         {
-            context.Response.Headers.CacheControl = "no-store";
             return store.TryBootstrapSeat(matchId, Token(context), out var bootstrap)
                 ? Results.Ok(bootstrap)
                 : Results.NotFound(new { code = "match_not_found" });
@@ -125,7 +124,6 @@ public static class DevelopmentMatchEndpoints
         group.MapGet("/{matchId:guid}/turn-options", (Guid matchId, HttpContext context,
             DevelopmentMatchStore store) =>
         {
-            context.Response.Headers.CacheControl = "no-store";
             return store.TryReadTurnOptions(matchId, Token(context), out var options)
                 ? Results.Ok(options)
                 : Results.NotFound(new { code = "match_not_found" });
@@ -144,7 +142,6 @@ public static class DevelopmentMatchEndpoints
         // exposes ONLY the public revision, never a private hand or credential.
         group.MapGet("/{matchId:guid}", (Guid matchId, HttpContext context, DevelopmentMatchStore store) =>
         {
-            context.Response.Headers.CacheControl = "no-store";
             if (!store.TryRead(matchId, Token(context), out var snapshot))
                 return Results.NotFound(new { code = "match_not_found" });
 
@@ -164,7 +161,6 @@ public static class DevelopmentMatchEndpoints
         group.MapPost("/{matchId:guid}/rotate-token", (
             Guid matchId, HttpContext context, DevelopmentMatchStore store) =>
         {
-            context.Response.Headers.CacheControl = "no-store";
             return store.TryRotateSeatToken(matchId, Token(context), out var credential)
                 ? Results.Ok(credential)
                 : Results.NotFound(new { code = "match_not_found" });

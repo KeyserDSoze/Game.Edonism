@@ -57,3 +57,5 @@ Il bootstrap valido **inizializza direttamente** mano e opzioni, saltando solo l
 Non viene aggiunta alcuna identità Production, gestione account, durabilità multi-processo, distribuzione di carte, risoluzione azioni, tasse, elezione o settlement. #13 (Production auth/DB) e #4/#6 (regole e motore) restano aperte. Non scambiare i cataloghi sintetici Development per carte ufficiali: #19 è aperta.
 
 Seguire la [issue #32](https://github.com/KeyserDSoze/Game.Edonism/issues/32), il [ledger](development-ledger.md) e la CI effettiva prima di considerare completata la tranche.
+
+**Test completati sul codice:** [run #42725442604](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42725442604), commit `195e65d`: 183 test xUnit, 36 Playwright UI e 12 Playwright live, tutti verdi. Il ledger ne riporta il gate verificato.

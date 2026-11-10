@@ -84,6 +84,36 @@ public sealed class DevelopmentCheckpointPersistenceTests
         Assert.True(bobReplay!.Accepted);
         Assert.Equal(2, bobReplay.State.Revision);
         Assert.Equal(3, bobReplay.State.Events.Count);
+
+        // A replay after somebody else advanced the game returns the CURRENT
+        // authoritative state, not a stale snapshot from the original ACK.
+        Assert.True(onceMore.TryEndTurn(id, alice, 0, out var lateReplay, aliceKey));
+        Assert.True(lateReplay!.Accepted);
+        Assert.Equal(2, lateReplay.State.Revision);
+        Assert.Equal(3, lateReplay.State.Events.Count);
+    }
+
+    [Fact]
+    public async Task IdempotentReplayDoesNotWakeSubscribersOrAdvanceAnyRevision()
+    {
+        var store = new DevelopmentMatchStore();
+        var created = Create(store);
+        var alice = created.Credentials[0].Token;
+        var bob = created.Credentials[1].Token;
+        var id = created.MatchId;
+        var key = Guid.NewGuid().ToString("D");
+        Assert.True(store.TryEndTurn(id, alice, 0, out var first, key));
+        Assert.True(first!.Accepted);
+
+        var pending = store.WaitForRevisionAsync(
+            id, bob, 1, TimeSpan.FromMilliseconds(250));
+        Assert.True(store.TryEndTurn(id, alice, 0, out var replay, key));
+        Assert.True(replay!.Accepted);
+        Assert.False(pending.IsCompleted);
+        var idle = await pending.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.True(idle.Found);
+        Assert.Equal(1, idle.State!.Revision);
+        Assert.Equal(2, idle.State.Events.Count);
     }
 
     [Fact]

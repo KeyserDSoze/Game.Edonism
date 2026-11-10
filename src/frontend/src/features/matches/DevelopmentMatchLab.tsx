@@ -322,8 +322,9 @@ export function DevelopmentMatchLab({
     return () => controller.abort();
   }, [session?.matchId, token]);
 
-  // No periodic full snapshots if the public revision is unchanged.
-  // A 304 still follows a bearer-authenticated server read. Resume polling
+  // Long-poll an authenticated, revision-scoped ETag instead of issuing
+  // full snapshots while idle. 304 still verifies the bearer on the server.
+  // Resume polling
   // promptly when the tab becomes visible or the network comes back.
   useEffect(() => {
     const matchId = session?.matchId;
@@ -332,6 +333,8 @@ export function DevelopmentMatchLab({
     if (!matchId || !actorToken) return;
     const controller = new AbortController();
     let polling = false;
+    let pendingRequest: AbortController | null = null;
+    let retryWhenVisible = false;
     const check = async () => {
       if (polling || controller.signal.aborted || commandInFlight.current
         || document.visibilityState === "hidden") return;
@@ -344,16 +347,22 @@ export function DevelopmentMatchLab({
         if (tagged?.matchId === matchId && tagged.token === actorToken
           && tagged.revision === currentRevision.current) {
           headers["If-None-Match"] = tagged.value;
+          // Wait for a new revision or revocation rather than fetching the
+          // unchanged public snapshot every 1.5 s. An unsupported server
+          // still answers 304 and the normal poll remains a safe fallback.
+          headers["Prefer"] = "wait=5";
         }
+        const request = new AbortController();
+        pendingRequest = request;
         const response = await fetch(`/api/dev/matches/${matchId}`, {
           headers,
-          signal: controller.signal,
+          signal: request.signal,
           cache: "no-store",
         });
         // A cached ETag is never an authorization grant. 404 with the
         // current bearer means the seat has been revoked or match is gone.
         if (response.status === 404) {
-          if (!controller.signal.aborted)
+          if (!controller.signal.aborted && !pendingRequest?.signal.aborted)
             reconcileRevokedSeat(matchId, seatId, actorToken);
           return;
         }
@@ -361,8 +370,8 @@ export function DevelopmentMatchLab({
         if (response.status === 304) return;
         if (response.ok) {
           const next = (await response.json()) as DemoMatch;
-          if (!controller.signal.aborted && !commandInFlight.current
-            && currentMatchId.current === matchId
+          if (!controller.signal.aborted && !pendingRequest?.signal.aborted
+            && !commandInFlight.current && currentMatchId.current === matchId
             && next.matchId === matchId && Number.isInteger(next.revision)
             && next.revision >= currentRevision.current) {
             acceptServerState(next, matchId);
@@ -376,19 +385,41 @@ export function DevelopmentMatchLab({
       } catch {
         // Network glitches do not invent state; online/focus/next poll retries.
       } finally {
+        pendingRequest = null;
         polling = false;
+        if (retryWhenVisible && !controller.signal.aborted
+          && document.visibilityState === "visible") {
+          retryWhenVisible = false;
+          void check();
+        }
       }
     };
     const onVisible = () => {
-      if (document.visibilityState === "visible") void check();
+      if (document.visibilityState === "hidden") {
+        // Do not retain a pending long-poll while the tab is backgrounded.
+        pendingRequest?.abort();
+      } else if (polling) {
+        retryWhenVisible = true;
+        pendingRequest?.abort();
+      } else {
+        void check();
+      }
     };
-    const onOnline = () => void check();
+    const onOnline = () => {
+      if (polling) {
+        retryWhenVisible = true;
+        pendingRequest?.abort();
+      } else {
+        void check();
+      }
+    };
     const handle = window.setInterval(() => void check(), 1500);
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
     window.addEventListener("online", onOnline);
     return () => {
       controller.abort();
+      pendingRequest?.abort();
       window.clearInterval(handle);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);

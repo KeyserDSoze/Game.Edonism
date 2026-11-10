@@ -83,6 +83,53 @@ public sealed class DevelopmentCheckpointPersistenceTests
     }
 
     [Fact]
+    public async Task RestoredEncryptedMatchSignalsLongPollAndCleansUpCanceledWaiter()
+    {
+        using var temp = new TempDirectory();
+        var first = new DevelopmentMatchStore(temp.Files());
+        var created = Create(first);
+        var id = created.MatchId;
+        var alice = created.Credentials.Single(c => c.PlayerId == "alice").Token;
+        var bob = created.Credentials.Single(c => c.PlayerId == "bob").Token;
+        Assert.True(first.TryEndTurn(id, alice, 0, out var firstTurn));
+        Assert.True(firstTurn!.Accepted);
+
+        // A brand-new store reconstructs the match and subscription state
+        // from a sealed Development checkpoint, not an event stream.
+        var restored = new DevelopmentMatchStore(temp.Files());
+        using var cancellation = new CancellationTokenSource();
+        var canceled = restored.WaitForRevisionAsync(
+            id, alice, 1, TimeSpan.FromSeconds(5), cancellation.Token);
+        await Task.Delay(50);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            _ = await canceled;
+        });
+
+        var pending = restored.WaitForRevisionAsync(id, bob, 1, TimeSpan.FromSeconds(5));
+        await Task.Delay(60);
+        Assert.True(restored.TryEndTurn(id, bob, 1, out var ended));
+        Assert.True(ended!.Accepted);
+        var completion = await pending.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.True(completion.Found);
+        Assert.NotNull(completion.State);
+        Assert.Equal(2, completion.State.Revision);
+        Assert.Equal(1, (int)completion.State.Phase);
+
+        // Old subscribers cannot reveal a later checkpoint via a revoked
+        // bearer even when they know the exact public revision.
+        Assert.True(restored.TryRotateSeatToken(id, bob, out var replacement));
+        var denied = await restored.WaitForRevisionAsync(
+            id, bob, 2, TimeSpan.FromSeconds(1));
+        Assert.False(denied.Found);
+        var current = await restored.WaitForRevisionAsync(
+            id, replacement!.Token, 1, TimeSpan.FromSeconds(1));
+        Assert.True(current.Found);
+        Assert.Equal(2, current.State!.Revision);
+    }
+
+    [Fact]
     public void AtomicBootstrapSurvivesEncryptedRestartAndTokenRotation()
     {
         using var temp = new TempDirectory();

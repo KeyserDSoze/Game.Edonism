@@ -1112,3 +1112,70 @@ test("real .NET: lost command ACK is retried with same UUID and commits exactly 
   expect(JSON.stringify(storage)).not.toContain(aliceToken);
   expect(JSON.stringify(storage)).not.toContain(attemptedKeys[0]);
 });
+
+test("real .NET: full Alice long-poll quota returns 429 without starving Bob browser", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const api = `http://127.0.0.1:5080/api/dev/matches/${id}`;
+  const waiting = {
+    ...auth(aliceToken),
+    "If-None-Match": 'W/"edonism-revision-0"',
+    Prefer: "wait=5",
+  };
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const guest = await context.newPage();
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(id);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-seat-bob")).toBeVisible();
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+
+    // Four concurrent authenticated requests occupy only Alice's slots.
+    // Bob's browser is free to poll even while Alice is at quota.
+    const all = Array.from({ length: 4 }, () => request.get(api, {
+      headers: waiting,
+      timeout: 8000,
+    }));
+    await page.waitForTimeout(450);
+    const rejected = await request.get(api, { headers: waiting, timeout: 3000 });
+    expect(rejected.status()).toBe(429);
+    expect(rejected.headers()["retry-after"]).toBe("1");
+    expect(rejected.headers()["cache-control"]).toBe("no-store");
+    expect(rejected.headers()["pragma"]).toBe("no-cache");
+    expect(rejected.headers()["expires"]).toBe("0");
+    expect(rejected.headers()["etag"]).toBeUndefined();
+    expect((await rejected.body()).length).toBe(0);
+
+    await page.getByTestId("dev-end-turn").click();
+    const done = await Promise.all(all);
+    for (const response of done) {
+      expect(response.status()).toBe(200);
+      expect(response.headers()["etag"]).toBe('W/"edonism-revision-1"');
+      expect((await response.json() as PublicMatch).revision).toBe(1);
+    }
+    await expect(guest.getByTestId("dev-revision")).toHaveText("1", { timeout: 7000 });
+    await expect(guest.getByTestId("dev-active-player")).toHaveText("bob");
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    await expect(guest.getByTestId("dev-end-turn")).toBeEnabled();
+
+    const state = await request.get(api, { headers: auth(aliceToken) });
+    expect(state.status()).toBe(200);
+    const authoritative = await state.json() as PublicMatch;
+    expect(authoritative.revision).toBe(1);
+    expect(authoritative.events).toHaveLength(2);
+    const storage = await guest.evaluate(() => ({
+      url: location.href, local: Object.values(localStorage),
+      session: Object.values(sessionStorage),
+    }));
+    expect(JSON.stringify(storage)).not.toContain(bobToken);
+    expect(JSON.stringify(storage)).not.toContain(aliceToken);
+  } finally {
+    await context.close();
+  }
+});

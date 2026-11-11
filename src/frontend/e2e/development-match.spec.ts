@@ -1954,3 +1954,36 @@ test("fresh manual join starts at current revision without replaying old events 
   await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
   await page.getByTestId("dev-leave").click();
 });
+
+test("Development creator quota and oversize rejections are localized and do not create phantom matches", async ({ page }) => {
+  await mockMatchApi(page);
+  let attempts = 0;
+  await page.route("**/api/dev/matches/from-full-deck", async route => {
+    attempts++;
+    if (attempts === 1)
+      return route.fulfill({ status: 429,
+        headers: { "Retry-After": "12", "Cache-Control": "no-store" },
+        json: { code: "dev_create_rate_limited" } });
+    if (attempts === 2)
+      return route.fulfill({ status: 413,
+        headers: { "Cache-Control": "no-store" },
+        json: { code: "dev_create_payload_too_large" } });
+    return route.fallback();
+  });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-error")).toContainText("Troppe richieste di creazione");
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await expect(page.getByTestId("dev-create")).toBeEnabled();
+
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-error")).toContainText("exceeds the 128 KiB limit");
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-session")).toBeVisible();
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(attempts).toBe(3);
+  await page.getByTestId("dev-leave").click();
+});

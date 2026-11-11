@@ -1911,3 +1911,48 @@ test("real .NET: malformed commands never reveal binding details before bearer a
     await guestContext.close();
   }
 });
+
+test("real .NET creators reject oversized payload before binding, but two browser seats still play", async ({
+  page, browser, request,
+}) => {
+  const creator = "http://127.0.0.1:5080/api/dev/matches/from-full-deck";
+  const oversize = await request.post(creator, {
+    headers: { "Content-Type": "application/json" },
+    data: "x".repeat(131073),
+  });
+  expect(oversize.status()).toBe(413);
+  expect(oversize.headers()["cache-control"]).toBe("no-store");
+  const rejected = await oversize.json() as { code: string; credentials?: unknown };
+  expect(rejected.code).toBe("dev_create_payload_too_large");
+  expect(rejected.credentials).toBeUndefined();
+
+  const created = await startRealMatch(page);
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const guestContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(created.matchId);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-session")).toBeVisible();
+    await page.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-revision")).toHaveText("1", { timeout: 12000 });
+    await guest.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("2", { timeout: 12000 });
+    const state = await request.get(
+      `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`,
+      { headers: auth(aliceToken) },
+    );
+    expect(state.status()).toBe(200);
+    const snapshot = await state.json() as PublicMatch;
+    expect(snapshot.revision).toBe(2);
+    expect(snapshot.phase).toBe(1);
+    expect(snapshot.events).toHaveLength(3);
+    expect(JSON.stringify(snapshot)).not.toContain(aliceToken);
+    expect(JSON.stringify(snapshot)).not.toContain(bobToken);
+  } finally {
+    await guestContext.close();
+  }
+});

@@ -1575,3 +1575,75 @@ test("real .NET: two browser turn badge follows server and clears after round or
     await guestContext.close();
   }
 });
+
+test("real .NET settlement preview is authenticated, gross-only and consistent in two browsers", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const path = `http://127.0.0.1:5080/api/dev/matches/${id}/settlement-preview`;
+  const initial = await request.get(path, { headers: auth(aliceToken) });
+  expect(initial.status()).toBe(409);
+  expect(initial.headers()["cache-control"]).toBe("no-store");
+  expect((await initial.json()).code).toBe("round_not_pending");
+  const forbidden = await request.get(path);
+  expect(forbidden.status()).toBe(404);
+
+  const secondContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const second = await secondContext.newPage();
+    await second.goto("/");
+    await second.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+    await second.getByTestId("dev-join-id").fill(id);
+    await second.getByTestId("dev-join-token").fill(bobToken);
+    await second.getByTestId("dev-join").click();
+    await expect(second.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    await page.getByTestId("dev-end-turn").click();
+    await expect(second.getByTestId("dev-revision")).toHaveText("1", { timeout: 9000 });
+    await second.getByTestId("dev-end-turn").click();
+    await expect(second.getByTestId("dev-revision")).toHaveText("2");
+    await expect(page.getByTestId("dev-revision")).toHaveText("2", { timeout: 9000 });
+    await expect(page.getByTestId("dev-settlement-gross").locator("li")).toHaveCount(2);
+    await expect(second.getByTestId("dev-settlement-gross").locator("li")).toHaveCount(2);
+    await expect(second.getByTestId("dev-settlement-warning"))
+      .toContainText("no salary paid");
+    const first = await request.get(path, { headers: auth(aliceToken) });
+    const other = await request.get(path, { headers: auth(bobToken) });
+    expect(first.status()).toBe(200);
+    expect(other.status()).toBe(200);
+    expect(first.headers()["cache-control"]).toBe("no-store");
+    const a = await first.json() as { matchId: string; round: number; verifiedRevision: number;
+      nextTurnOrder: string[];
+      grossSalaryQuotes: { playerId: string; baseAtoms: number;
+        standingActivityAtoms: number; grossAtoms: number }[] };
+    const b = await other.json();
+    expect(b).toEqual(a);
+    expect(a.matchId).toBe(id);
+    expect(a.round).toBe(1);
+    expect(a.verifiedRevision).toBe(2);
+    expect(a.nextTurnOrder).toEqual(["bob", "alice"]);
+    expect(a.grossSalaryQuotes).toHaveLength(2);
+    expect(a.grossSalaryQuotes.every(q => q.baseAtoms === 2
+      && q.standingActivityAtoms === 1 && q.grossAtoms === 3)).toBe(true);
+    expect(JSON.stringify(a)).not.toContain(aliceToken);
+    expect(JSON.stringify(a)).not.toContain(bobToken);
+    expect(JSON.stringify(a)).not.toContain("cardIds");
+    const stateResponse = await request.get(path.replace("/settlement-preview", ""),
+      { headers: auth(aliceToken) });
+    expect(stateResponse.status()).toBe(200);
+    const snapshot = await stateResponse.json() as PublicMatch;
+    expect(snapshot.revision).toBe(2);
+    expect(snapshot.phase).toBe(1);
+    expect(snapshot.events).toHaveLength(3);
+    expect(snapshot.players.every(p => p.freeMoveUsed === false)).toBe(true);
+    // No credit: each player still owns the initial four atoms.
+    expect((snapshot.players as unknown as { atoms: number }[])
+      .every(p => p.atoms === 4)).toBe(true);
+    await second.getByTestId("dev-leave").click();
+    await expect(second.getByTestId("dev-settlement-panel")).toHaveCount(0);
+  } finally {
+    await secondContext.close();
+  }
+});

@@ -57,6 +57,15 @@ type DevSeatBootstrap = Readonly<{
   turnOptions: ActorTurnOptions;
 }>;
 
+// Public, audited preview, never a wage payment or next-round transition.
+type PendingSettlementPreview = Readonly<{
+  matchId: string;
+  round: number;
+  verifiedRevision: number;
+  nextTurnOrder: readonly string[];
+  grossSalaryQuotes: readonly PublicGrossSalaryQuote[];
+}>;
+
 type PublicHistoryFrame = Readonly<{
   revision: number;
   kind: string;
@@ -167,6 +176,9 @@ export function DevelopmentMatchLab({
   // null follows the latest server-confirmed revision, while a number means
   // the user has intentionally chosen a historical read-only frame.
   const [historyRevision, setHistoryRevision] = useState<number | null>(null);
+  const [settlementLease, setSettlementLease] = useState<{
+    token: string; data: PendingSettlementPreview;
+  } | null>(null);
   const [presenceLease, setPresenceLease] = useState<{
     token: string; data: DevPresence;
   } | null>(null);
@@ -229,6 +241,12 @@ export function DevelopmentMatchLab({
   const inspectedRevision = historyRevision ?? history?.verifiedRevision;
   const inspectedFrame = history?.frames.find(frame =>
     frame.revision === inspectedRevision);
+  const settlement = settlementLease && token
+    && settlementLease.token === token
+    && settlementLease.data.matchId === session?.matchId
+    && settlementLease.data.verifiedRevision === session?.state.revision
+    && session?.state.phase === 1
+    ? settlementLease.data : null;
   const presence = presenceLease && token
     && presenceLease.token === token
     && presenceLease.data.matchId === session?.matchId
@@ -468,6 +486,67 @@ export function DevelopmentMatchLab({
     // Each fetch is bound to a unique match/seat/token/revision.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.matchId, session?.state.revision, actorId, token]);
+
+  // Read only after the FINAL first-round event; never derive net payments
+  // or apply next-round order locally. Old HTTP responses cannot resurrect
+  // previews after actor switch, token revocation, exit or newer revision.
+  useEffect(() => {
+    const matchId = session?.matchId;
+    const revision = session?.state.revision;
+    const seatId = actorId;
+    const actorToken = token;
+    const state = session?.state;
+    setSettlementLease(null);
+    if (!matchId || !state || state.phase !== 1
+      || revision === undefined || !seatId || !actorToken) return;
+    const controller = new AbortController();
+    void fetch(`/api/dev/matches/${matchId}/settlement-preview`, {
+      headers: { "X-Edonism-Dev-Token": actorToken },
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(response => {
+        if (response.status === 404 && !controller.signal.aborted)
+          reconcileRevokedSeat(matchId, seatId, actorToken);
+        return responseJson<PendingSettlementPreview>(response);
+      })
+      .then(result => {
+        const scope = currentActorScope.current;
+        if (controller.signal.aborted || scope?.matchId !== matchId
+          || scope.seatId !== seatId || scope.token !== actorToken
+          || currentRevision.current !== revision) return;
+        const ids = state.players.map(p => p.playerId);
+        const expectedNext = state.proposedNextRoundOrder;
+        const expectedQuotes = state.grossSalaryQuotes;
+        if (!result || result.matchId !== matchId
+          || result.round !== state.round || result.verifiedRevision !== revision
+          || !Array.isArray(result.nextTurnOrder)
+          || result.nextTurnOrder.length !== ids.length
+          || result.nextTurnOrder.some((id, i) => id !== expectedNext[i])
+          || !Array.isArray(result.grossSalaryQuotes)
+          || result.grossSalaryQuotes.length !== expectedQuotes.length
+          || result.grossSalaryQuotes.some((q, i) => {
+            const original = expectedQuotes[i];
+            return q.playerId !== original?.playerId
+              || !Number.isInteger(q.baseAtoms)
+              || !Number.isInteger(q.standingActivityAtoms)
+              || !Number.isInteger(q.grossAtoms)
+              || q.baseAtoms < 0 || q.standingActivityAtoms < 0
+              || q.grossAtoms !== q.baseAtoms + q.standingActivityAtoms
+              || q.baseAtoms !== original.baseAtoms
+              || q.standingActivityAtoms !== original.standingActivityAtoms
+              || q.grossAtoms !== original.grossAtoms;
+          })) return;
+        setSettlementLease({ token: actorToken, data: result });
+      })
+      .catch(() => {
+        // 409, transient network errors, malformed data: no preview.
+        // Never invent a payout or treat an unavailable read as logout.
+      });
+    return () => controller.abort();
+    // Match, revision, seat and bearer define the only valid projection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.matchId, session?.state.revision, session?.state.phase, actorId, token]);
 
   // Only a visible, authenticated Development browser sends a heartbeat.
   // It is never a game command: no local game revision or 3D projection is
@@ -1133,6 +1212,55 @@ export function DevelopmentMatchLab({
               </p>
               <p className="text-[11px] text-muted-foreground">{t("dev.turnSignalNote")}</p>
             </div>
+
+            {session.state.phase === 1 && (
+              <section aria-label={t("dev.settlementPreviewTitle")}
+                data-testid="dev-settlement-panel"
+                className="space-y-2 rounded-xl border border-border p-3">
+                <p className="text-xs font-semibold">{t("dev.settlementPreviewTitle")}</p>
+                {!settlement ? (
+                  <p data-testid="dev-settlement-unavailable"
+                    className="text-xs text-muted-foreground">
+                    {t("dev.settlementPreviewUnavailable")}
+                  </p>
+                ) : (
+                  <>
+                    <p data-testid="dev-settlement-revision"
+                      className="text-xs text-muted-foreground">
+                      {t("dev.settlementPreviewRevision", { revision: settlement.verifiedRevision })}
+                    </p>
+                    <ul data-testid="dev-settlement-gross" className="grid gap-2 text-xs sm:grid-cols-2">
+                      {settlement.grossSalaryQuotes.map(q => (
+                        <li key={q.playerId} data-player-id={q.playerId}
+                          data-gross-atoms={q.grossAtoms}
+                          className="rounded-md bg-muted px-2 py-2">
+                          <span className="font-semibold">{q.playerId}</span>
+                          <span className="block">{t("dev.settlementGrossAtoms", {
+                            amount: q.grossAtoms,
+                          })}</span>
+                          <span className="text-muted-foreground">{t("dev.settlementGrossParts", {
+                            base: q.baseAtoms,
+                            activities: q.standingActivityAtoms,
+                          })}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="text-xs font-semibold">{t("dev.nextOrderPreview")}</p>
+                    <ol data-testid="dev-settlement-order" className="flex flex-wrap gap-2 text-xs">
+                      {settlement.nextTurnOrder.map((id, index) => (
+                        <li key={id} className="rounded-md bg-muted px-2 py-1">
+                          {index + 1}. {id}
+                        </li>
+                      ))}
+                    </ol>
+                  </>
+                )}
+                <p data-testid="dev-settlement-warning"
+                  className="text-[11px] leading-5 text-muted-foreground">
+                  {t("dev.settlementPreviewWarning")}
+                </p>
+              </section>
+            )}
 
             <section aria-label={t("dev.presenceTitle")}
               data-testid="dev-presence-panel"

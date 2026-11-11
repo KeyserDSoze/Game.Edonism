@@ -377,6 +377,24 @@ public sealed class DevelopmentMatchStore
         }
     }
 
+    /// <summary>
+    /// The bearer is checked under the match lock BEFORE reporting whether
+    /// settlement is pending; no private hand, token or deck in the preview.
+    /// Returning true with null means authenticated but not yet pending.
+    /// </summary>
+    public bool TryReadPendingSettlementPreview(Guid matchId, string? token,
+        out MatchPendingSettlementPreview? preview)
+    {
+        preview = null;
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            if (entry.ResolveActor(token) is null) return false;
+            preview = entry.Match.PendingSettlementPreview();
+            return true;
+        }
+    }
+
     /// <summary>Read-only actor-scoped commands, under the same lock as mutations.</summary>
     public bool TryReadTurnOptions(
         Guid matchId, string? token, out MatchTurnOptions? options)

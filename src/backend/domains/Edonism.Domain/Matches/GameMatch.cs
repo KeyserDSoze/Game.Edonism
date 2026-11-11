@@ -65,6 +65,15 @@ public sealed record MatchTurnOptions(
 public sealed record MatchCommandResult(bool Accepted, string Code, MatchSnapshot State);
 
 /// <summary>
+/// Verified first-round settlement INPUT only, never a salary credit or a
+/// promise of net atoms. Taxes, card effects and later phases are not defined.
+/// </summary>
+public sealed record MatchPendingSettlementPreview(
+    Guid MatchId, int Round, long VerifiedRevision,
+    IReadOnlyList<string> NextTurnOrder,
+    IReadOnlyList<MatchGrossSalaryQuote> GrossSalaryQuotes);
+
+/// <summary>
 /// Authoritative in-process movement/turn aggregate for the original street topology.
 /// One free move is permitted per player turn (rulebook2 pp.6-7).
 /// Round resolution deliberately pauses before salary, draws, votes and taxes (#6).
@@ -307,6 +316,27 @@ public sealed partial class GameMatch
         _boardActivities,
         _assignedCharacters,
         Array.AsReadOnly(_events.ToArray()));
+
+    /// <summary>
+    /// Read-only, audited quote when all first-round turns have completed.
+    /// Deliberately DOES NOT pay wages, deduct taxes or start another round.
+    /// The quote is gross, and the order is proposed, not yet applied.
+    /// </summary>
+    public MatchPendingSettlementPreview? PendingSettlementPreview()
+    {
+        if (Phase != MatchPhase.AwaitingRoundSettlement) return null;
+        var state = Snapshot();
+        var replay = MatchAuditReplay.Verify(_board, state);
+        if (!replay.IsValid || replay.VerifiedRevision != state.Revision
+            || state.Events[^1].Kind != "round-settlement-pending")
+            throw new InvalidOperationException("Cannot quote an unverified first-round settlement.");
+
+        return new MatchPendingSettlementPreview(
+            MatchId, Round, replay.VerifiedRevision,
+            Array.AsReadOnly(state.ProposedNextRoundOrder.ToArray()),
+            Array.AsReadOnly(GrossSalaryRules.Quote(
+                _board, _players, _controlledActivities).ToArray()));
+    }
 
     /// <summary>
     /// Returns only the existing free move and end-turn possibilities for this

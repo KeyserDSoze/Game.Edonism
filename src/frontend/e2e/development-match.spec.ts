@@ -26,6 +26,8 @@ type MockOptions = {
   presenceUnavailable?: boolean;
   invalidPresence?: boolean;
   delayFirstAlicePresence?: boolean;
+  invalidSettlementPreview?: boolean;
+  delayFirstSettlementPreview?: boolean;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
@@ -52,6 +54,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let firstHttp503 = false;
   let firstOverloadedPoll = false;
   let delayedAlicePresence = false;
+  let delayedSettlement = false;
   const presentSeats = new Set<Seat>();
   const acceptedKeys = new Map<string, {
     kind: string; expectedRevision: number; destinationStreetId?: string;
@@ -256,6 +259,24 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           isActive: presentSeats.has(id),
         })),
       } });
+    }
+
+    if (path.endsWith("/settlement-preview")) {
+      if (phase !== 1) return reply({ status: 409, json: { code: "round_not_pending" } });
+      const data = {
+        matchId: snapshot().matchId,
+        round: 1,
+        verifiedRevision: options.invalidSettlementPreview ? revision + 4 : revision,
+        nextTurnOrder: [...seats].reverse(),
+        grossSalaryQuotes: seats.map(playerId => ({
+          playerId, baseAtoms: 2, standingActivityAtoms: 1, grossAtoms: 3,
+        })),
+      };
+      if (options.delayFirstSettlementPreview && !delayedSettlement) {
+        delayedSettlement = true;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      return reply({ status: 200, json: data });
     }
 
     if (path.endsWith("/history")) {
@@ -1701,4 +1722,56 @@ test("turn announcement is bilingual on mobile and revocation clears stale title
   }));
   expect(JSON.stringify(storage)).not.toContain("a".repeat(64));
   expect(JSON.stringify(storage)).not.toContain("b".repeat(64));
+});
+
+test("settlement is a server-verified read-only gross projection, not a payout", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-settlement-panel")).toHaveCount(0);
+  const matchId = await page.getByTestId("dev-match-id").innerText();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-settlement-panel")).toHaveCount(0);
+  await page.getByTestId("dev-seat-bob").click();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("2");
+  const panel = page.getByTestId("dev-settlement-panel");
+  await expect(panel).toBeVisible();
+  await expect(page.getByTestId("dev-settlement-revision")).toContainText("#2");
+  await expect(page.getByTestId("dev-settlement-gross").locator("li")).toHaveCount(2);
+  await expect(page.getByTestId("dev-settlement-gross").locator('[data-player-id="alice"]'))
+    .toHaveAttribute("data-gross-atoms", "3");
+  await expect(page.getByTestId("dev-settlement-order").locator("li"))
+    .toHaveText(["1. bob", "2. alice"]);
+  await expect(page.getByTestId("dev-settlement-warning"))
+    .toContainText("nessun salario pagato");
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  expect(observedHeaders.filter(x => x.path.endsWith("/settlement-preview")).length)
+    .toBeGreaterThanOrEqual(1);
+  expect(matchId).toMatch(/^[a-f0-9-]{36}$/);
+  await page.getByTestId("dev-leave").click();
+  await expect(panel).toHaveCount(0);
+});
+
+test("settlement preview rejects stale, malformed and switched bearer results on mobile EN", async ({ page }) => {
+  await mockMatchApi(page, { delayFirstSettlementPreview: true, invalidSettlementPreview: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await page.getByTestId("dev-end-turn").click();
+  await page.getByTestId("dev-seat-bob").click();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-settlement-panel")).toBeVisible();
+  await page.getByTestId("dev-seat-alice").click();
+  await expect(page.getByTestId("dev-settlement-unavailable")).toBeVisible();
+  await page.waitForTimeout(1100);
+  await expect(page.getByTestId("dev-settlement-gross")).toHaveCount(0);
+  await expect(page.getByTestId("dev-settlement-warning"))
+    .toContainText("no salary paid");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-settlement-panel")).toHaveCount(0);
 });

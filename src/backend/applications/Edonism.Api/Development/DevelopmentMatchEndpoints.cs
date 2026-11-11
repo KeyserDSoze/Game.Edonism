@@ -119,6 +119,18 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "match_not_found" });
         });
 
+        // #42: verified, immutable gross quote and NEXT order only after the
+        // last first-round turn. Auth before phase check, no settlement writes.
+        group.MapGet("/{matchId:guid}/settlement-preview",
+            (Guid matchId, HttpContext context, DevelopmentMatchStore store) =>
+        {
+            if (!store.TryReadPendingSettlementPreview(matchId, Token(context), out var preview))
+                return Results.NotFound(new { code = "match_not_found" });
+            return preview is null
+                ? Results.Conflict(new { code = "round_not_pending" })
+                : Results.Ok(preview);
+        });
+
         // A heartbeat is an ephemeral, bearer-authenticated hint that a
         // Development seat's browser is recently active. It neither mutates
         // Domain state nor grants gameplay permissions. GET never marks a

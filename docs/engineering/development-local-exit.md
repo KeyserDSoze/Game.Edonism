@@ -15,3 +15,7 @@ Chi prova il laboratorio PvP con 2–8 posti può abbandonare volontariamente la
 ## Test
 
 Playwright mocked verifica accessibilità IT/EN mobile, che non rimangano proiezioni/token/input dopo l'uscita, che non partano altri heartbeat/poll dopo un ciclo di 5 secondi, che una risposta tardiva non ripristini UI, e che un rientro richieda un nuovo bootstrap. Playwright live verifica con due browser che la disconnessione locale non tocchi API .NET, revoca, mano o revisione del match. La CI continua a eseguire xUnit backend per evitare regressioni trasversali. Chiudere #39 solo dopo i tre job verdi su ultimo HEAD.
+
+## CI del codice
+
+La [run #43002910518](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43002910518) sul commit `19a402e` ha verificato **220 test xUnit**, **54 Playwright UI** e **19 Playwright full-stack live** (tutti passati). L'ultimo commit documentale richiede la propria CI prima della chiusura dell'issue.

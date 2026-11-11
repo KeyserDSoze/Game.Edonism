@@ -402,18 +402,18 @@ export function DevelopmentMatchLab({
             && (frame.phase === 0 || frame.phase === 1)
             && (frame.activePlayerId === null || ids.has(frame.activePlayerId))
             && Array.isArray(frame.players) && frame.players.length === ids.size
-            && new Set(frame.players.map(p => p.playerId)).size === ids.size
-            && frame.players.every(p => ids.has(p.playerId)
+            && new Set(frame.players.map((p: PublicHistoryFrame["players"][number]) => p.playerId)).size === ids.size
+            && frame.players.every((p: PublicHistoryFrame["players"][number]) => ids.has(p.playerId)
               && typeof p.freeMoveUsed === "boolean"
               && typeof p.streetId === "string" && Boolean(streetById(p.streetId)))))
           return;
         const latest = frames[frames.length - 1];
         if (latest.phase !== session.state.phase
           || latest.activePlayerId !== session.state.activePlayerId
-          || !latest.players.every(p => {
+          || !latest.players.every((p: PublicHistoryFrame["players"][number]) => {
             const current = expectedPlayers.find(actor => actor.playerId === p.playerId);
             return current?.streetId === p.streetId
-              && current.freeMoveUsed === p.freeMoveUsed;
+              && current?.freeMoveUsed === p.freeMoveUsed;
           })) return;
         setHistoryLease({ token: actorToken, data: result });
       })

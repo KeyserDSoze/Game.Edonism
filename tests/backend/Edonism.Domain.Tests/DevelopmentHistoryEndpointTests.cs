@@ -60,11 +60,19 @@ public sealed class DevelopmentHistoryEndpointTests
         Assert.Equal(id, genesis!.RootElement.GetProperty("matchId").GetGuid());
         Assert.Equal(0, genesis.RootElement.GetProperty("verifiedRevision").GetInt64());
         Assert.Single(genesis.RootElement.GetProperty("frames").EnumerateArray());
-        Assert.Equal("gauss", genesis.RootElement.GetProperty("frames")[0]
+        var firstStreet = created.RootElement.GetProperty("state")
+            .GetProperty("players")[0].GetProperty("streetId").GetString()!;
+        Assert.Equal(firstStreet, genesis.RootElement.GetProperty("frames")[0]
             .GetProperty("players")[0].GetProperty("streetId").GetString());
-
+        // Full-deck character setup is authoritative; never assume Alice
+        // starts on Gauss, or that Planck is always adjacent.
+        using var options = await alice.GetFromJsonAsync<JsonDocument>(
+            $"/api/dev/matches/{id}/turn-options");
+        Assert.NotNull(options);
+        var destination = options.RootElement.GetProperty("freeMoveStreetIds")[0].GetString()!;
+        Assert.NotEqual(firstStreet, destination);
         using var moved = await alice.PostAsJsonAsync($"/api/dev/matches/{id}/free-move",
-            new { destinationStreetId = "planck", expectedRevision = 0 });
+            new { destinationStreetId = destination, expectedRevision = 0 });
         Assert.Equal(HttpStatusCode.OK, moved.StatusCode);
         using var ended = await alice.PostAsJsonAsync($"/api/dev/matches/{id}/end-turn",
             new { expectedRevision = 1 });
@@ -81,8 +89,8 @@ public sealed class DevelopmentHistoryEndpointTests
         Assert.Equal(3, frames.Length);
         Assert.Equal(new long[] { 0, 1, 2 },
             frames.Select(f => f.GetProperty("revision").GetInt64()));
-        Assert.Equal("gauss", frames[0].GetProperty("players")[0].GetProperty("streetId").GetString());
-        Assert.Equal("planck", frames[1].GetProperty("players")[0].GetProperty("streetId").GetString());
+        Assert.Equal(firstStreet, frames[0].GetProperty("players")[0].GetProperty("streetId").GetString());
+        Assert.Equal(destination, frames[1].GetProperty("players")[0].GetProperty("streetId").GetString());
         Assert.Equal("bob", frames[2].GetProperty("activePlayerId").GetString());
         Assert.DoesNotContain(aliceToken, text);
         Assert.DoesNotContain(bobToken, text);

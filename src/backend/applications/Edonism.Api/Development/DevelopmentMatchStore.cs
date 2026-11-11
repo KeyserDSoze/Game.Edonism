@@ -438,6 +438,25 @@ public sealed class DevelopmentMatchStore
     }
 
     /// <summary>
+    /// Server-audited public proximity to the other seats. Resolve the
+    /// requesting player from the bearer under the same match mutation lock;
+    /// never read hands, factions or expose a token in the projection.
+    /// </summary>
+    public bool TryReadOtherPlayerRoutes(Guid matchId, string? token,
+        out MatchOtherPlayerRoutes? routes)
+    {
+        routes = null;
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            var actor = entry.ResolveActor(token);
+            if (actor is null) return false;
+            routes = entry.Match.VerifiedOtherPlayerRoutesForActor(actor);
+            return routes is not null;
+        }
+    }
+
+    /// <summary>
     /// Server-verified, read-only public first-round turn progression. A
     /// forged/revoked token must never learn who already ended a turn.
     /// </summary>

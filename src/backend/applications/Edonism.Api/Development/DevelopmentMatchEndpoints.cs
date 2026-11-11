@@ -167,6 +167,16 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "match_not_found" });
         });
 
+        // #51: actor-bound public-only other-seat proximity; not combat or
+        // movement permission. Never map this route in Production.
+        group.MapGet("/{matchId:guid}/other-player-routes",
+            (Guid matchId, HttpContext context, DevelopmentMatchStore store) =>
+        {
+            return store.TryReadOtherPlayerRoutes(matchId, Token(context), out var routes)
+                ? Results.Ok(routes)
+                : Results.NotFound(new { code = "match_not_found" });
+        });
+
         // #43: actor-authorized, audit-verified completed/remaining turn order.
         // Does not grant turn permissions, reveal private cards or skip actors.
         group.MapGet("/{matchId:guid}/turn-progress",

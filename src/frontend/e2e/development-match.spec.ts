@@ -2463,3 +2463,26 @@ test("forged and stale player/lot projections never enable tactical focus", asyn
   await expect(page.getByTestId("dev-revision")).toHaveText("1");
   await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-path", "");
 });
+
+test("tactical focus is cleared on seat token rotation and remote revocation", async ({ page }) => {
+  const { revokeSeat } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await page.getByTestId("dev-focus-player-bob").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+
+  await page.getByTestId("dev-rotate-token").click();
+  await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-path", "");
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+
+  await page.getByTestId("dev-focus-player-bob").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  revokeSeat("alice");
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByTestId("dev-seat-alice")).toHaveCount(0, { timeout: 12000 });
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-target", "");
+});

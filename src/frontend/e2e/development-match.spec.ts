@@ -2055,3 +2055,53 @@ test("Development fixture capacity 503 is localized, private and leaves no phant
   await expect(page.getByTestId("dev-session")).toBeVisible();
   await expect(page.getByTestId("dev-error")).toHaveCount(0);
 });
+
+test("read-only uncontrolled activity routes follow the current seat on mobile IT/EN", async ({ page }) => {
+  await mockMatchApi(page, { routePlannerWithFreeCards: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-routes-count")).toContainText("2 attività non controllate");
+  await expect(page.getByTestId("dev-routes-list").locator("li")).toHaveCount(2);
+  await expect(page.getByTestId("dev-route-N-02")).toHaveAttribute("data-steps", "0");
+  await expect(page.getByTestId("dev-route-S-02")).toHaveAttribute("data-steps", "2");
+  await expect(page.getByTestId("dev-routes-note")).toContainText("Non sono turni stimati");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(page.getByTestId("dev-routes-note")).toContainText("not turn estimates");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-route-S-02")).toHaveAttribute("data-steps", "0");
+  await expect(page.getByTestId("dev-route-N-02")).toHaveAttribute("data-steps", "2");
+  await expect(page.getByTestId("dev-routes-count")).toContainText("2 uncontrolled");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-route-planner")).toHaveCount(0);
+});
+
+test("corrupt or late route plans fail closed across revision and actor changes", async ({ page }) => {
+  await mockMatchApi(page, { routePlannerWithFreeCards: true, invalidRoutePlanner: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-routes-unavailable")).toBeVisible();
+  await expect(page.getByTestId("dev-routes-list")).toHaveCount(0);
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-routes-list")).toHaveCount(0);
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-route-planner")).toHaveCount(0);
+});
+
+test("late previous-seat route response cannot overwrite current actor", async ({ page }) => {
+  await mockMatchApi(page, { routePlannerWithFreeCards: true, delayFirstAliceRoutes: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-route-S-02")).toHaveAttribute("data-steps", "0");
+  await page.waitForTimeout(1100);
+  await expect(page.getByTestId("dev-route-S-02")).toHaveAttribute("data-steps", "0");
+  await expect(page.getByTestId("dev-route-N-02")).toHaveAttribute("data-steps", "2");
+  await page.getByTestId("dev-leave").click();
+});

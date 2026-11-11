@@ -123,6 +123,50 @@ public sealed class OtherPlayerRoutesTests
         Assert.Equal(MatchPhase.AwaitingRoundSettlement, match.Phase);
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void PublicActivityAndOtherPlayerFocusPathsAgreeForEverySharedDestinationStreet(
+        int playerCount)
+    {
+        var match = FullMatch(playerCount);
+        var original = JsonSerializer.Serialize(match.CaptureCheckpoint());
+        foreach (var actor in match.Snapshot().Players)
+        {
+            var otherPlayers = match.VerifiedOtherPlayerRoutesForActor(actor.PlayerId)!;
+            var activities = match.VerifiedUncontrolledRoutesForActor(actor.PlayerId)!;
+            Assert.Equal(otherPlayers.FromStreetId, activities.FromStreetId);
+            Assert.Equal(otherPlayers.VerifiedRevision, activities.VerifiedRevision);
+            Assert.Equal(0, otherPlayers.VerifiedRevision);
+
+            var targets = otherPlayers.Others.Select(other =>
+                    (StreetId: other.StreetId, Steps: other.StreetSteps,
+                     Path: other.StreetPath))
+                .Concat(activities.Routes.Select(route =>
+                    (StreetId: route.StreetId, Steps: route.StreetSteps,
+                     Path: route.StreetPath)))
+                .ToArray();
+            Assert.NotEmpty(targets);
+            var repeats = 0;
+            foreach (var sameStreet in targets.GroupBy(t => t.StreetId))
+            {
+                var first = sameStreet.First();
+                if (sameStreet.Count() > 1) repeats++;
+                Assert.All(sameStreet, focus =>
+                {
+                    Assert.Equal(first.Steps, focus.Steps);
+                    Assert.Equal(first.Path, focus.Path);
+                    Assert.Equal(focus.Steps + 1, focus.Path.Count);
+                    Assert.Equal(actor.StreetId, focus.Path[0]);
+                    Assert.Equal(focus.StreetId, focus.Path[^1]);
+                });
+            }
+            Assert.True(repeats > 0, "Multiple public targets share streets on the canonical board.");
+        }
+        Assert.Equal(original, JsonSerializer.Serialize(match.CaptureCheckpoint()));
+    }
+
     [Fact]
     public void EncryptedCheckpointEquivalentStateRestoresTheSamePublicOpponentPlan()
     {

@@ -30,6 +30,9 @@ type MockOptions = {
   delayFirstAliceTurnProgress?: boolean;
   invalidSettlementPreview?: boolean;
   delayFirstSettlementPreview?: boolean;
+  routePlannerWithFreeCards?: boolean;
+  invalidRoutePlanner?: boolean;
+  delayFirstAliceRoutes?: boolean;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
@@ -58,6 +61,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayedAlicePresence = false;
   let delayedSettlement = false;
   let delayedAliceTurnProgress = false;
+  let delayedAliceRoutes = false;
   const presentSeats = new Set<Seat>();
   const acceptedKeys = new Map<string, {
     kind: string; expectedRevision: number; destinationStreetId?: string;
@@ -97,6 +101,10 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     })),
     boardActivities: [
       { slotId: "N-01", cardId: "demo:activity:gauss", category: "culture" },
+      ...(options.routePlannerWithFreeCards ? [
+        { slotId: "N-02", cardId: "demo:activity:free-gauss", category: "culture" },
+        { slotId: "S-02", cardId: "demo:activity:free-einstein", category: "sport" },
+      ] : []),
       ...(options.missingBoardCard
         ? []
         : [{ slotId: "S-01", cardId: "demo:activity:einstein", category: "transport" }]),
@@ -261,6 +269,27 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           playerId: options.invalidPresence && id === "bob" ? "intruder" : id,
           isActive: presentSeats.has(id),
         })),
+      } });
+    }
+
+    if (path.endsWith("/uncontrolled-routes")) {
+      const position = streets[seat];
+      const cards = snapshot().boardActivities.filter(card =>
+        !snapshot().controlledActivities.some(owned => owned.slotId === card.slotId));
+      const routes = cards.map(card => {
+        const streetId = card.slotId.startsWith("N-") ? "gauss" : "einstein";
+        const streetSteps = streetId === position ? 0 : position === "planck" ? 1 : 2;
+        return { ...card, streetId, streetSteps };
+      }).sort((a, b) => a.streetSteps - b.streetSteps
+        || a.slotId.localeCompare(b.slotId));
+      if (options.delayFirstAliceRoutes && seat === "alice" && !delayedAliceRoutes) {
+        delayedAliceRoutes = true;
+        await new Promise(resolve => setTimeout(resolve, 900));
+      }
+      return reply({ status: 200, json: {
+        matchId: snapshot().matchId, playerId: seat, round: 1,
+        verifiedRevision: options.invalidRoutePlanner ? revision + 5 : revision,
+        fromStreetId: position, routes,
       } });
     }
 

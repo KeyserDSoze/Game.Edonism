@@ -210,11 +210,18 @@ public sealed class DevelopmentIdempotencyEndpointTests
         using var bob = AsSeat(host, bobToken);
         using var forged = AsSeat(host, new string('F', 64));
         var path = $"/api/dev/matches/{id}/{kind}";
+        using var options = await alice.GetFromJsonAsync<JsonDocument>(
+            $"/api/dev/matches/{id}/turn-options");
+        Assert.NotNull(options);
+        var adjacent = options.RootElement.GetProperty("freeMoveStreetIds")[0].GetString()!;
         var payload = kind == "end-turn"
             ? (object)new { expectedRevision = 0 }
-            : new { expectedRevision = 0, destinationStreetId = "planck" };
+            : new { expectedRevision = 0, destinationStreetId = adjacent };
 
-        foreach (var key in new[] { "bad-key", "", Guid.Empty.ToString("D"),
+        // HttpClient drops an empty value from this header entirely; test
+        // malformed values that are actually transmitted, then validate
+        // the explicit empty-key Store contract in its own unit coverage.
+        foreach (var key in new[] { "bad-key", Guid.Empty.ToString("D"),
             new string('X', 200) })
         {
             using var missing = await Command(creator, path, payload, key);

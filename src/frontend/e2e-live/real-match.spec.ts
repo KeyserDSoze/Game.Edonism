@@ -1755,3 +1755,75 @@ test("real .NET turn progress authenticates both browsers and never skips a play
     await guestContext.close();
   }
 });
+
+test("real .NET two browsers display only newly verified public opponent events", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const endpoint = `http://127.0.0.1:5080/api/dev/matches/${id}`;
+  await expect(page.getByTestId("dev-unread-activity-count")).toContainText("0");
+  const guestContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto("/");
+    await guest.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+    await guest.getByTestId("dev-join-id").fill(id);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    const guestUnread = guest.getByTestId("dev-unread-activity-count");
+    await expect(guestUnread).toContainText("0");
+    await page.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(guest.getByTestId("dev-revision")).toHaveText("1", { timeout: 12000 });
+    await expect(guestUnread).toContainText("1", { timeout: 12000 });
+    await expect(guest.getByTestId("dev-unread-activity-event-1"))
+      .toContainText("alice ended their turn");
+    await guest.getByTestId("dev-unread-activity-mark-seen").click();
+    await expect(guestUnread).toContainText("0");
+    await expect(guest.getByTestId("dev-revision")).toHaveText("1");
+    const move = guest.locator('button[data-testid^="dev-move-"]').first();
+    await expect(move).toBeEnabled();
+    await move.click();
+    await expect(guest.getByTestId("dev-revision")).toHaveText("2");
+    await expect(guestUnread).toContainText("0");
+    await expect(page.getByTestId("dev-revision")).toHaveText("2", { timeout: 12000 });
+    await expect(page.getByTestId("dev-unread-activity-count")).toContainText("1");
+    await expect(page.getByTestId("dev-unread-activity-event-2")).toContainText("bob si è mosso");
+    await guest.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-revision")).toHaveText("3");
+    await expect(page.getByTestId("dev-revision")).toHaveText("3", { timeout: 12000 });
+    await expect(page.getByTestId("dev-unread-activity-count")).toContainText("2");
+    await expect(page.getByTestId("dev-unread-activity-event-3"))
+      .toContainText("bob ha completato il round");
+    await expect(guestUnread).toContainText("0");
+
+    const stateBefore = await request.get(endpoint, { headers: auth(aliceToken) });
+    expect(stateBefore.status()).toBe(200);
+    const before = await stateBefore.json() as PublicMatch;
+    expect(before.revision).toBe(3);
+    expect(before.events).toHaveLength(4);
+    await page.getByTestId("dev-unread-activity-mark-seen").click();
+    await expect(page.getByTestId("dev-unread-activity-count")).toContainText("0");
+    const stateAfter = await request.get(endpoint, { headers: auth(aliceToken) });
+    expect(stateAfter.status()).toBe(200);
+    const after = await stateAfter.json() as PublicMatch;
+    expect(after.revision).toBe(before.revision);
+    expect(after.events).toEqual(before.events);
+    const hand = await request.get(endpoint + "/hand", { headers: auth(bobToken) });
+    expect(hand.status()).toBe(200);
+    expect((await hand.json() as { cardIds: string[] }).cardIds).toHaveLength(4);
+    const storage = await guest.evaluate(() => ({
+      url: location.href, local: Object.values(localStorage),
+      session: Object.values(sessionStorage),
+    }));
+    expect(JSON.stringify(storage)).not.toContain(aliceToken);
+    expect(JSON.stringify(storage)).not.toContain(bobToken);
+    await guest.getByTestId("dev-leave").click();
+    await expect(guest.getByTestId("dev-unread-activity-panel")).toHaveCount(0);
+  } finally {
+    await guestContext.close();
+  }
+});

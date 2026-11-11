@@ -483,6 +483,25 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       tokenToSeat.set(fresh, seat);
       return fresh;
     },
+    // A separate server actor: real audit and positions, not a local UI guess.
+    moveBobRemotely: () => {
+      expect(active).toBe("bob");
+      expect(moved.bob).toBe(false);
+      const fromStreetId = streets.bob;
+      streets.bob = "newton";
+      moved.bob = true;
+      revision++;
+      auditEvents.push({ revision, round: 1, kind: "free-move",
+        actorId: "bob", fromStreetId, toStreetId: "newton" });
+    },
+    endBobRemotely: () => {
+      expect(active).toBe("bob");
+      revision++;
+      active = null;
+      phase = 1;
+      auditEvents.push({ revision, round: 1, kind: "round-settlement-pending",
+        actorId: "bob", fromStreetId: null, toStreetId: null });
+    },
     // Simulate a distinct server actor's command between browser polls.
     advanceOtherActor: () => {
       revision++;
@@ -1861,4 +1880,77 @@ test("turn progress never renders malformed revision even with a valid seat", as
   await expect(page.getByTestId("dev-turn-progress-seats")).toHaveCount(0);
   await page.getByTestId("dev-leave").click();
   await expect(page.getByTestId("dev-turn-progress")).toHaveCount(0);
+});
+
+test("unread opponent history counts remote moves and turn endings, not own actions", async ({ page }) => {
+  const server = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const count = page.getByTestId("dev-unread-activity-count");
+  await expect(count).toContainText("0");
+  await expect(page.getByTestId("dev-unread-activity-mark-seen")).toBeDisabled();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(count).toContainText("0", { timeout: 12000 });
+  server.moveBobRemotely();
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByTestId("dev-revision")).toHaveText("2", { timeout: 12000 });
+  await expect(count).toContainText("1", { timeout: 12000 });
+  await expect(page.getByTestId("dev-unread-activity-event-2")).toContainText("bob si è mosso");
+  server.endBobRemotely();
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByTestId("dev-revision")).toHaveText("3", { timeout: 12000 });
+  await expect(count).toContainText("2", { timeout: 12000 });
+  await expect(page.getByTestId("dev-unread-activity-event-3"))
+    .toContainText("bob ha completato il round");
+  await expect(page.getByTestId("dev-unread-activity-events").locator("li")).toHaveCount(2);
+  await page.getByTestId("dev-unread-activity-mark-seen").click();
+  await expect(count).toContainText("0");
+  await expect(page.getByTestId("dev-revision")).toHaveText("3");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(count).toContainText("0");
+  await page.getByTestId("dev-seat-alice").click();
+  await expect(count).toContainText("0");
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-unread-activity-panel")).toHaveCount(0);
+});
+
+test("unread opponent activity fails closed on malformed public replay, mobile EN and actor switch", async ({ page }) => {
+  const server = await mockMatchApi(page, { corruptHistory: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-unread-activity-unavailable")).toBeVisible();
+  await page.getByTestId("dev-end-turn").click();
+  server.moveBobRemotely();
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByTestId("dev-revision")).toHaveText("2", { timeout: 12000 });
+  await expect(page.getByTestId("dev-unread-activity-events")).toHaveCount(0);
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-unread-activity-events")).toHaveCount(0);
+  await expect(page.getByTestId("dev-unread-activity-note"))
+    .toContainText("No system notification");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-unread-activity-panel")).toHaveCount(0);
+});
+
+test("fresh manual join starts at current revision without replaying old events as unread", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const matchId = (await page.getByTestId("dev-match-id").innerText()).trim();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await page.getByTestId("dev-leave").click();
+  await page.getByTestId("dev-join-id").fill(matchId);
+  await page.getByTestId("dev-join-token").fill("b".repeat(64));
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-unread-activity-count")).toContainText("0");
+  await expect(page.getByTestId("dev-unread-activity-events")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await page.getByTestId("dev-leave").click();
 });

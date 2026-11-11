@@ -54,3 +54,7 @@ xUnit Domain: storia completa per 2 e 8 giocatori, movimento e flag per ogni rev
 Playwright mocked: mobile/EN, passaggio avanti/indietro, scenari invalidi o privi di cronologia, mano privata e comandi invariati, cambio posto cancella selezione storica. Playwright live: due browser che visualizzano il medesimo replay del server, mossa reale sulla strada scelta dai turn options, fase live indipendente dalla preview, token revocato non può più interrogare la storia.
 
 Tracciamento: [issue #37](https://github.com/KeyserDSoze/Game.Edonism/issues/37), [ledger](development-ledger.md). CI obbligatoria prima della chiusura: xUnit, Playwright UI e Playwright real-API verdi sul commit finale di `main`.
+
+## Evidenza CI del codice e governance
+
+La [run #42985847562](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42985847562) ha completato con successo i tre gate: **213 xUnit**, **45 UI Playwright mocked**, **17 Playwright live su API .NET reale**. Il test full-stack ha verificato storia con due browser, non-mutazione dei marker live, mano di Bob protetta, autenticazione bearer, rotazione e recupero della lettura col nuovo token. Il commit `2207817` ha aggiunto un reset esplicito della selezione storica alla rigenerazione della capability e relativo test UI; questo gate è ancora in verifica con [#42986355883](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42986355883). Chiudere #37 solo dopo CI verde sul commit HEAD aggiornato di ledger/patch notes.

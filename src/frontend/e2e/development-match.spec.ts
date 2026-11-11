@@ -1987,3 +1987,37 @@ test("Development creator quota and oversize rejections are localized and do not
   expect(attempts).toBe(3);
   await page.getByTestId("dev-leave").click();
 });
+
+
+test("Development fixture capacity 503 is localized, private and leaves no phantom match", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  let creates = 0;
+  await page.route("**/api/dev/matches/from-full-deck", async route => {
+    creates++;
+    if (creates < 3) {
+      return route.fulfill({
+        status: 503,
+        headers: { "Cache-Control": "no-store" },
+        json: { code: "dev_match_capacity_reached" },
+      });
+    }
+    return route.fallback();
+  });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-error")).toContainText("limite di partite in memoria");
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await expect(page.getByTestId("dev-create")).toBeEnabled();
+
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-error")).toContainText("in-memory match limit");
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-session")).toBeVisible();
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+});

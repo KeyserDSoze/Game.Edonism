@@ -40,8 +40,19 @@ public sealed record DevPublicHistory(
 public sealed record DevSeatPresence(string PlayerId, bool IsActive);
 public sealed record DevMatchPresence(Guid MatchId, IReadOnlyList<DevSeatPresence> Seats);
 
+/// <summary>Only new Development fixtures are exhausted; existing sessions stay usable.</summary>
+public sealed class DevelopmentMatchCapacityException : Exception
+{
+    public DevelopmentMatchCapacityException()
+        : base("Development fixture creation capacity has been reached.") { }
+}
+
 public sealed class DevelopmentMatchStore
 {
+    // A second, process-lifetime boundary beyond the 64 attempts/minute gate (#46).
+    // Do not count historical encrypted checkpoint reloads: rejecting a reload
+    // would revoke legitimate seats. This is NOT a disk retention policy.
+    public const int MaxNewMatchesPerProcess = 64;
     private const int MaxRetainedReceipts = 64;
     // Development single-process fairness: allow several tabs per player,
     // but never let one bearer monopolize a multi-seat match.
@@ -53,13 +64,20 @@ public sealed class DevelopmentMatchStore
         string ActorId, TaskCompletionSource<bool> Signal);
     private readonly DevelopmentMatchCheckpointFiles? _checkpointFiles;
     private readonly TimeProvider _clock;
+    private readonly object _creationGate = new();
+    private readonly int _maxNewMatches;
+    private int _newMatches;
 
     public DevelopmentMatchStore(
         DevelopmentMatchCheckpointFiles? checkpointFiles = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        int maxNewMatches = MaxNewMatchesPerProcess)
     {
+        if (maxNewMatches is < 1 or > MaxNewMatchesPerProcess)
+            throw new ArgumentOutOfRangeException(nameof(maxNewMatches));
         _checkpointFiles = checkpointFiles;
         _clock = timeProvider ?? TimeProvider.System;
+        _maxNewMatches = maxNewMatches;
     }
 
     private sealed class Entry
@@ -149,22 +167,32 @@ public sealed class DevelopmentMatchStore
 
     private DevMatchCreated Register(GameMatch match)
     {
-        var secrets = new Dictionary<string, byte[]>(StringComparer.Ordinal);
-        var credentials = new List<DevSeatCredential>();
-        foreach (var player in match.Snapshot().Players)
+        // Serialize only creation admission, independent of per-match command
+        // locks. Validation happened before this point; failures do not take a
+        // fixture slot. Do not evict any match that has already issued tokens.
+        lock (_creationGate)
         {
-            var bytes = RandomNumberGenerator.GetBytes(32);
-            secrets.Add(player.PlayerId, SHA256.HashData(bytes));
-            credentials.Add(new DevSeatCredential(player.PlayerId, Convert.ToHexString(bytes)));
+            if (_newMatches >= _maxNewMatches)
+                throw new DevelopmentMatchCapacityException();
+
+            var secrets = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+            var credentials = new List<DevSeatCredential>();
+            foreach (var player in match.Snapshot().Players)
+            {
+                var bytes = RandomNumberGenerator.GetBytes(32);
+                secrets.Add(player.PlayerId, SHA256.HashData(bytes));
+                credentials.Add(new DevSeatCredential(player.PlayerId, Convert.ToHexString(bytes)));
+                CryptographicOperations.ZeroMemory(bytes);
+            }
+
+            // Disk commit precedes in-memory publication and quota increment.
+            // A failed encrypted save must not consume a slot or issue tokens.
+            _checkpointFiles?.Save(match.CaptureCheckpoint(), secrets);
+            if (!_matches.TryAdd(match.MatchId, new Entry(match, secrets)))
+                throw new InvalidOperationException("Unexpected match ID collision.");
+            _newMatches++;
+            return new DevMatchCreated(match.MatchId, match.Snapshot(), credentials.AsReadOnly());
         }
-
-        // Save BEFORE publishing the created match. Failed disk writes cannot
-        // create a partially visible in-memory session.
-        _checkpointFiles?.Save(match.CaptureCheckpoint(), secrets);
-        if (!_matches.TryAdd(match.MatchId, new Entry(match, secrets)))
-            throw new InvalidOperationException("Unexpected match ID collision.");
-
-        return new DevMatchCreated(match.MatchId, match.Snapshot(), credentials.AsReadOnly());
     }
 
     private bool TryGetEntry(Guid matchId, out Entry entry)

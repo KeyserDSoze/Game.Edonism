@@ -188,6 +188,11 @@ export function DevelopmentMatchLab({
   // null follows the latest server-confirmed revision, while a number means
   // the user has intentionally chosen a historical read-only frame.
   const [historyRevision, setHistoryRevision] = useState<number | null>(null);
+  // Local, actor-scoped unread cursor. The baseline is the revision at
+  // join/seat/token change; never persist it or use it for game commands.
+  const [activityRead, setActivityRead] = useState<{
+    matchId: string; seatId: string; token: string; revision: number;
+  } | null>(null);
   const [turnProgressLease, setTurnProgressLease] = useState<{
     token: string; data: FirstRoundTurnProgress;
   } | null>(null);
@@ -253,6 +258,24 @@ export function DevelopmentMatchLab({
     && historyLease.data.matchId === session?.matchId
     && historyLease.data.verifiedRevision === session?.state.revision
     ? historyLease.data : null;
+  // A new actor/capability starts from the last known live revision.
+  // Do not count preexisting match history as unseen activity.
+  useEffect(() => {
+    setActivityRead(session?.matchId && actorId && token
+      ? { matchId: session.matchId, seatId: actorId, token,
+          revision: currentRevision.current }
+      : null);
+  }, [session?.matchId, actorId, token]);
+
+  const activityReady = Boolean(history && activityRead && token
+    && activityRead.matchId === session?.matchId
+    && activityRead.seatId === actorId && activityRead.token === token
+    && activityRead.revision <= history.verifiedRevision);
+  const unseenOpponentFrames = activityReady && history && activityRead
+    ? history.frames.filter(frame => frame.revision > activityRead.revision
+      && frame.actorId !== actorId && (frame.kind === "free-move"
+        || frame.kind === "turn-ended" || frame.kind === "round-settlement-pending"))
+    : [];
   const inspectedRevision = historyRevision ?? history?.verifiedRevision;
   const inspectedFrame = history?.frames.find(frame =>
     frame.revision === inspectedRevision);
@@ -1112,6 +1135,7 @@ export function DevelopmentMatchLab({
   // response already queued for the old bearer fails closed.
   function leaveDemo() {
     if (busy || !session) return;
+    setActivityRead(null);
     currentActorScope.current = null;
     currentMatchId.current = null;
     currentRevision.current = -1;
@@ -1151,6 +1175,7 @@ export function DevelopmentMatchLab({
     setRotationNotice(null);
     setHistoryLease(null);
     setHistoryRevision(null);
+    setActivityRead(null);
     setActorId(id);
     setHand(null);
     setError(null);
@@ -1547,6 +1572,62 @@ export function DevelopmentMatchLab({
                   {t("dev.nextOrderWarning")}
                 </p>
               </div>
+            </section>
+            <section aria-label={t("dev.unreadActivityTitle")}
+              data-testid="dev-unread-activity-panel"
+              className="space-y-2 rounded-xl border border-border p-3">
+              <p className="text-xs font-semibold">{t("dev.unreadActivityTitle")}</p>
+              {!activityReady ? (
+                <p data-testid="dev-unread-activity-unavailable"
+                  className="text-xs text-muted-foreground">
+                  {t("dev.unreadActivityUnavailable")}
+                </p>
+              ) : (
+                <>
+                  <p data-testid="dev-unread-activity-count" role="status" aria-live="polite"
+                    className="text-sm font-semibold">
+                    {t("dev.unreadActivityCount", { count: unseenOpponentFrames.length })}
+                  </p>
+                  {unseenOpponentFrames.length > 0 && (
+                    <ol data-testid="dev-unread-activity-events"
+                      className="max-h-44 space-y-1 overflow-y-auto text-xs">
+                      {unseenOpponentFrames.slice(-5).map(frame => (
+                        <li key={frame.revision} data-event-kind={frame.kind}
+                          data-testid={`dev-unread-activity-event-${frame.revision}`}
+                          className="rounded-md bg-muted px-2 py-1">
+                          <span className="mr-2 font-mono text-muted-foreground">
+                            #{frame.revision}
+                          </span>
+                          {frame.kind === "free-move"
+                            ? t("dev.unreadActivityMove", { actor: frame.actorId })
+                            : frame.kind === "turn-ended"
+                              ? t("dev.unreadActivityTurnEnded", { actor: frame.actorId })
+                              : t("dev.unreadActivityRoundEnded", { actor: frame.actorId })}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  <Button type="button" size="sm" variant="outline"
+                    disabled={unseenOpponentFrames.length === 0}
+                    data-testid="dev-unread-activity-mark-seen"
+                    onClick={() => {
+                      if (!history || !session || !token || !actorId) return;
+                      const scope = currentActorScope.current;
+                      if (scope?.matchId !== session.matchId
+                        || scope.seatId !== actorId || scope.token !== token) return;
+                      setActivityRead({
+                        matchId: session.matchId, seatId: actorId,
+                        token, revision: history.verifiedRevision,
+                      });
+                    }}>
+                    {t("dev.unreadActivityMarkSeen")}
+                  </Button>
+                </>
+              )}
+              <p data-testid="dev-unread-activity-note"
+                className="text-[11px] leading-5 text-muted-foreground">
+                {t("dev.unreadActivityNote")}
+              </p>
             </section>
             <section
               aria-label={t("dev.historyTitle")}

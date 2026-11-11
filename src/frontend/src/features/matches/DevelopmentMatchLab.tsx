@@ -889,8 +889,13 @@ export function DevelopmentMatchLab({
         return;
       }
       if (response.status === 503) {
-        setError(t("dev.createCapacityReached"));
-        return;
+        // A generic API outage is not proof that the Development fixture
+        // budget is full. Only the precise server code gets this message.
+        const failure = await response.clone().json().catch(() => null) as { code?: string } | null;
+        if (failure?.code === "dev_match_capacity_reached") {
+          setError(t("dev.createCapacityReached"));
+          return;
+        }
       }
       const created = await responseJson<DemoSession>(response);
       const playerIds = demoSeatIds.slice(0, playerCount);

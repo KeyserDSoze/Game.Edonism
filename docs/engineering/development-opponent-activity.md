@@ -17,3 +17,7 @@ Questa NON è una notifica di sistema, una promessa di push mentre il browser è
 ## Test e gate
 
 xUnit: frame replay immutabili, allineati alle revisioni per 2–8 attori, filtrabili per actor, nessun evento privato o mano, zero frame se manomessi, stato/checkpoint invariati. Playwright UI: comandi propri ignorati, movimento e fine turno avversario, conferma senza mutazioni, cambio posto e lingua, mobile, storia corrotta, join tardiva senza vecchi unread. Playwright live .NET: due browser Alice/Bob, passaggio turno e movimento, eventi verificati, ack locale e privacy Web Storage. La issue [#44](https://github.com/KeyserDSoze/Game.Edonism/issues/44) si chiude solo dopo tre job CI verdi sull'HEAD finale di main.
+
+## Verifica CI
+
+La [CI del codice #43024452834](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43024452834) sul commit `249695e` è `completed/success`: **252 xUnit .NET 10 + 64 Playwright UI + 24 Playwright live = 340 test**, zero fallimenti. Tutti i tre job sono verdi, compresi i nuovi scenari di due browser reali, cambio posto, history invalida e join tardiva. L'ultimo commit documentale è soggetto al medesimo gate; la chiusura finale è annotata nella issue #44.

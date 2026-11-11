@@ -2420,8 +2420,16 @@ test("tactical focus resets on actor switch, confirmed server movement and local
 
 test("English mobile tactical focus remains accessible when WebGL is unavailable", async ({ page }) => {
   await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    // Disable ONLY WebGL. Breaking 2D contexts prevents app initialization
+    // in Chromium and would test a broken browser, not the supported fallback.
     Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
-      configurable: true, value: () => null,
+      configurable: true,
+      value: function (this: HTMLCanvasElement, type: string, ...args: unknown[]) {
+        if (type === "webgl" || type === "webgl2" || type === "experimental-webgl")
+          return null;
+        return Reflect.apply(original, this, [type, ...args]);
+      },
     });
   });
   await mockMatchApi(page, { routePlannerWithFreeCards: true });

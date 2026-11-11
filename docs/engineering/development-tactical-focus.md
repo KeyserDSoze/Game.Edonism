@@ -33,3 +33,7 @@ Il focus si annulla quando cambia l'attore o il suo token, quando il POST di rot
 - Playwright live: due browser reali sulla stessa partita, target pubblico visitabile in entrambi, mossa .NET che invalida il focus anche per il browser dell'altro posto, nessun cambio revisione causato dalla sola osservazione.
 
 Le suite di test non affermano che siano state approvate le inferenze di topologia #4/R-10. Nessun dato canonico di carte #19 è stato inventato. Traccia di completamento e CI finale in [#52](https://github.com/KeyserDSoze/Game.Edonism/issues/52).
+
+## Risultati di verifica
+
+La [CI #43065779427](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43065779427) sulla versione funzionale ha terminato **3/3 job success**: **309 test xUnit, 87 Playwright UI e 29 Playwright full-stack con reale API .NET (425/425)**, zero skip. La sequenza è stata verificata anche dopo un movimento reale con due browser connessi. Il test Playwright del fallback disabilita **solo** `webgl`, `webgl2` e `experimental-webgl`, non `2d`: così misura il vero percorso accessibile senza impedire l'inizializzazione dell'applicazione. La checklist finale di release è nell'[issue #52](https://github.com/KeyserDSoze/Game.Edonism/issues/52) ed è subordinata ai tre job verdi sull'HEAD definitivo.

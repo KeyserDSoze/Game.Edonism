@@ -90,7 +90,10 @@ public sealed class UncontrolledActivityRoutesTests
             Assert.Equal(destination, route.StreetPath[0]));
         Assert.Equal(before.Routes.Select(r => r.SlotId).Order(StringComparer.Ordinal),
             after.Routes.Select(r => r.SlotId).Order(StringComparer.Ordinal));
-        Assert.Equal(bobBefore.Routes, bobAfter.Routes);
+        // StreetPath is an immutable collection: record equality compares its
+        // reference, not path contents. Verify the public wire projection.
+        Assert.Equal(JsonSerializer.Serialize(bobBefore.Routes),
+            JsonSerializer.Serialize(bobAfter.Routes));
         Assert.Equal(1, bobAfter.VerifiedRevision);
         Assert.True(match.TryEndTurn(first.PlayerId, 1).Accepted);
         Assert.True(match.TryEndTurn("player-1", 2).Accepted);

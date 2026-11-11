@@ -77,6 +77,8 @@ const resources = {
         rotateWarning: "Solo Development: il nuovo token revoca quello vecchio per questo posto, senza modificare la partita.",
 
         createError: "Impossibile avviare la partita di prova. Avvia l'API .NET in Development sulla porta 5080.",
+        createRateLimited: "Troppe richieste di creazione: riprova tra poco. Nessuna partita è stata creata.",
+        createPayloadTooLarge: "La configurazione di prova supera il limite di 128 KiB. Nessuna partita è stata creata.",
         loading: "Operazione in corso…",
         round: "Round",
         revision: "Revisione",
@@ -221,6 +223,8 @@ const resources = {
         rotateWarning: "Development only: the new token revokes the previous one for this seat without changing the match.",
 
         createError: "Cannot start the demo match. Run the .NET API in Development on port 5080.",
+        createRateLimited: "Too many match creation requests. Try again shortly. No match was created.",
+        createPayloadTooLarge: "The fixture exceeds the 128 KiB limit. No match was created.",
         loading: "Working…",
         round: "Round",
         revision: "Revision",

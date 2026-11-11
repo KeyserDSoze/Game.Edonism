@@ -880,6 +880,14 @@ export function DevelopmentMatchLab({
         body: JSON.stringify(demoFixture(playerCount)),
         cache: "no-store",
       });
+      if (response.status === 429) {
+        setError(t("dev.createRateLimited"));
+        return;
+      }
+      if (response.status === 413) {
+        setError(t("dev.createPayloadTooLarge"));
+        return;
+      }
       const created = await responseJson<DemoSession>(response);
       const playerIds = demoSeatIds.slice(0, playerCount);
       if (created.credentials.length !== playerCount || created.state.players.length !== playerCount

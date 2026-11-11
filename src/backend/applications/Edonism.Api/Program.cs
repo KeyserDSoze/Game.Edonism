@@ -14,6 +14,7 @@ if (builder.Environment.IsDevelopment())
     if (string.IsNullOrWhiteSpace(checkpointDir) != string.IsNullOrWhiteSpace(checkpointKey))
         throw new InvalidOperationException(
             "Development match storage requires BOTH checkpoint dir and AES-256 key.");
+    builder.Services.AddSingleton<DevelopmentMatchCreationAdmission>();
     builder.Services.AddSingleton(string.IsNullOrWhiteSpace(checkpointDir)
         ? new DevelopmentMatchStore()
         : new DevelopmentMatchStore(new DevelopmentMatchCheckpointFiles(
@@ -59,6 +60,53 @@ if (app.Environment.IsDevelopment())
         }
 
         await next();
+    });
+}
+
+// The 4 unauthenticated Development fixture creators need admission limits
+// BEFORE router/model binding and BEFORE untrusted JSON allocation. Apply
+// the no-store middleware above to 413/429 too. This is not Production auth.
+if (app.Environment.IsDevelopment())
+{
+    app.Use(async (context, next) =>
+    {
+        if (!DevelopmentMatchCreationAdmission.IsCreator(context.Request))
+        {
+            await next();
+            return;
+        }
+
+        var budget = context.RequestServices
+            .GetRequiredService<DevelopmentMatchCreationAdmission>();
+        if (context.Request.ContentLength > DevelopmentMatchCreationAdmission.MaxJsonBytes)
+        {
+            await Results.Json(new { code = "dev_create_payload_too_large" },
+                statusCode: StatusCodes.Status413PayloadTooLarge).ExecuteAsync(context);
+            return;
+        }
+        if (!budget.TryAdmit(out var retryAfter))
+        {
+            context.Response.Headers.RetryAfter = retryAfter.ToString(
+                System.Globalization.CultureInfo.InvariantCulture);
+            await Results.Json(new { code = "dev_create_rate_limited" },
+                statusCode: StatusCodes.Status429TooManyRequests).ExecuteAsync(context);
+            return;
+        }
+
+        // ContentLength may be absent (chunked), or may be fabricated.
+        // Buffer at most 128 KiB + 1 byte before exposing the replay stream
+        // to the framework binder. Never trust ContentLength alone.
+        await using var bounded = new MemoryStream();
+        if (!await DevelopmentMatchCreationAdmission.TryBufferBodyAsync(context, bounded))
+        {
+            await Results.Json(new { code = "dev_create_payload_too_large" },
+                statusCode: StatusCodes.Status413PayloadTooLarge).ExecuteAsync(context);
+            return;
+        }
+        var original = context.Request.Body;
+        context.Request.Body = bounded;
+        try { await next(); }
+        finally { context.Request.Body = original; }
     });
 }
 

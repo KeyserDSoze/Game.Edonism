@@ -27,3 +27,11 @@ Tracking: [#49](https://github.com/KeyserDSoze/Game.Edonism/issues/49).
 ## Verifica codice e browser
 
 La [CI #43048278643](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43048278643) ha passato **296 xUnit, 69 Playwright UI e 28 Playwright full-stack reali** (393/393, tre job verdi). Il gate documentale finale viene registrato sulla issue #49.
+
+## Percorso stradale minimo esplicito — #50
+
+Ogni attività conserva `streetSteps` ed espone ora anche `streetPath`: lista **inclusiva** della strada corrente del giocatore e della strada della carta. Il Domain calcola il percorso con BFS su `BoardDefinition.ShortestStreetPath`, esplorando i vicini in ordine ordinal di ID per rendere deterministici gli ex aequo; `ShortestStreetDistance` deriva dal percorso, dunque `streetSteps = streetPath.Count - 1`. Una strada sconosciuta non produce un percorso. Array immutabili. Lo stesso ordine è usato in tutti i server, indipendentemente da geometria o ordine dei vicini nel JSON.
+
+Il browser visualizza la catena con **nomi delle strade** in italiano/inglese e, prima di esporre qualsiasi elemento della proiezione, confronta l'intero percorso con la BFS della plancia pubblica. Verifica estremi, adiacenze, ordine canonico, distanza minima, identificativi delle carte/slot pubbliche, revisione e token del posto. Una falsificazione di lunghezza, percorso, distanza, origine, identità o revision produce *vista non disponibile*, senza influire sulle altre autorizzazioni. Fino a cinque attività mostrate, tutte senza pulsante di acquisto. Nessuna modifica al 3D, alle carte, ai comandi o all'audit.
+
+La traiettoria è una **spiegazione geometrico-logica**, non una promessa di quanti turni o mosse serviranno: il movimento gratuito continua a usare solo `turn-options` e il server. Gli archi della plancia inferiti richiedono signoff #4/R-10. Dettagli e checklist [#50](https://github.com/KeyserDSoze/Game.Edonism/issues/50).

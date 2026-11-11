@@ -89,4 +89,33 @@ public sealed class BoardDefinitionTests
         slots[1] = slots[0];
         Assert.Throws<InvalidOperationException>(() => (Board with { Slots = slots }).Validate());
     }
+    [Fact]
+    public void CanonicalShortestStreetPathUsesOrdinalTiesAndCannotBeMutated()
+    {
+        Assert.Equal(new[] { "gauss", "main-square", "einstein" },
+            Board.ShortestStreetPath("gauss", "einstein"));
+        Assert.Equal(new[] { "einstein", "main-square", "gauss" },
+            Board.ShortestStreetPath("einstein", "gauss"));
+        Assert.Equal(new[] { "planck" }, Board.ShortestStreetPath("planck", "planck"));
+        Assert.Null(Board.ShortestStreetPath("unknown", "gauss"));
+        Assert.Null(Board.ShortestStreetPath("gauss", "unknown"));
+        var path = Board.ShortestStreetPath("gauss", "einstein")!;
+        Assert.Throws<NotSupportedException>(() => ((IList<string>)path)[1] = "forged");
+    }
+
+    [Fact]
+    public void AllFortyNineStreetPairsFollowContiguousMinimumPaths()
+    {
+        foreach (var from in Board.Streets)
+        foreach (var to in Board.Streets)
+        {
+            var path = Board.ShortestStreetPath(from.Id, to.Id)!;
+            Assert.Equal(from.Id, path[0]);
+            Assert.Equal(to.Id, path[^1]);
+            Assert.Equal(Board.ShortestStreetDistance(from.Id, to.Id), path.Count - 1);
+            Assert.All(Enumerable.Range(0, path.Count - 1), i =>
+                Assert.True(Board.CanMoveOneStreet(path[i], path[i + 1])));
+        }
+    }
+
 }

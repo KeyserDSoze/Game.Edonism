@@ -72,7 +72,13 @@ public sealed class DevelopmentUncontrolledRoutesEndpointTests
         Assert.Equal(28, bobRoutes.Length);
         foreach (var route in aliceRoutes)
         {
-            Assert.True(route.GetProperty("streetSteps").GetInt32() >= 0);
+            var steps = route.GetProperty("streetSteps").GetInt32();
+            var path = route.GetProperty("streetPath").EnumerateArray()
+                .Select(x => x.GetString()).ToArray();
+            Assert.InRange(steps, 0, 6);
+            Assert.Equal(steps + 1, path.Length);
+            Assert.Equal(alicePlan.RootElement.GetProperty("fromStreetId").GetString(), path[0]);
+            Assert.Equal(route.GetProperty("streetId").GetString(), path[^1]);
             Assert.False(string.IsNullOrEmpty(route.GetProperty("streetId").GetString()));
             Assert.False(string.IsNullOrEmpty(route.GetProperty("cardId").GetString()));
         }

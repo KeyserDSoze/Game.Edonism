@@ -86,27 +86,51 @@ public sealed record BoardDefinition(
     public bool CanMoveOneStreet(string fromStreet, string toStreet) =>
         Streets.FirstOrDefault(s => s.Id == fromStreet)?.Neighbors.Contains(toStreet, StringComparer.Ordinal) ?? false;
 
-    /// <summary>Breadth-first distance over street intersections; null for unknown/unreachable street.</summary>
-    public int? ShortestStreetDistance(string fromStreet, string toStreet)
+    /// <summary>
+    /// Canonical inclusive shortest street path (start and destination).
+    /// Ties use ordinal street IDs, not renderer geometry, label order or
+    /// mutable input neighbor order. Returns null for unknown streets.
+    /// </summary>
+    public IReadOnlyList<string>? ShortestStreetPath(string fromStreet, string toStreet)
     {
         var streetMap = Streets.ToDictionary(s => s.Id, StringComparer.Ordinal);
-        if (!streetMap.ContainsKey(fromStreet) || !streetMap.ContainsKey(toStreet)) return null;
-        if (fromStreet == toStreet) return 0;
+        if (!streetMap.ContainsKey(fromStreet) || !streetMap.ContainsKey(toStreet))
+            return null;
 
-        var visited = new HashSet<string>(StringComparer.Ordinal) { fromStreet };
-        var queue = new Queue<(string Id, int Steps)>();
-        queue.Enqueue((fromStreet, 0));
+        var previous = new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            [fromStreet] = null
+        };
+        var queue = new Queue<string>();
+        queue.Enqueue(fromStreet);
         while (queue.TryDequeue(out var current))
         {
-            foreach (var next in streetMap[current.Id].Neighbors)
+            if (current == toStreet)
             {
-                if (!streetMap.ContainsKey(next) || !visited.Add(next)) continue;
-                if (next == toStreet) return current.Steps + 1;
-                queue.Enqueue((next, current.Steps + 1));
+                var reversed = new List<string>();
+                for (string? street = current; street is not null; street = previous[street])
+                    reversed.Add(street);
+                reversed.Reverse();
+                return Array.AsReadOnly(reversed.ToArray());
+            }
+
+            foreach (var neighbor in streetMap[current].Neighbors.Order(StringComparer.Ordinal))
+            {
+                if (!streetMap.ContainsKey(neighbor) || previous.ContainsKey(neighbor))
+                    continue;
+                previous.Add(neighbor, current);
+                queue.Enqueue(neighbor);
             }
         }
 
         return null;
+    }
+
+    /// <summary>Shortest count of street edges; derived from the same canonical route.</summary>
+    public int? ShortestStreetDistance(string fromStreet, string toStreet)
+    {
+        var path = ShortestStreetPath(fromStreet, toStreet);
+        return path is null ? null : path.Count - 1;
     }
 
     private bool WithinBounds(BoardPoint point) =>

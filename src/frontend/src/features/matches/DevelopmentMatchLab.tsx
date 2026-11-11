@@ -4,7 +4,7 @@ import { CircleDot, FlaskConical, Hand, LogOut, MoveRight, RotateCw, Users } fro
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { streetById, slotById } from "@/features/city/board";
+import { shortestStreetPath, streetById, slotById } from "@/features/city/board";
 import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
 import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
 
@@ -74,6 +74,7 @@ type UncontrolledRoute = Readonly<{
   category: string;
   streetId: string;
   streetSteps: number;
+  streetPath: readonly string[];
 }>;
 type UncontrolledRoutes = Readonly<{
   matchId: string;
@@ -659,9 +660,13 @@ export function DevelopmentMatchLab({
             || !Number.isInteger(route.streetSteps) || route.streetSteps < 0
             || route.streetSteps > 6 || typeof route.streetId !== "string") return;
           const card = expectedBySlot.get(route.slotId);
+          const canonicalPath = shortestStreetPath(position, route.streetId);
           if (!card || route.cardId !== card.cardId || route.category !== card.category
             || slotById(route.slotId)?.streetId !== route.streetId
-            || (route.streetId === position) !== (route.streetSteps === 0)
+            || !canonicalPath || !Array.isArray(route.streetPath)
+            || route.streetSteps !== canonicalPath.length - 1
+            || route.streetPath.length !== canonicalPath.length
+            || route.streetPath.some((id, index) => id !== canonicalPath[index])
             || route.streetSteps < previousSteps
             || (route.streetSteps === previousSteps && route.slotId <= previousSlot)) return;
           used.add(route.slotId);
@@ -1603,12 +1608,18 @@ export function DevelopmentMatchLab({
                             data-street-id={route.streetId}
                             data-steps={route.streetSteps}
                             data-card-id={route.cardId}
+                            data-path={route.streetPath.join(">")}
                             className="rounded-md bg-muted p-2">
                             <span className="font-semibold">{route.slotId} · {route.category}</span>
                             <span className="block text-muted-foreground">
                               {streetById(route.streetId)?.name ?? route.streetId} · {
                                 t("dev.routeSteps", { count: route.streetSteps })
                               }
+                            </span>
+                            <span className="block break-words text-muted-foreground"
+                              data-testid={`dev-route-path-${route.slotId}`}>
+                              {t("dev.routePath")}: {route.streetPath.map(id =>
+                                streetById(id)?.name ?? id).join(" → ")}
                             </span>
                           </li>
                         ))}

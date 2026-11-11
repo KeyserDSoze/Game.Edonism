@@ -5,7 +5,8 @@ namespace Edonism.Domain.Matches;
 /// shortest *street graph edge count*. Never a purchase permission or price.
 /// </summary>
 public sealed record MatchUncontrolledRoute(
-    string SlotId, string CardId, string Category, string StreetId, int StreetSteps);
+    string SlotId, string CardId, string Category, string StreetId, int StreetSteps,
+    IReadOnlyList<string> StreetPath);
 
 /// <summary>
 /// Actor-scoped, read-only movement-planning projection for the verified
@@ -43,11 +44,12 @@ public sealed partial class GameMatch
         {
             if (occupied.Contains(activity.SlotId)) continue;
             if (!streetsBySlot.TryGetValue(activity.SlotId, out var streetId)
-                || _board.ShortestStreetDistance(player.StreetId, streetId) is not int steps)
+                || _board.ShortestStreetPath(player.StreetId, streetId) is not { } path)
                 throw new InvalidOperationException("Activity route not present in canonical board.");
 
             routes.Add(new MatchUncontrolledRoute(
-                activity.SlotId, activity.CardId, activity.Category, streetId, steps));
+                activity.SlotId, activity.CardId, activity.Category, streetId,
+                path.Count - 1, path));
         }
 
         return new MatchUncontrolledRoutes(

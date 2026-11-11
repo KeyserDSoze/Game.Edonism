@@ -50,6 +50,11 @@ public sealed class UncontrolledActivityRoutesTests
                 Assert.Equal(slot.StreetId, route.StreetId);
                 Assert.Equal(board.ShortestStreetDistance(player.StreetId, route.StreetId),
                     route.StreetSteps);
+                Assert.Equal(route.StreetSteps + 1, route.StreetPath.Count);
+                Assert.Equal(board.ShortestStreetPath(player.StreetId, route.StreetId),
+                    route.StreetPath);
+                Assert.Throws<NotSupportedException>(() =>
+                    ((IList<string>)route.StreetPath)[0] = "forged");
             });
             Assert.Equal(plan.Routes.OrderBy(a => a.StreetSteps)
                 .ThenBy(a => a.SlotId, StringComparer.Ordinal), plan.Routes);
@@ -81,6 +86,8 @@ public sealed class UncontrolledActivityRoutesTests
         var bobAfter = match.VerifiedUncontrolledRoutesForActor("player-1")!;
         Assert.Equal(1, after.VerifiedRevision);
         Assert.Equal(destination, after.FromStreetId);
+        Assert.All(after.Routes, route =>
+            Assert.Equal(destination, route.StreetPath[0]));
         Assert.Equal(before.Routes.Select(r => r.SlotId).Order(StringComparer.Ordinal),
             after.Routes.Select(r => r.SlotId).Order(StringComparer.Ordinal));
         Assert.Equal(bobBefore.Routes, bobAfter.Routes);

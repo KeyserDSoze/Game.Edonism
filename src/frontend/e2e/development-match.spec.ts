@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { shortestStreetPath } from "../src/features/city/board";
 
 type Seat = string;
 const demoSeats = ["alice", "bob", "charlie", "diana", "eve", "frank", "grace", "heidi"] as const;
@@ -33,6 +34,8 @@ type MockOptions = {
   routePlannerWithFreeCards?: boolean;
   invalidRoutePlanner?: boolean;
   delayFirstAliceRoutes?: boolean;
+  invalidRoutePath?: boolean;
+  invalidRouteSteps?: boolean;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
@@ -278,8 +281,12 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         !snapshot().controlledActivities.some(owned => owned.slotId === card.slotId));
       const routes = cards.map(card => {
         const streetId = card.slotId.startsWith("N-") ? "gauss" : "einstein";
-        const streetSteps = streetId === position ? 0 : position === "planck" ? 1 : 2;
-        return { ...card, streetId, streetSteps };
+        const streetPath = shortestStreetPath(position, streetId) ?? [];
+        const streetSteps = streetPath.length - 1
+          + (options.invalidRouteSteps && card.slotId === "S-02" ? 1 : 0);
+        return { ...card, streetId, streetSteps, streetPath:
+          options.invalidRoutePath && card.slotId === "S-02"
+            ? [position, streetId] : streetPath };
       }).sort((a, b) => a.streetSteps - b.streetSteps
         || a.slotId.localeCompare(b.slotId));
       if (options.delayFirstAliceRoutes && seat === "alice" && !delayedAliceRoutes) {
@@ -2065,14 +2072,20 @@ test("read-only uncontrolled activity routes follow the current seat on mobile I
   await expect(page.getByTestId("dev-routes-list").locator("li")).toHaveCount(2);
   await expect(page.getByTestId("dev-route-N-02")).toHaveAttribute("data-steps", "0");
   await expect(page.getByTestId("dev-route-S-02")).toHaveAttribute("data-steps", "2");
+  await expect(page.getByTestId("dev-route-path-N-02")).toContainText("Percorso: Gauss Avenue");
+  await expect(page.getByTestId("dev-route-path-S-02"))
+    .toContainText("Gauss Avenue → Main Square → Einstein Avenue");
   await expect(page.getByTestId("dev-routes-note")).toContainText("Non sono turni stimati");
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
 
   await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
   await expect(page.getByTestId("dev-routes-note")).toContainText("not turn estimates");
+  await expect(page.getByTestId("dev-route-path-N-02")).toContainText("Route:");
   await page.getByTestId("dev-seat-bob").click();
   await expect(page.getByTestId("dev-route-S-02")).toHaveAttribute("data-steps", "0");
   await expect(page.getByTestId("dev-route-N-02")).toHaveAttribute("data-steps", "2");
+  await expect(page.getByTestId("dev-route-path-N-02"))
+    .toContainText("Einstein Avenue → Main Square → Gauss Avenue");
   await expect(page.getByTestId("dev-routes-count")).toContainText("2 uncontrolled");
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);
@@ -2108,4 +2121,28 @@ test("late previous-seat route response cannot overwrite current actor", async (
   await expect(page.getByTestId("dev-route-S-02")).toHaveAttribute("data-steps", "0");
   await expect(page.getByTestId("dev-route-N-02")).toHaveAttribute("data-steps", "2");
   await page.getByTestId("dev-leave").click();
+});
+
+test("forged street hops fail closed without affecting PvP commands", async ({ page }) => {
+  await mockMatchApi(page, { routePlannerWithFreeCards: true, invalidRoutePath: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-routes-unavailable")).toBeVisible();
+  await expect(page.getByTestId("dev-routes-list")).toHaveCount(0);
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-routes-list")).toHaveCount(0);
+});
+
+test("nonminimal route distance is never presented as a valid plan", async ({ page }) => {
+  await mockMatchApi(page, { routePlannerWithFreeCards: true, invalidRouteSteps: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-routes-unavailable")).toBeVisible();
+  await expect(page.getByTestId("dev-routes-list")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
 });

@@ -2019,18 +2019,26 @@ test("real .NET: two browser street route plans follow public activity ownership
   const firstPlan = await first.json() as {
     matchId: string; playerId: string; verifiedRevision: number; fromStreetId: string;
     routes: { slotId: string; cardId: string; category: string;
-      streetId: string; streetSteps: number }[];
+      streetId: string; streetSteps: number; streetPath: string[] }[];
   };
   expect(firstPlan.playerId).toBe("alice");
   expect(firstPlan.verifiedRevision).toBe(0);
   expect(firstPlan.fromStreetId).toBe(created.state.players[0].streetId);
   expect(firstPlan.routes).toHaveLength(28);
+  for (const route of firstPlan.routes) {
+    expect(route.streetPath[0]).toBe(firstPlan.fromStreetId);
+    expect(route.streetPath.at(-1)).toBe(route.streetId);
+    expect(route.streetPath).toHaveLength(route.streetSteps + 1);
+  }
   expect(JSON.stringify(firstPlan)).not.toContain(alice);
   expect(JSON.stringify(firstPlan)).not.toContain(bob);
   expect(JSON.stringify(firstPlan)).not.toContain("atoms");
   for (const route of firstPlan.routes.slice(0, 5)) {
     await expect(page.getByTestId(`dev-route-${route.slotId}`))
       .toHaveAttribute("data-steps", String(route.streetSteps));
+    await expect(page.getByTestId(`dev-route-${route.slotId}`))
+      .toHaveAttribute("data-path", route.streetPath.join(">"));
+    await expect(page.getByTestId(`dev-route-path-${route.slotId}`)).toBeVisible();
   }
 
   const guestContext = await browser.newContext({ viewport: { width: 390, height: 844 } });

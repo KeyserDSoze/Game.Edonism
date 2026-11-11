@@ -40,6 +40,30 @@ export function isAdjacentStreet(from: string, to: string): boolean {
   return streetById(from)?.neighbors.includes(to) ?? false;
 }
 
+// Public consistency check for the advisory route display. Does not grant
+// any movement or purchase permission: the .NET API remains authoritative.
+// Keep ordinal tie-breaks consistent with BoardDefinition.ShortestStreetPath.
+export function shortestStreetPath(fromStreet: string, toStreet: string): readonly string[] | null {
+  if (!streetById(fromStreet) || !streetById(toStreet)) return null;
+  const previous = new Map<string, string | null>([[fromStreet, null]]);
+  const queue = [fromStreet];
+  for (let cursor = 0; cursor < queue.length; cursor++) {
+    const current = queue[cursor];
+    if (current === toStreet) {
+      const reversed: string[] = [];
+      for (let id: string | null = current; id !== null; id = previous.get(id) ?? null)
+        reversed.push(id);
+      return reversed.reverse();
+    }
+    for (const neighbor of [...(streetById(current)?.neighbors ?? [])].sort()) {
+      if (!streetById(neighbor) || previous.has(neighbor)) continue;
+      previous.set(neighbor, current);
+      queue.push(neighbor);
+    }
+  }
+  return null;
+}
+
 // Drawing transforms only. World units are NOT movement coordinates.
 export function toScene(point: BoardPoint): [number, number] {
   const scale = 95;

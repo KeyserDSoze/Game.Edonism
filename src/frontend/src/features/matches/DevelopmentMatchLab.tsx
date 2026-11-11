@@ -57,6 +57,27 @@ type DevSeatBootstrap = Readonly<{
   turnOptions: ActorTurnOptions;
 }>;
 
+type PublicHistoryFrame = Readonly<{
+  revision: number;
+  kind: string;
+  actorId: string;
+  phase: number;
+  activePlayerId: string | null;
+  players: readonly Readonly<{
+    playerId: string;
+    streetId: string;
+    freeMoveUsed: boolean;
+  }>[];
+}>;
+
+// Read-only timeline verified by .NET. Never drive the active 3D scene,
+// commands, turn options or private hands from a historical frame.
+type PublicHistory = Readonly<{
+  matchId: string;
+  verifiedRevision: number;
+  frames: readonly PublicHistoryFrame[];
+}>;
+
 const quotaAndExtras = [
   ["public-financing", 5, 2],
   ["private-financing", 5, 2],
@@ -133,6 +154,12 @@ export function DevelopmentMatchLab({
   const [playerCount, setPlayerCount] = useState(2);
   const [actorId, setActorId] = useState("");
   const [hand, setHand] = useState<PrivateHand | null>(null);
+  const [historyLease, setHistoryLease] = useState<{
+    token: string; data: PublicHistory;
+  } | null>(null);
+  // null follows the latest server-confirmed revision, while a number means
+  // the user has intentionally chosen a historical read-only frame.
+  const [historyRevision, setHistoryRevision] = useState<number | null>(null);
   // The credential identity is held only in component memory.
   const [optionLease, setOptionLease] = useState<{
     token: string; options: ActorTurnOptions
@@ -178,6 +205,14 @@ export function DevelopmentMatchLab({
     ? visiblePublicAuditEvents(session.state.events ?? [],
         session.state.players.map((seat) => seat.playerId))
     : [];
+  const history = historyLease && token
+    && historyLease.token === token
+    && historyLease.data.matchId === session?.matchId
+    && historyLease.data.verifiedRevision === session?.state.revision
+    ? historyLease.data : null;
+  const inspectedRevision = historyRevision ?? history?.verifiedRevision;
+  const inspectedFrame = history?.frames.find(frame =>
+    frame.revision === inspectedRevision);
 
   function publishPublicPositions(state: DemoMatch | null) {
     onPublicState(state
@@ -206,6 +241,8 @@ export function DevelopmentMatchLab({
 
     const remaining = session.credentials.filter((seat) => seat.playerId !== seatId);
     setHand(null);
+    setHistoryLease(null);
+    setHistoryRevision(null);
     setOptionLease(null);
     lastPublicTag.current = null;
     if (remaining.length === 0) {
@@ -321,6 +358,73 @@ export function DevelopmentMatchLab({
       });
     return () => controller.abort();
   }, [session?.matchId, token]);
+
+  // Ask the Domain verifier for a complete, public replay at this
+  // confirmed match revision. A previous seat/token/revision may never
+  // publish its history after a reconnect, revocation or actor switch.
+  useEffect(() => {
+    const matchId = session?.matchId;
+    const revision = session?.state.revision;
+    const seatId = actorId;
+    const actorToken = token;
+    setHistoryLease(null);
+    if (!matchId || revision === undefined || !seatId || !actorToken) return;
+    const controller = new AbortController();
+    const expectedPlayers = session.state.players;
+    const expectedEvents = session.state.events;
+    void fetch(`/api/dev/matches/${matchId}/history`, {
+      headers: { "X-Edonism-Dev-Token": actorToken },
+      signal: controller.signal,
+      cache: "no-store",
+    })
+      .then(response => {
+        if (response.status === 404 && !controller.signal.aborted)
+          reconcileRevokedSeat(matchId, seatId, actorToken);
+        return responseJson<PublicHistory>(response);
+      })
+      .then(result => {
+        if (controller.signal.aborted || currentMatchId.current !== matchId
+          || currentRevision.current !== revision
+          || currentActorScope.current?.seatId !== seatId
+          || currentActorScope.current?.token !== actorToken) return;
+        const allowed = new Set(["match-created", "free-move",
+          "turn-ended", "round-settlement-pending"]);
+        const ids = new Set(expectedPlayers.map(p => p.playerId));
+        const frames = result?.frames;
+        // Fail closed for incomplete, reordered or unexpected future data.
+        // The live snapshot is still authoritative even while replay loads.
+        if (result.matchId !== matchId || result.verifiedRevision !== revision
+          || !Array.isArray(frames) || frames.length !== expectedEvents.length
+          || frames.length !== revision + 1
+          || !frames.every((frame, index) => frame.revision === index
+            && allowed.has(frame.kind) && frame.kind === expectedEvents[index]?.kind
+            && frame.actorId === expectedEvents[index]?.actorId
+            && (frame.phase === 0 || frame.phase === 1)
+            && (frame.activePlayerId === null || ids.has(frame.activePlayerId))
+            && Array.isArray(frame.players) && frame.players.length === ids.size
+            && new Set(frame.players.map(p => p.playerId)).size === ids.size
+            && frame.players.every(p => ids.has(p.playerId)
+              && typeof p.freeMoveUsed === "boolean"
+              && typeof p.streetId === "string" && Boolean(streetById(p.streetId)))))
+          return;
+        const latest = frames[frames.length - 1];
+        if (latest.phase !== session.state.phase
+          || latest.activePlayerId !== session.state.activePlayerId
+          || !latest.players.every(p => {
+            const current = expectedPlayers.find(actor => actor.playerId === p.playerId);
+            return current?.streetId === p.streetId
+              && current.freeMoveUsed === p.freeMoveUsed;
+          })) return;
+        setHistoryLease({ token: actorToken, data: result });
+      })
+      .catch(() => {
+        // History is optional UI. Never fabricate positions or authorize
+        // commands, and do not clear private hands on transient errors.
+      });
+    return () => controller.abort();
+    // Each fetch is bound to a unique match/seat/token/revision.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.matchId, session?.state.revision, actorId, token]);
 
   // Long-poll an authenticated, revision-scoped ETag instead of issuing
   // full snapshots while idle. 304 still verifies the bearer on the server.
@@ -444,6 +548,8 @@ export function DevelopmentMatchLab({
     setError(null);
     setRotationNotice(null);
     setHand(null);
+    setHistoryLease(null);
+    setHistoryRevision(null);
     setOptionLease(null);
     lastPublicTag.current = null;
     bootstrappedSeat.current = null;
@@ -502,6 +608,8 @@ export function DevelopmentMatchLab({
     setError(null);
     setRotationNotice(null);
     setHand(null);
+    setHistoryLease(null);
+    setHistoryRevision(null);
     setOptionLease(null);
     lastPublicTag.current = null;
     bootstrappedSeat.current = null;
@@ -711,6 +819,8 @@ export function DevelopmentMatchLab({
       matchId: session.matchId, seatId: id, token: credential.token,
     };
     setRotationNotice(null);
+    setHistoryLease(null);
+    setHistoryRevision(null);
     setActorId(id);
     setHand(null);
     setError(null);
@@ -962,6 +1072,66 @@ export function DevelopmentMatchLab({
                   {t("dev.nextOrderWarning")}
                 </p>
               </div>
+            </section>
+            <section
+              aria-label={t("dev.historyTitle")}
+              data-testid="dev-history-panel"
+              className="space-y-3 rounded-xl border border-border p-3"
+            >
+              <p className="text-xs font-semibold">{t("dev.historyTitle")}</p>
+              {!inspectedFrame || !history ? (
+                <p data-testid="dev-history-unavailable"
+                  className="text-xs text-muted-foreground">{t("dev.historyUnavailable")}</p>
+              ) : (
+                <>
+                  <div role="group" aria-label={t("dev.historyNavigation")}
+                    className="flex flex-wrap items-center gap-2">
+                    <Button type="button" size="sm" variant="outline"
+                      data-testid="dev-history-previous"
+                      disabled={inspectedFrame.revision <= 0}
+                      onClick={() => setHistoryRevision(inspectedFrame.revision - 1)}>
+                      {t("dev.historyPrevious")}
+                    </Button>
+                    <span data-testid="dev-history-revision"
+                      className="font-mono text-xs" aria-live="polite">
+                      {t("dev.historyAtRevision", { revision: inspectedFrame.revision })}
+                    </span>
+                    <Button type="button" size="sm" variant="outline"
+                      data-testid="dev-history-next"
+                      disabled={inspectedFrame.revision >= history.verifiedRevision}
+                      onClick={() => {
+                        const next = inspectedFrame.revision + 1;
+                        setHistoryRevision(next === history.verifiedRevision ? null : next);
+                      }}>
+                      {t("dev.historyNext")}
+                    </Button>
+                    <Button type="button" size="sm" variant="ghost"
+                      data-testid="dev-history-latest"
+                      disabled={inspectedFrame.revision === history.verifiedRevision}
+                      onClick={() => setHistoryRevision(null)}>
+                      {t("dev.historyLatest")}
+                    </Button>
+                  </div>
+                  <p data-testid="dev-history-active" className="text-xs text-muted-foreground">
+                    {inspectedFrame.activePlayerId
+                      ? t("dev.historyActor", { actor: inspectedFrame.activePlayerId })
+                      : t("dev.historySettlement")}
+                  </p>
+                  <ul data-testid="dev-history-positions"
+                    className="grid gap-1 text-xs sm:grid-cols-2">
+                    {inspectedFrame.players.map(p => (
+                      <li key={p.playerId} data-player-id={p.playerId}
+                        data-street-id={p.streetId} data-moved={p.freeMoveUsed}
+                        className="rounded-md bg-muted px-2 py-1">
+                        <span className="font-semibold">{p.playerId}: </span>
+                        {streetById(p.streetId)?.name ?? p.streetId}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-[11px] leading-5 text-muted-foreground"
+                    data-testid="dev-history-warning">{t("dev.historyWarning")}</p>
+                </>
+              )}
             </section>
             <p className="text-[11px] leading-5 text-muted-foreground">{t("dev.warning")}</p>
           </div>

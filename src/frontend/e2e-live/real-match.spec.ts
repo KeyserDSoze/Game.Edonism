@@ -1998,3 +1998,85 @@ test("real .NET: a second fixture creation never invalidates the first PvP seat"
     await guestContext.close();
   }
 });
+
+test("real .NET: two browser street route plans follow public activity ownership without commands", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const alice = tokenFor(created, "alice");
+  const bob = tokenFor(created, "bob");
+  const endpoint = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}/uncontrolled-routes`;
+  await expect(page.getByTestId("dev-routes-count")).toContainText("28 attività non controllate");
+  await expect(page.getByTestId("dev-routes-list").locator("li")).toHaveCount(5);
+  await expect(page.getByTestId("dev-routes-note")).toContainText("Non sono turni stimati");
+
+  const anonymous = await request.get(endpoint);
+  expect(anonymous.status()).toBe(404);
+  expect(anonymous.headers()["cache-control"]).toBe("no-store");
+  const first = await request.get(endpoint, { headers: auth(alice) });
+  expect(first.status()).toBe(200);
+  expect(first.headers()["cache-control"]).toBe("no-store");
+  const firstPlan = await first.json() as {
+    matchId: string; playerId: string; verifiedRevision: number; fromStreetId: string;
+    routes: { slotId: string; cardId: string; category: string;
+      streetId: string; streetSteps: number }[];
+  };
+  expect(firstPlan.playerId).toBe("alice");
+  expect(firstPlan.verifiedRevision).toBe(0);
+  expect(firstPlan.fromStreetId).toBe(created.state.players[0].streetId);
+  expect(firstPlan.routes).toHaveLength(28);
+  expect(JSON.stringify(firstPlan)).not.toContain(alice);
+  expect(JSON.stringify(firstPlan)).not.toContain(bob);
+  expect(JSON.stringify(firstPlan)).not.toContain("atoms");
+  for (const route of firstPlan.routes.slice(0, 5)) {
+    await expect(page.getByTestId(`dev-route-${route.slotId}`))
+      .toHaveAttribute("data-steps", String(route.streetSteps));
+  }
+
+  const guestContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto("/");
+    await guest.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+    await guest.getByTestId("dev-join-id").fill(created.matchId);
+    await guest.getByTestId("dev-join-token").fill(bob);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-routes-count")).toContainText("28 uncontrolled");
+    await expect(guest.getByTestId("dev-routes-note")).toContainText("not turn estimates");
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    const second = await request.get(endpoint, { headers: auth(bob) });
+    expect(second.status()).toBe(200);
+    const bobPlan = await second.json() as typeof firstPlan;
+    expect(bobPlan.playerId).toBe("bob");
+    expect(bobPlan.fromStreetId).toBe(created.state.players[1].streetId);
+    expect(bobPlan.routes).toHaveLength(28);
+
+    await page.locator('[data-testid^="dev-move-"]:not([disabled])').first().click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    const moved = await request.get(endpoint, { headers: auth(alice) });
+    expect(moved.status()).toBe(200);
+    const movedPlan = await moved.json() as typeof firstPlan;
+    expect(movedPlan.verifiedRevision).toBe(1);
+    expect(movedPlan.fromStreetId).not.toBe(firstPlan.fromStreetId);
+    await expect(page.getByTestId("dev-routes-count")).toContainText("28 attività non controllate");
+    for (const route of movedPlan.routes.slice(0, 5)) {
+      await expect(page.getByTestId(`dev-route-${route.slotId}`))
+        .toHaveAttribute("data-steps", String(route.streetSteps));
+    }
+    await expect(guest.getByTestId("dev-revision")).toHaveText("1", { timeout: 9000 });
+    await expect(guest.getByTestId("dev-routes-count")).toContainText("28 uncontrolled");
+    const snapshot = await request.get(
+      `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`,
+      { headers: auth(bob) },
+    );
+    expect(snapshot.status()).toBe(200);
+    const state = await snapshot.json() as PublicMatch;
+    expect(state.revision).toBe(1);
+    expect(state.events).toHaveLength(2);
+    expect(state.players.every(p => p.hearts > 0)).toBe(true);
+    await guest.getByTestId("dev-leave").click();
+    await expect(guest.getByTestId("dev-route-planner")).toHaveCount(0);
+  } finally {
+    await guestContext.close();
+  }
+});

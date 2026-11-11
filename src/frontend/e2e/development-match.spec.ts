@@ -1995,11 +1995,11 @@ test("Development fixture capacity 503 is localized, private and leaves no phant
   let creates = 0;
   await page.route("**/api/dev/matches/from-full-deck", async route => {
     creates++;
-    if (creates < 3) {
+    if (creates <= 3) {
       return route.fulfill({
         status: 503,
         headers: { "Cache-Control": "no-store" },
-        json: { code: "dev_match_capacity_reached" },
+        json: { code: creates === 3 ? "api_unavailable" : "dev_match_capacity_reached" },
       });
     }
     return route.fallback();
@@ -2016,6 +2016,11 @@ test("Development fixture capacity 503 is localized, private and leaves no phant
   await expect(page.getByTestId("dev-session")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);
+
+  // A different 503 is an API error, not proof that creation slots ran out.
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-error")).toContainText("Cannot start the demo match");
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
 
   await page.getByTestId("dev-create").click();
   await expect(page.getByTestId("dev-session")).toBeVisible();

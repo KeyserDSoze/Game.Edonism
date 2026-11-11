@@ -666,7 +666,7 @@ export function DevelopmentMatchLab({
             || !canonicalPath || !Array.isArray(route.streetPath)
             || route.streetSteps !== canonicalPath.length - 1
             || route.streetPath.length !== canonicalPath.length
-            || route.streetPath.some((id, index) => id !== canonicalPath[index])
+            || route.streetPath.some((id: string, index: number) => id !== canonicalPath[index])
             || route.streetSteps < previousSteps
             || (route.streetSteps === previousSteps && route.slotId <= previousSlot)) return;
           used.add(route.slotId);

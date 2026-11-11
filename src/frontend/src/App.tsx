@@ -56,6 +56,17 @@ export default function App() {
     setSelectedStreetId(slot.streetId);
   };
 
+  // Read-only traversal of the already verified route. Manual board inspection
+  // still clears focus; waypoint controls never issue a game command.
+  const chooseTacticalWaypoint = (index: number) => {
+    const valid = verifiedTacticalFocus(publicPlayers, tacticalFocus);
+    const streetId = valid?.streetPath[index];
+    if (!valid || !streetId) return;
+    setSelectedStreetId(streetId);
+    setSelectedSlotId(valid.kind === "activity" && index === valid.streetPath.length - 1
+      ? valid.targetId : slotsOnStreet(streetId)[0]?.id ?? null);
+  };
+
   const chooseTacticalFocus = (requested: TacticalFocus | null) => {
     if (!requested) {
       setTacticalFocus(null);
@@ -193,6 +204,27 @@ export default function App() {
                 <p data-testid="city-tactical-route" className="break-words text-muted-foreground">
                   {verifiedFocus.streetPath.map(id => streetById(id)?.name ?? id).join(" → ")}
                 </p>
+                <nav aria-label={t("city.tacticalWaypointsTitle")} data-testid="city-tactical-waypoints">
+                  <p className="font-semibold">{t("city.tacticalWaypointsTitle")}</p>
+                  <ol className="mt-2 flex flex-wrap gap-2">
+                    {verifiedFocus.streetPath.map((id, index) => (
+                      <li key={`${id}-${index}`}>
+                        <Button type="button" size="sm"
+                          variant={selectedStreetId === id ? "secondary" : "outline"}
+                          aria-current={selectedStreetId === id ? "step" : undefined}
+                          aria-label={t("city.tacticalWaypointLabel", {
+                            step: index + 1, count: verifiedFocus.streetPath.length,
+                            street: streetById(id)?.name ?? id,
+                          })}
+                          data-testid={`city-tactical-waypoint-${index}`}
+                          onClick={() => chooseTacticalWaypoint(index)}
+                          className="h-auto min-h-9 whitespace-normal text-left text-xs">
+                          {index + 1}. {streetById(id)?.name ?? id}
+                        </Button>
+                      </li>
+                    ))}
+                  </ol>
+                </nav>
                 <p className="text-muted-foreground">{t("city.tacticalFocusNote")}</p>
               </section>
             )}

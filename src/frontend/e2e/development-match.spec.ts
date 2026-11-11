@@ -2375,6 +2375,20 @@ test("public player and free-card focus select canonical streets, and manual ins
     "data-focus-path", "gauss>main-square>einstein");
   await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-kind", "player");
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("city-tactical-waypoints")).toBeVisible();
+  await expect(page.getByTestId("city-tactical-waypoint-0"))
+    .toHaveAttribute("aria-label", "Tappa 1 di 3: Gauss Avenue");
+  await expect(page.getByTestId("city-tactical-waypoint-2")).toHaveAttribute("aria-current", "step");
+  await page.getByTestId("city-tactical-waypoint-1").click();
+  await expect(page.getByTestId("selected-street")).toHaveText("Main Square");
+  await expect(page.getByTestId("city-tactical-waypoint-1")).toHaveAttribute("aria-current", "step");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute(
+    "data-focus-path", "gauss>main-square>einstein");
+  await page.getByTestId("city-tactical-waypoint-0").click();
+  await expect(page.getByTestId("selected-street")).toHaveText("Gauss Avenue");
+  await page.getByTestId("city-tactical-waypoint-2").click();
+  await expect(page.getByTestId("selected-street")).toHaveText("Einstein Avenue");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
   await page.getByTestId("city-clear-tactical-focus").click();
   await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
   await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-path", "");
@@ -2385,6 +2399,11 @@ test("public player and free-card focus select canonical streets, and manual ins
   await expect(page.getByTestId("city-renderer")).toHaveAttribute(
     "data-focus-path", "gauss>main-square>einstein");
   await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-kind", "activity");
+  await page.getByTestId("city-tactical-waypoint-0").click();
+  await expect(page.getByTestId("selected-street")).toHaveText("Gauss Avenue");
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await page.getByTestId("city-tactical-waypoint-2").click();
+  await expect(page.getByTestId("selected-slot")).toHaveText("S-02");
   await page.getByTestId("street-picker-newton").click();
   await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
   await expect(page.getByTestId("selected-street")).toHaveText("Newton Avenue");
@@ -2447,11 +2466,27 @@ test("English mobile tactical focus remains accessible when WebGL is unavailable
     .toContainText("Gauss Avenue → Main Square → Einstein Avenue");
   await expect(page.getByTestId("city-renderer")).toHaveAttribute(
     "data-focus-path", "gauss>main-square>einstein");
+  await expect(page.getByTestId("city-tactical-waypoint-0"))
+    .toHaveAttribute("aria-label", "Step 1 of 3: Gauss Avenue");
+  await page.getByTestId("city-tactical-waypoint-0").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("selected-street")).toHaveText("Gauss Avenue");
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute(
+    "data-focus-path", "gauss>main-square>einstein");
+  await page.getByTestId("city-tactical-waypoint-2").click();
+  await expect(page.getByTestId("selected-street")).toHaveText("Einstein Avenue");
   await page.getByTestId("city-clear-tactical-focus").click();
   await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
   await page.getByTestId("dev-focus-activity-N-02").click();
   await expect(page.getByTestId("city-tactical-target")).toContainText("Observed activity: N-02");
   await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-path", "gauss");
+  await expect(page.getByTestId("city-tactical-waypoint-0"))
+    .toHaveAttribute("aria-label", "Step 1 of 1: Gauss Avenue");
+  await expect(page.getByTestId("city-tactical-waypoint-1")).toHaveCount(0);
+  await page.getByTestId("city-tactical-waypoint-0").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);
 });

@@ -62,7 +62,35 @@ if (app.Environment.IsDevelopment())
     });
 }
 
+// Explicit routing exposes trusted endpoint metadata and route values
+// BEFORE the Minimal API binder reads a potentially invalid command JSON.
+app.UseRouting();
 app.UseCors("frontend");
+if (app.Environment.IsDevelopment())
+{
+    app.Use(async (context, next) =>
+    {
+        if (context.GetEndpoint()?.Metadata
+                .GetMetadata<DevelopmentCommandPreauthorization>() is not null)
+        {
+            // The :guid route constraint has already matched. Do not inspect
+            // a client-supplied playerId, URL query or JSON command body.
+            var matchId = context.Request.RouteValues["matchId"]?.ToString();
+            var token = context.Request.Headers["X-Edonism-Dev-Token"].ToString();
+            if (!Guid.TryParse(matchId, out var id)
+                || !context.RequestServices
+                    .GetRequiredService<DevelopmentMatchStore>()
+                    .HasSeatAccess(id, token))
+            {
+                await Results.NotFound(new { code = "match_not_found" })
+                    .ExecuteAsync(context);
+                return;
+            }
+        }
+
+        await next();
+    });
+}
 app.MapHealthChecks("/health");
 app.MapGet("/api/v1/meta", () => Results.Ok(new
 {

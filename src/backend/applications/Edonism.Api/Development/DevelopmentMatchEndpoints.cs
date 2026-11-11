@@ -20,6 +20,10 @@ public sealed record CreateFullDevelopmentMatchRequest(
     IReadOnlyList<string> ActionCardIds,
     string ElectionDayCardId,
     int Seed);
+// Marker inspected AFTER endpoint routing, BEFORE Minimal API JSON binding.
+// Only explicitly marked mutating Development commands get this preflight.
+internal sealed class DevelopmentCommandPreauthorization;
+
 public sealed record DevelopmentFreeMoveRequest(string DestinationStreetId, long ExpectedRevision);
 public sealed record DevelopmentEndTurnRequest(long ExpectedRevision);
 
@@ -246,7 +250,7 @@ public static class DevelopmentMatchEndpoints
                 return Results.NotFound(new { code = "match_not_found" });
 
             return Result(result!);
-        });
+        }).WithMetadata(new DevelopmentCommandPreauthorization());
 
         group.MapPost("/{matchId:guid}/end-turn", (
             Guid matchId, DevelopmentEndTurnRequest request, HttpContext context, DevelopmentMatchStore store) =>
@@ -256,7 +260,7 @@ public static class DevelopmentMatchEndpoints
                 return Results.NotFound(new { code = "match_not_found" });
 
             return Result(result!);
-        });
+        }).WithMetadata(new DevelopmentCommandPreauthorization());
 
         return app;
     }

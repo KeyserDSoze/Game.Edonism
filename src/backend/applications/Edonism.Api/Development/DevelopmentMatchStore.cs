@@ -281,6 +281,20 @@ public sealed class DevelopmentMatchStore
         }
     }
 
+    /// <summary>
+    /// Fast authorization-only gate used before ASP.NET Core Minimal API
+    /// deserializes a command body. The command store authenticates AGAIN
+    /// under this same lock when it applies an action, so rotation cannot
+    /// race past the final authorization check. No snapshot, hand, presence
+    /// or gameplay event is created by this preflight.
+    /// </summary>
+    public bool HasSeatAccess(Guid matchId, string? token)
+    {
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+            return entry.ResolveActor(token) is not null;
+    }
+
     public bool TryRead(Guid matchId, string? token, out MatchSnapshot? snapshot)
     {
         snapshot = null;

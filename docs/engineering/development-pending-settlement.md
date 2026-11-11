@@ -15,3 +15,7 @@ Solo `Development`: `GET /api/dev/matches/{id}/settlement-preview`. Il bearer `X
 Il client rende la previsione solo quando il suo snapshot live è in fase pending, e solo se l'API restituisce stesso match, round, revisione, ordine e quote lorde del server. Il risultato è vincolato all'esatta credenziale attuale; richieste abortite, 409, risposte tardive e dati malformati non possono creare pagamenti né ripristinare schede vecchie. UI i18next IT/EN con etichette chiare **lordo previsto, non pagato**, e layout mobile. Il rendering non influisce su comandi o città 3D.
 
 xUnit: da 2 a 8 attori, quote, ordine, invarianti, copie immutabili, no mutations; HTTP WebApplicationFactory per 409/404/200, revoca/no-store e route non Production. Playwright mocked: pre/pending, UI EN/mobile, dati invalidi e risposte tardive; Playwright live: due browser, REST reale, salario lordo e atoms originali invariati. L'issue #42 viene chiusa dopo CI verde sull'ultimo HEAD di `main`.
+
+## Esito del codice
+
+La [CI #43013915316](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43013915316) sul commit `9e02a79` è `completed/success`, con **233 xUnit .NET 10**, **58 Playwright UI** e **22 Playwright live**, totale **313 test passati** senza errori. La suite xUnit include nuovi casi 2–8 giocatori, copia immutabile e checkpoint ripristinato, privacy e autorizzazione API, revoca, assenza di route Production. Playwright verifica lingua, mobile, dati obsoleti e due browser reali con wallet invariato. Rimane il gate CI sul commit documentale HEAD prima della chiusura #42.

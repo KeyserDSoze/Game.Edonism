@@ -111,6 +111,20 @@ test("real .NET + React: server draws a match, moves two players and stops befor
 
   const aliceToken = tokenFor(created, "alice");
   const bobToken = tokenFor(created, "bob");
+
+  // #58: real .NET first-round commands must never reshuffle, swap or leak
+  // the four cards that were originally assigned to each private seat.
+  const handUrl = `http://127.0.0.1:5080/api/dev/matches/${matchId}/hand`;
+  const originalAliceReply = await request.get(handUrl, { headers: auth(aliceToken) });
+  const originalBobReply = await request.get(handUrl, { headers: auth(bobToken) });
+  expect(originalAliceReply.status()).toBe(200);
+  expect(originalBobReply.status()).toBe(200);
+  const originalAliceHand = (await originalAliceReply.json() as Hand).cardIds;
+  const originalBobHand = (await originalBobReply.json() as Hand).cardIds;
+  expect(originalAliceHand).toHaveLength(4);
+  expect(originalBobHand).toHaveLength(4);
+  expect(originalAliceHand.every(card => !originalBobHand.includes(card))).toBe(true);
+
   const aliceStart = created.state.players[0].streetId;
   const aliceStreet = page.getByTestId("dev-position");
   await expect(aliceStreet).toBeVisible();
@@ -191,6 +205,15 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   expect(final.controlledActivities).toEqual(created.state.controlledActivities);
   expect(final.grossSalaryQuotes).toEqual(created.state.grossSalaryQuotes);
   expect(final.boardActivities).toEqual(created.state.boardActivities);
+  const afterAliceReply = await request.get(handUrl, { headers: auth(aliceToken) });
+  const afterBobReply = await request.get(handUrl, { headers: auth(bobToken) });
+  expect(afterAliceReply.status()).toBe(200);
+  expect(afterBobReply.status()).toBe(200);
+  expect((await afterAliceReply.json() as Hand).cardIds).toEqual(originalAliceHand);
+  expect((await afterBobReply.json() as Hand).cardIds).toEqual(originalBobHand);
+  const publicJson = JSON.stringify(final);
+  for (const secret of [...originalAliceHand, ...originalBobHand])
+    expect(publicJson).not.toContain(secret);
 });
 
 test("real .NET: rejects spoofable and oversized technical player IDs before issuing seats", async ({

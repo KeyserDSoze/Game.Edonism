@@ -107,6 +107,13 @@ public sealed partial class GameMatch
             if (cards.Length != InitialActionDeckComposer.PrintedActionCardCount + 1
                 || cards.Distinct(StringComparer.Ordinal).Count() != cards.Length)
                 throw new InvalidDataException("Checkpoint private deck incomplete or duplicated.");
+
+            // A structurally complete 59-card checkpoint can still silently
+            // swap hands or reorder the hidden draw pile. Reconstruct the
+            // exact original permutation for the recorded seed and seat order
+            // before granting any restored actor access to private cards.
+            if (!InitialActionDeckComposer.MatchesRecordedShuffle(privateDeal, s.TurnOrder))
+                throw new InvalidDataException("Checkpoint private deal does not match its recorded shuffle.");
         }
 
         var expectedQuotes = GrossSalaryRules.Quote(board, participants, s.ControlledActivities);

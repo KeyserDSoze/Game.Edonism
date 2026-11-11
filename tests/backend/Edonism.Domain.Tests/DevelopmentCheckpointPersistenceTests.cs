@@ -230,6 +230,53 @@ public sealed class DevelopmentCheckpointPersistenceTests
         Assert.Equal(1, replay.State.Revision);
     }
 
+    [Theory]
+    [InlineData("swap-private-hand")]
+    [InlineData("reorder-draw-pile")]
+    public void AuthenticatedButNonCanonicalPrivateDealIsRejectedOnEncryptedRestart(
+        string tamper)
+    {
+        using var temp = new TempDirectory();
+        var original = new DevelopmentMatchStore(temp.Files());
+        var created = Create(original);
+        var persisted = temp.Files().Load(created.MatchId);
+        Assert.NotNull(persisted);
+        var deal = persisted.Checkpoint.PrivateDeal!;
+        var hands = deal.Hands.Select(h =>
+            h with { CardIds = h.CardIds.ToArray() }).ToArray();
+        var pile = deal.RemainingDrawPile.ToArray();
+
+        if (tamper == "swap-private-hand")
+        {
+            var left = hands[0].CardIds.ToArray();
+            var right = hands[1].CardIds.ToArray();
+            (left[0], right[0]) = (right[0], left[0]);
+            hands[0] = hands[0] with { CardIds = left };
+            hands[1] = hands[1] with { CardIds = right };
+        }
+        else
+            (pile[0], pile[1]) = (pile[1], pile[0]);
+
+        var tampered = deal with { Hands = hands, RemainingDrawPile = pile };
+        var digests = persisted.TokenDigests.ToDictionary(
+            kv => kv.Key, kv => Convert.FromHexString(kv.Value), StringComparer.Ordinal);
+        // Authenticated AES-GCM envelope is not proof of logical deck order:
+        // simulate an internally inconsistent but correctly re-encrypted file.
+        temp.Files().Save(persisted.Checkpoint with { PrivateDeal = tampered },
+            digests, persisted.CommandReceipts);
+
+        var restarted = new DevelopmentMatchStore(temp.Files());
+        var alice = created.Credentials.Single(c => c.PlayerId == "alice").Token;
+        Assert.False(restarted.TryRead(created.MatchId, alice, out _));
+        Assert.False(restarted.TryReadHand(created.MatchId, alice, out _));
+        Assert.False(restarted.TryReadHistory(created.MatchId, alice, out _));
+
+        // Existing store memory is untouched; only the corrupted restarted
+        // instance fails closed, with no private cards from the forged file.
+        Assert.True(original.TryReadHand(created.MatchId, alice, out var privateHand));
+        Assert.Equal(4, privateHand!.CardIds.Count);
+    }
+
     [Fact]
     public void EncryptedCheckpointWithForgedReceiptDoesNotRestore()
     {

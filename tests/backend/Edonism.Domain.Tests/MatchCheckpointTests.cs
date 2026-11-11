@@ -103,6 +103,112 @@ public sealed class MatchCheckpointTests
     }
 
     [Fact]
+    public void CharacterOnlyFixtureWithoutPrivateActionDealStillRestores()
+    {
+        var match = GameMatch.CreateFromTrustedCharacterCatalog(
+            Guid.NewGuid(), BoardCatalog.LoadDefault(), ["alice", "bob"],
+            CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(), 2026);
+        var checkpoint = match.CaptureCheckpoint();
+        Assert.Equal(2, checkpoint.State.AssignedCharacters.Count);
+        Assert.Null(checkpoint.PrivateDeal);
+        var restored = Restore(checkpoint);
+        Assert.Null(restored.PrivateHandForActor("alice"));
+        Assert.Equal(checkpoint.State.AssignedCharacters, restored.Snapshot().AssignedCharacters);
+        Assert.True(restored.VerifyPublicAudit().IsValid);
+    }
+
+    [Theory]
+    [InlineData("within-hand")]
+    [InlineData("between-seats")]
+    [InlineData("hand-to-pile")]
+    [InlineData("pile-order")]
+    [InlineData("seat-order")]
+    [InlineData("seed")]
+    [InlineData("version")]
+    public void RestoreRejectsStructurallyCompleteButWrongPrivateShuffle(string tamper)
+    {
+        // Every variant still holds 59 distinct IDs and four cards per seat.
+        // The old cardinality-only checkpoint gate would have accepted them.
+        var original = FullDeck().CaptureCheckpoint();
+        var deal = original.PrivateDeal!;
+        var hands = deal.Hands.Select(h => h with { CardIds = h.CardIds.ToArray() }).ToArray();
+        var pile = deal.RemainingDrawPile.ToArray();
+
+        var forged = tamper switch
+        {
+            "within-hand" => SwapWithinHand(),
+            "between-seats" => SwapBetweenSeats(),
+            "hand-to-pile" => SwapHandAndPile(),
+            "pile-order" => SwapWithinPile(),
+            "seat-order" => deal with { Hands = hands.Reverse().ToArray() },
+            "seed" => deal with { Seed = deal.Seed ^ 0x01020304 },
+            "version" => deal with { AlgorithmVersion = "future-algorithm" },
+            _ => throw new ArgumentOutOfRangeException(nameof(tamper)),
+        };
+
+        InitialActionDeal SwapWithinHand()
+        {
+            var ids = hands[0].CardIds.ToArray();
+            (ids[0], ids[1]) = (ids[1], ids[0]);
+            hands[0] = hands[0] with { CardIds = ids };
+            return deal with { Hands = hands };
+        }
+        InitialActionDeal SwapBetweenSeats()
+        {
+            var left = hands[0].CardIds.ToArray();
+            var right = hands[1].CardIds.ToArray();
+            (left[0], right[0]) = (right[0], left[0]);
+            hands[0] = hands[0] with { CardIds = left };
+            hands[1] = hands[1] with { CardIds = right };
+            return deal with { Hands = hands };
+        }
+        InitialActionDeal SwapHandAndPile()
+        {
+            var ids = hands[0].CardIds.ToArray();
+            (ids[0], pile[0]) = (pile[0], ids[0]);
+            hands[0] = hands[0] with { CardIds = ids };
+            return deal with { Hands = hands, RemainingDrawPile = pile };
+        }
+        InitialActionDeal SwapWithinPile()
+        {
+            (pile[0], pile[1]) = (pile[1], pile[0]);
+            return deal with { RemainingDrawPile = pile };
+        }
+
+        Assert.Equal(59, forged.Hands.SelectMany(h => h.CardIds)
+            .Concat(forged.RemainingDrawPile).Distinct(StringComparer.Ordinal).Count());
+        Assert.All(forged.Hands, hand => Assert.Equal(4, hand.CardIds.Count));
+        Assert.False(InitialActionDeckComposer.MatchesRecordedShuffle(
+            forged, original.State.TurnOrder));
+        var error = Assert.Throws<InvalidDataException>(() =>
+            Restore(original with { PrivateDeal = forged }));
+        Assert.DoesNotContain("test:action:", error.Message);
+        Assert.DoesNotContain(ActionDeckFixture.ElectionDayId, error.Message);
+    }
+
+    [Fact]
+    public void ValidCheckpointAfterFullFirstRoundPreservesPrivateDealAndDoesNotCreditEconomy()
+    {
+        var source = FullDeck();
+        Assert.True(source.TryEndTurn("alice", 0).Accepted);
+        Assert.True(source.TryEndTurn("bob", 1).Accepted);
+        var checkpoint = source.CaptureCheckpoint();
+        Assert.True(InitialActionDeckComposer.MatchesRecordedShuffle(
+            checkpoint.PrivateDeal, checkpoint.State.TurnOrder));
+
+        var restored = Restore(checkpoint);
+        Assert.Equal(MatchPhase.AwaitingRoundSettlement, restored.Phase);
+        Assert.Equal(2L, restored.Revision);
+        Assert.True(restored.VerifyPublicAudit().IsValid);
+        foreach (var seat in checkpoint.State.TurnOrder)
+            Assert.Equal(source.PrivateHandForActor(seat)!.CardIds,
+                restored.PrivateHandForActor(seat)!.CardIds);
+        Assert.All(restored.Snapshot().Players, p => Assert.Equal(4, p.Atoms));
+        Assert.False(restored.TurnOptionsForActor("alice")!.CanEndTurn);
+        Assert.NotNull(restored.PendingSettlementPreview());
+    }
+
+    [Fact]
     public void RejectsDuplicateAndIncompletePrivateCardsOrCharacterAssignments()
     {
         var state = FullDeck().CaptureCheckpoint();

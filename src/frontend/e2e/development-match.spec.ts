@@ -1,5 +1,35 @@
 import { expect, test, type Page } from "@playwright/test";
-import { shortestStreetPath } from "../src/features/city/board";
+// E2E mocks stay Node-compatible: do not import Vite's JSON-backed board
+// module here, because Node 24 requires a JSON import attribute at runtime.
+const mockStreetGraph: Record<string, readonly string[]> = {
+  gauss: ["main-square", "newton", "planck"],
+  einstein: ["main-square", "newton", "planck"],
+  newton: ["boson", "einstein", "gauss"],
+  planck: ["einstein", "gauss", "meson"],
+  boson: ["main-square", "newton"],
+  meson: ["main-square", "planck"],
+  "main-square": ["boson", "einstein", "gauss", "meson"],
+};
+function shortestStreetPath(from: string, to: string): string[] | null {
+  if (!mockStreetGraph[from] || !mockStreetGraph[to]) return null;
+  const parents = new Map<string, string | null>([[from, null]]);
+  const pending = [from];
+  for (let i = 0; i < pending.length; i++) {
+    const current = pending[i];
+    if (current === to) {
+      const reversed: string[] = [];
+      for (let street: string | null = current; street !== null;
+        street = parents.get(street) ?? null) reversed.push(street);
+      return reversed.reverse();
+    }
+    for (const next of mockStreetGraph[current]) {
+      if (parents.has(next)) continue;
+      parents.set(next, current);
+      pending.push(next);
+    }
+  }
+  return null;
+}
 
 type Seat = string;
 const demoSeats = ["alice", "bob", "charlie", "diana", "eve", "frank", "grace", "heidi"] as const;

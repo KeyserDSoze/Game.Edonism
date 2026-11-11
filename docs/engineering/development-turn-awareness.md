@@ -19,3 +19,7 @@ Non è un permesso Domain: le azioni `free-move` e `end-turn` sono autorizzate s
 ## Accettazione
 
 Playwright mocked verifica gli stati in italiano, il prefisso dopo join/cambio posto, i turni in sequenza, la fase pending e la pulizia al leave; test EN mobile include revoca e controllo storage. Playwright full-stack verifica la propagazione Alice→Bob tra due browser reali via API .NET, i titoli nelle due lingue, la fase pending e il browser che lascia. La CI esegue anche tutti gli xUnit sul Domain e sugli endpoint; la issue #41 si chiude solo con il gate HEAD di main verde.
+
+## Evidenza CI
+
+[CI del codice #43009017206](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43009017206) sul commit `0015075`: `completed/success`, con **223 xUnit .NET 10**, **56 Playwright UI** (2 nuovi), **21 Playwright live** (1 nuovo), in totale **300 test superati** senza fallimenti. Tutti e tre i job `.NET 10 / xUnit`, `React / Playwright`, `Live React + .NET / Playwright` verdi. La CI sul commit finale documentale è richiesta per chiudere la issue.

@@ -1282,3 +1282,92 @@ test("real .NET: two browsers inspect verified first-round history without chang
     await context.close();
   }
 });
+
+test("real .NET: two-browser authenticated seat activity follows heartbeat and revocation", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const presencePath = `http://127.0.0.1:5080/api/dev/matches/${id}/presence`;
+  const asState = async (token: string) => {
+    const response = await request.get(presencePath, { headers: auth(token) });
+    expect(response.status()).toBe(200);
+    expect(response.headers()["cache-control"]).toBe("no-store");
+    const raw = await response.text();
+    expect(raw).not.toContain(aliceToken);
+    expect(raw).not.toContain(bobToken);
+    expect(raw).not.toContain("lastSeen");
+    expect(raw).not.toContain("cardIds");
+    return JSON.parse(raw) as { matchId: string;
+      seats: { playerId: string; isActive: boolean }[] };
+  };
+
+  await expect.poll(async () => (await asState(bobToken))
+    .seats.find(s => s.playerId === "alice")?.isActive, {
+    timeout: 9000,
+  }).toBe(true);
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="alice"]')).toHaveAttribute("data-presence", "active");
+  const guestContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(id);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-seat-bob")).toBeVisible();
+    await expect(guest.getByTestId("dev-presence-seats")
+      .locator('[data-player-id="bob"]')).toHaveAttribute("data-presence", "active");
+    await expect(guest.getByTestId("dev-presence-seats")
+      .locator('[data-player-id="alice"]')).toHaveAttribute("data-presence", "active");
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    const both = await asState(bobToken);
+    expect(both.seats).toEqual([
+      { playerId: "alice", isActive: true },
+      { playerId: "bob", isActive: true },
+    ]);
+    await expect(guest.getByTestId("dev-revision")).toHaveText("0");
+    await expect(guest.getByTestId("dev-active-player")).toHaveText("alice");
+
+    const rotated = await request.post(
+      `http://127.0.0.1:5080/api/dev/matches/${id}/rotate-token`,
+      { headers: auth(aliceToken) });
+    expect(rotated.status()).toBe(200);
+    const replacement = await rotated.json() as { playerId: string; token: string };
+    expect(replacement.playerId).toBe("alice");
+    expect(replacement.token).not.toBe(aliceToken);
+    const stale = await request.post(presencePath, { headers: auth(aliceToken) });
+    expect(stale.status()).toBe(404);
+    expect(stale.headers()["cache-control"]).toBe("no-store");
+    expect((await asState(bobToken)).seats).toEqual([
+      { playerId: "alice", isActive: false },
+      { playerId: "bob", isActive: true },
+    ]);
+    const renewed = await request.post(presencePath, {
+      headers: auth(replacement.token),
+    });
+    expect(renewed.status()).toBe(200);
+    expect((await asState(bobToken)).seats.every(s => s.isActive)).toBe(true);
+    await expect(guest.getByTestId("dev-revision")).toHaveText("0");
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    const state = await request.get(
+      `http://127.0.0.1:5080/api/dev/matches/${id}`,
+      { headers: auth(bobToken) });
+    expect(state.status()).toBe(200);
+    const snapshot = await state.json() as PublicMatch;
+    expect(snapshot.revision).toBe(0);
+    expect(snapshot.events).toHaveLength(1);
+    const storage = await guest.evaluate(() => ({
+      url: location.href, local: Object.values(localStorage),
+      session: Object.values(sessionStorage),
+    }));
+    expect(JSON.stringify(storage)).not.toContain(bobToken);
+    expect(JSON.stringify(storage)).not.toContain(aliceToken);
+    expect(await guest.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+      .toBe(false);
+  } finally {
+    await guestContext.close();
+  }
+});

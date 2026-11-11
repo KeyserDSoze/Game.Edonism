@@ -420,6 +420,24 @@ public sealed class DevelopmentMatchStore
     }
 
     /// <summary>
+    /// Current seat's read-only street graph routes to public unowned cards.
+    /// Authorization and the Domain-verified projection share the match lock.
+    /// </summary>
+    public bool TryReadUncontrolledRoutes(Guid matchId, string? token,
+        out MatchUncontrolledRoutes? routes)
+    {
+        routes = null;
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            var actorId = entry.ResolveActor(token);
+            if (actorId is null) return false;
+            routes = entry.Match.VerifiedUncontrolledRoutesForActor(actorId);
+            return routes is not null;
+        }
+    }
+
+    /// <summary>
     /// Server-verified, read-only public first-round turn progression. A
     /// forged/revoked token must never learn who already ended a turn.
     /// </summary>

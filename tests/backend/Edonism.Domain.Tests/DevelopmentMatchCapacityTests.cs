@@ -186,4 +186,65 @@ public sealed class DevelopmentMatchCapacityTests
         });
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
+
+    [Fact]
+    public void FailedEncryptedSaveDoesNotConsumeSlotOrPublishMatch()
+    {
+        var directory = Path.Combine(Path.GetTempPath(),
+            "edonism-fixture-capacity-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var disk = new DevelopmentMatchCheckpointFiles(directory, new string('A', 64));
+            var store = new DevelopmentMatchStore(disk, maxNewMatches: 1);
+            Directory.Delete(directory);
+            // An ordinary file occupying the checkpoint directory forces a
+            // write failure, without requiring root privileges or chmod.
+            File.WriteAllText(directory, "blocked");
+            Assert.ThrowsAny<IOException>(() => store.Create(Players()));
+            File.Delete(directory);
+            Directory.CreateDirectory(directory);
+
+            var created = store.Create(Players());
+            Assert.True(store.TryRead(created.MatchId, created.Credentials[0].Token, out _));
+            Assert.Single(Directory.GetFiles(directory, "*.edonism"));
+            Assert.Throws<DevelopmentMatchCapacityException>(() => store.Create(Players()));
+        }
+        finally
+        {
+            if (File.Exists(directory)) File.Delete(directory);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CheckpointRestoresStayAccessibleWithoutConsumingNewCreationSlots()
+    {
+        var directory = Path.Combine(Path.GetTempPath(),
+            "edonism-fixture-reload-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var disk = new DevelopmentMatchCheckpointFiles(directory, new string('B', 64));
+            var originalStore = new DevelopmentMatchStore(disk, maxNewMatches: 1);
+            var original = originalStore.Create(Players());
+            var restoredStore = new DevelopmentMatchStore(disk, maxNewMatches: 1);
+
+            Assert.True(restoredStore.TryRead(original.MatchId,
+                original.Credentials[0].Token, out var before));
+            Assert.Equal(0, before!.Revision);
+            var next = restoredStore.Create(Players());
+            Assert.NotEqual(original.MatchId, next.MatchId);
+            Assert.Throws<DevelopmentMatchCapacityException>(
+                () => restoredStore.Create(Players()));
+            Assert.True(restoredStore.TryRead(original.MatchId,
+                original.Credentials[1].Token, out _));
+            Assert.True(restoredStore.TryRead(next.MatchId,
+                next.Credentials[0].Token, out _));
+            Assert.Equal(2, Directory.GetFiles(directory, "*.edonism").Length);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
 }

@@ -268,6 +268,12 @@ export function DevelopmentMatchLab({
   const currentActorScope = useRef<{
     matchId: string; seatId: string; token: string;
   } | null>(null);
+  // While a rotation is awaiting its ACK, the server may already have revoked
+  // the old bearer. Concurrent read 404s must not erase the still-recoverable
+  // seat before the rotation response updates the in-memory capability.
+  const rotationPending = useRef<{
+    matchId: string; seatId: string; token: string;
+  } | null>(null);
   // Atomic join carries the first hand and options at the same revision.
   const bootstrappedSeat = useRef<{
     matchId: string; seatId: string; token: string; revision: number;
@@ -387,6 +393,9 @@ export function DevelopmentMatchLab({
    * or reauthorize it from a stale HTTP response. Transient 5xx is not revocation.
    */
   function reconcileRevokedSeat(matchId: string, seatId: string, revokedToken: string) {
+    const pending = rotationPending.current;
+    if (pending?.matchId === matchId && pending.seatId === seatId
+      && pending.token === revokedToken) return;
     const active = currentActorScope.current;
     if (active?.matchId !== matchId || active.seatId !== seatId
       || active.token !== revokedToken || session?.matchId !== matchId) return;
@@ -1201,6 +1210,8 @@ export function DevelopmentMatchLab({
     if (busy || !session || !token || !actorId) return;
     const matchId = session.matchId;
     const seatId = actorId;
+    const previousToken = token;
+    rotationPending.current = { matchId, seatId, token: previousToken };
     commandInFlight.current = true;
     setBusy(true);
     setError(null);
@@ -1212,7 +1223,9 @@ export function DevelopmentMatchLab({
         cache: "no-store",
       });
       if (response.status === 404) {
-        reconcileRevokedSeat(matchId, seatId, token);
+        // Unlike concurrent read 404s, the rotation's own 404 is definitive.
+        rotationPending.current = null;
+        reconcileRevokedSeat(matchId, seatId, previousToken);
         return;
       }
       const result = await responseJson<DemoCredential>(response);
@@ -1241,6 +1254,10 @@ export function DevelopmentMatchLab({
       // A failed checkpoint write keeps the original capability valid.
       setError(t("dev.rotateError"));
     } finally {
+      if (rotationPending.current?.matchId === matchId
+        && rotationPending.current.seatId === seatId
+        && rotationPending.current.token === previousToken)
+        rotationPending.current = null;
       commandInFlight.current = false;
       setBusy(false);
     }

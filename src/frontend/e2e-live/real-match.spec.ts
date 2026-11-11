@@ -2088,3 +2088,77 @@ test("real .NET: two browser street route plans follow public activity ownership
     await guestContext.close();
   }
 });
+
+
+test("real .NET: public opponent dossier follows a move in two browsers without revealing hands", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const endpoint = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}/other-player-routes`;
+  await expect(page.getByTestId("dev-other-seats-count")).toContainText("1 altri giocatori");
+  await expect(page.getByTestId("dev-other-seat-bob")).toHaveAttribute("data-owned", "1");
+  await expect(page.getByTestId("dev-other-seat-bob")).toHaveAttribute("data-standing", "1");
+
+  const anonymous = await request.get(endpoint);
+  expect(anonymous.status()).toBe(404);
+  expect(anonymous.headers()["cache-control"]).toBe("no-store");
+  const response = await request.get(endpoint, { headers: auth(aliceToken) });
+  expect(response.status()).toBe(200);
+  expect(response.headers()["cache-control"]).toBe("no-store");
+  const plan = await response.json() as {
+    playerId: string; verifiedRevision: number; fromStreetId: string;
+    others: { otherPlayerId: string; streetId: string; streetSteps: number;
+      streetPath: string[]; controlledActivities: number; standingHenchmen: number }[];
+  };
+  expect(plan.playerId).toBe("alice");
+  expect(plan.verifiedRevision).toBe(0);
+  expect(plan.fromStreetId).toBe(created.state.players[0].streetId);
+  expect(plan.others).toHaveLength(1);
+  const other = plan.others[0];
+  expect(other.otherPlayerId).toBe("bob");
+  expect(other.streetPath).toHaveLength(other.streetSteps + 1);
+  await expect(page.getByTestId("dev-other-seat-bob"))
+    .toHaveAttribute("data-path", other.streetPath.join(">"));
+  expect(JSON.stringify(plan)).not.toContain(aliceToken);
+  expect(JSON.stringify(plan)).not.toContain(bobToken);
+  expect(JSON.stringify(plan)).not.toContain("cardIds");
+  expect(JSON.stringify(plan)).not.toContain("faction");
+
+  const guestContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto("/");
+    await guest.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+    await guest.getByTestId("dev-join-id").fill(created.matchId);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-other-seats-count")).toContainText("1 other players");
+    await expect(guest.getByTestId("dev-other-seat-alice")).toHaveAttribute("data-owned", "1");
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    const bobPlanResponse = await request.get(endpoint, { headers: auth(bobToken) });
+    expect(bobPlanResponse.status()).toBe(200);
+    const bobPlan = await bobPlanResponse.json() as typeof plan;
+    expect(bobPlan.playerId).toBe("bob");
+    expect(bobPlan.others[0].otherPlayerId).toBe("alice");
+
+    await page.locator('[data-testid^="dev-move-"]:not([disabled])').first().click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    const moved = await request.get(endpoint, { headers: auth(aliceToken) });
+    expect(moved.status()).toBe(200);
+    const movedPlan = await moved.json() as typeof plan;
+    expect(movedPlan.verifiedRevision).toBe(1);
+    expect(movedPlan.fromStreetId).not.toBe(plan.fromStreetId);
+    await expect(page.getByTestId("dev-other-seat-bob"))
+      .toHaveAttribute("data-path", movedPlan.others[0].streetPath.join(">"));
+    await expect(guest.getByTestId("dev-revision")).toHaveText("1", { timeout: 10000 });
+    await expect(guest.getByTestId("dev-other-seat-alice"))
+      .toHaveAttribute("data-owned", "1");
+    await guest.getByTestId("dev-leave").click();
+    await expect(guest.getByTestId("dev-other-seats")).toHaveCount(0);
+    await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  } finally {
+    await guestContext.close();
+  }
+});

@@ -2215,3 +2215,80 @@ test("nonminimal route distance is never presented as a valid plan", async ({ pa
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);
 });
+
+
+// #51: public rival reconnaissance is informational, not permission to attack.
+test("other-player public street routes switch seats on IT/EN mobile without leaking credentials", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-other-seats-count")).toContainText("1 altri giocatori");
+  await expect(page.getByTestId("dev-other-seats-list").locator("li")).toHaveCount(1);
+  const bob = page.getByTestId("dev-other-seat-bob");
+  await expect(bob).toHaveAttribute("data-steps", "2");
+  await expect(bob).toHaveAttribute("data-path", "gauss>main-square>einstein");
+  await expect(bob).toHaveAttribute("data-owned", "1");
+  await expect(bob).toHaveAttribute("data-standing", "1");
+  await expect(page.getByTestId("dev-other-path-bob")).toContainText(
+    "Gauss Avenue → Main Square → Einstein Avenue");
+  await expect(page.getByTestId("dev-other-seats-note")).toContainText("non indica fazioni");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(page.getByTestId("dev-other-seats-note")).toContainText("no faction");
+  await page.getByTestId("dev-seat-bob").click();
+  const alice = page.getByTestId("dev-other-seat-alice");
+  await expect(alice).toHaveAttribute("data-path", "einstein>main-square>gauss");
+  await expect(alice).toHaveAttribute("data-owned", "1");
+  await expect(alice).toHaveAttribute("data-standing", "1");
+  await expect(page.getByTestId("dev-other-seats-count")).toContainText("1 other players");
+  await expect(page.getByTestId("dev-other-seat-bob")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-other-seats")).toHaveCount(0);
+});
+
+for (const defect of ["revision", "path", "steps", "count", "identity"] as const) {
+  test(`forged opponent projection ${defect} is hidden without blocking legal commands`, async ({ page }) => {
+    await mockMatchApi(page, { invalidOtherSeatRoutes: defect });
+    await page.goto("/");
+    await page.getByTestId("dev-create").click();
+    await expect(page.getByTestId("dev-other-seats-unavailable")).toBeVisible();
+    await expect(page.getByTestId("dev-other-seats-list")).toHaveCount(0);
+    await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+    await page.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("dev-other-seats-list")).toHaveCount(0);
+  });
+}
+
+test("late old-seat public opponent routes cannot replace the newly selected seat", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { delayFirstAliceOtherSeatRoutes: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect.poll(() => observedHeaders.some(({ path, token }) =>
+    path.endsWith("/other-player-routes") && token === "a".repeat(64))).toBe(true);
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-other-seat-alice"))
+    .toHaveAttribute("data-path", "einstein>main-square>gauss");
+  await page.waitForTimeout(1150);
+  await expect(page.getByTestId("dev-other-seat-alice"))
+    .toHaveAttribute("data-path", "einstein>main-square>gauss");
+  await expect(page.getByTestId("dev-other-seat-bob")).toHaveCount(0);
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-other-seats")).toHaveCount(0);
+});
+
+test("same-street public seats show a zero-edge path and no implied combat", async ({ page }) => {
+  await mockMatchApi(page, { sameStreet: true });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-other-seat-bob")).toHaveAttribute("data-steps", "0");
+  await expect(page.getByTestId("dev-other-seat-bob")).toHaveAttribute("data-path", "gauss");
+  await expect(page.getByTestId("dev-other-seats-note")).toContainText("non indica fazioni");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+});

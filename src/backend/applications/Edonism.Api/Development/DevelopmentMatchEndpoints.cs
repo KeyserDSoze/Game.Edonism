@@ -20,9 +20,27 @@ public sealed record CreateFullDevelopmentMatchRequest(
     IReadOnlyList<string> ActionCardIds,
     string ElectionDayCardId,
     int Seed);
-// Marker inspected AFTER endpoint routing, BEFORE Minimal API JSON binding.
-// Only explicitly marked mutating Development commands get this preflight.
-internal sealed class DevelopmentCommandPreauthorization;
+/// <summary>
+/// Match EXACTLY the two Development command paths before the router can
+/// short-circuit malformed Content-Type with 415. No other Dev routes,
+/// query parameters, HTTP verbs or arbitrary path prefixes are authorized.
+/// This only identifies a resource; the store resolves the bearer under lock.
+/// </summary>
+internal static class DevelopmentCommandPreauthorization
+{
+    public static bool TryMatchPath(PathString path, out Guid matchId)
+    {
+        matchId = Guid.Empty;
+        var segments = path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments is { Length: 5 }
+            && segments[0].Equals("api", StringComparison.OrdinalIgnoreCase)
+            && segments[1].Equals("dev", StringComparison.OrdinalIgnoreCase)
+            && segments[2].Equals("matches", StringComparison.OrdinalIgnoreCase)
+            && (segments[4].Equals("free-move", StringComparison.OrdinalIgnoreCase)
+                || segments[4].Equals("end-turn", StringComparison.OrdinalIgnoreCase))
+            && Guid.TryParse(segments[3], out matchId);
+    }
+}
 
 public sealed record DevelopmentFreeMoveRequest(string DestinationStreetId, long ExpectedRevision);
 public sealed record DevelopmentEndTurnRequest(long ExpectedRevision);
@@ -250,7 +268,7 @@ public static class DevelopmentMatchEndpoints
                 return Results.NotFound(new { code = "match_not_found" });
 
             return Result(result!);
-        }).WithMetadata(new DevelopmentCommandPreauthorization());
+        });
 
         group.MapPost("/{matchId:guid}/end-turn", (
             Guid matchId, DevelopmentEndTurnRequest request, HttpContext context, DevelopmentMatchStore store) =>
@@ -260,7 +278,7 @@ public static class DevelopmentMatchEndpoints
                 return Results.NotFound(new { code = "match_not_found" });
 
             return Result(result!);
-        }).WithMetadata(new DevelopmentCommandPreauthorization());
+        });
 
         return app;
     }

@@ -62,35 +62,34 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-// Explicit routing exposes trusted endpoint metadata and route values
-// BEFORE the Minimal API binder reads a potentially invalid command JSON.
-app.UseRouting();
-app.UseCors("frontend");
+// ASP.NET Core's endpoint router may return 415 for an invalid Content-Type
+// BEFORE a Minimal API endpoint filter or endpoint-metadata middleware runs.
+// For the TWO known Development mutation routes, authorize the bearer BEFORE
+// routing as well as again in the store before committing the command (#45).
+// This early gate does not inspect the command body, playerId or query string.
 if (app.Environment.IsDevelopment())
 {
     app.Use(async (context, next) =>
     {
-        if (context.GetEndpoint()?.Metadata
-                .GetMetadata<DevelopmentCommandPreauthorization>() is not null)
+        if (HttpMethods.IsPost(context.Request.Method)
+            && DevelopmentCommandPreauthorization.TryMatchPath(
+                context.Request.Path, out var matchId)
+            && !context.RequestServices.GetRequiredService<DevelopmentMatchStore>()
+                .HasSeatAccess(matchId,
+                    context.Request.Headers["X-Edonism-Dev-Token"].ToString()))
         {
-            // The :guid route constraint has already matched. Do not inspect
-            // a client-supplied playerId, URL query or JSON command body.
-            var matchId = context.Request.RouteValues["matchId"]?.ToString();
-            var token = context.Request.Headers["X-Edonism-Dev-Token"].ToString();
-            if (!Guid.TryParse(matchId, out var id)
-                || !context.RequestServices
-                    .GetRequiredService<DevelopmentMatchStore>()
-                    .HasSeatAccess(id, token))
-            {
-                await Results.NotFound(new { code = "match_not_found" })
-                    .ExecuteAsync(context);
-                return;
-            }
+            await Results.NotFound(new { code = "match_not_found" })
+                .ExecuteAsync(context);
+            return;
         }
 
         await next();
     });
 }
+// Explicit routing here prevents implicit routing from executing BEFORE
+// the auth gate and exposing body/Content-Type validation to revoked tokens.
+app.UseRouting();
+app.UseCors("frontend");
 app.MapHealthChecks("/health");
 app.MapGet("/api/v1/meta", () => Results.Ok(new
 {

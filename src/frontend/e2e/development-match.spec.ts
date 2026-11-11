@@ -1546,7 +1546,7 @@ test("verified read-only history scrubs first-round streets without moving the l
   await page.getByTestId("dev-history-next").click();
   await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
   await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
-  await page.getByTestId("dev-history-next").click();
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
   await expect(page.getByTestId("dev-history-positions")
     .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", "planck");
   await page.getByTestId("dev-end-turn").click();

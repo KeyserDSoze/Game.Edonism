@@ -1371,3 +1371,57 @@ test("real .NET: two-browser authenticated seat activity follows heartbeat and r
     await guestContext.close();
   }
 });
+
+test("real .NET + two browsers: leaving a local seat hides secrets without ending the match", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const api = `http://127.0.0.1:5080/api/dev/matches/${id}`;
+  const guestContext = await browser.newContext();
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(id);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+
+    await page.getByTestId("dev-leave").click();
+    await expect(page.getByTestId("dev-session")).toHaveCount(0);
+    await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+    await expect(page.getByTestId("match-player-alice")).toHaveCount(0);
+    await expect(page.getByTestId("dev-join-token")).toHaveValue("");
+    await expect(guest.getByTestId("dev-session")).toBeVisible();
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+
+    // No API command is sent by the local UI exit. The old bearer remains
+    // valid until explicitly rotated, and the match state is untouched.
+    const state = await request.get(api, { headers: auth(aliceToken) });
+    expect(state.status()).toBe(200);
+    expect(state.headers()["cache-control"]).toBe("no-store");
+    const unchanged = await state.json() as PublicMatch;
+    expect(unchanged.revision).toBe(0);
+    expect(unchanged.events).toHaveLength(1);
+    const oldSeat = await request.get(api + "/seat", { headers: auth(aliceToken) });
+    expect(oldSeat.status()).toBe(200);
+    expect((await oldSeat.json()).hand.playerId).toBe("alice");
+
+    await page.getByTestId("dev-join-id").fill(id);
+    await page.getByTestId("dev-join-token").fill(aliceToken);
+    await page.getByTestId("dev-join").click();
+    await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    const storage = await page.evaluate(() => ({
+      url: location.href, local: Object.values(localStorage),
+      session: Object.values(sessionStorage),
+    }));
+    expect(JSON.stringify(storage)).not.toContain(aliceToken);
+    expect(JSON.stringify(storage)).not.toContain(bobToken);
+  } finally {
+    await guestContext.close();
+  }
+});

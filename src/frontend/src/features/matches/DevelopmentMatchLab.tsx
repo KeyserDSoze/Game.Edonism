@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CircleDot, FlaskConical, Hand, MoveRight, RotateCw, Users } from "lucide-react";
+import { CircleDot, FlaskConical, Hand, LogOut, MoveRight, RotateCw, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -365,10 +365,21 @@ export function DevelopmentMatchLab({
         return responseJson<PrivateHand>(response);
       })
       .then((result) => {
-        if (!controller.signal.aborted) setHand(result);
+        const active = currentActorScope.current;
+        // A delayed private response must never restore a hand after
+        // local exit, token rotation or a switch to another seat.
+        if (!controller.signal.aborted && active?.matchId === matchId
+          && active.seatId === seatId && active.token === actorToken
+          && result.matchId === matchId && result.playerId === seatId
+          && Array.isArray(result.cardIds)
+          && result.cardIds.every(id => typeof id === "string"))
+          setHand(result);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setHand(null);
+        const active = currentActorScope.current;
+        if (!controller.signal.aborted && active?.matchId === matchId
+          && active.seatId === seatId && active.token === actorToken)
+          setHand(null);
       });
     return () => controller.abort();
   }, [session?.matchId, token]);
@@ -921,6 +932,30 @@ export function DevelopmentMatchLab({
     }
   }
 
+  // Local-only disconnect: no server-side token revocation or match change.
+  // Invalidate scopes synchronously before React effect cleanup so any
+  // response already queued for the old bearer fails closed.
+  function leaveDemo() {
+    if (busy || !session) return;
+    currentActorScope.current = null;
+    currentMatchId.current = null;
+    currentRevision.current = -1;
+    lastPublicTag.current = null;
+    bootstrappedSeat.current = null;
+    setSession(null);
+    setActorId("");
+    setHand(null);
+    setOptionLease(null);
+    setHistoryLease(null);
+    setHistoryRevision(null);
+    setPresenceLease(null);
+    setJoinMatchId("");
+    setJoinToken("");
+    setRotationNotice(null);
+    setError(null);
+    publishPublicPositions(null);
+  }
+
   function chooseActor(id: string) {
     if (busy) return;
     const credential = session?.credentials.find((seat) => seat.playerId === id);
@@ -1040,6 +1075,13 @@ export function DevelopmentMatchLab({
               <p className="text-[11px] leading-5 text-muted-foreground">
                 {t("dev.shareWarning")}
               </p>
+              <Button type="button" size="sm" variant="outline" className="w-full"
+                data-testid="dev-leave" disabled={busy} onClick={leaveDemo}>
+                <LogOut aria-hidden="true" className="size-3.5" />
+                {t("dev.leave")}
+              </Button>
+              <p className="text-[11px] leading-5 text-muted-foreground"
+                data-testid="dev-leave-note">{t("dev.leaveNote")}</p>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="rounded-xl bg-muted p-3">

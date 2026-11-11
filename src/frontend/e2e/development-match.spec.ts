@@ -1567,3 +1567,66 @@ test("backgrounded Development browser stops presence heartbeats and refreshes o
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
   await expect(page.getByTestId("dev-error")).toHaveCount(0);
 });
+
+test("local exit clears creator credentials, private state, 3D markers and stops browser polling", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(page.getByTestId("dev-leave")).toHaveCount(0);
+  await page.getByTestId("dev-create").click();
+  const id = await page.getByTestId("dev-match-id").innerText();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await expect(page.getByTestId("match-player-alice")).toBeVisible();
+  await page.getByTestId("dev-join-id").fill(id);
+  await page.getByTestId("dev-join-token").fill("b".repeat(64));
+  await expect(page.getByTestId("dev-leave-note"))
+    .toContainText("the server token remains valid");
+
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await expect(page.getByTestId("dev-leave")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+  await expect(page.getByTestId("dev-history-panel")).toHaveCount(0);
+  await expect(page.getByTestId("dev-presence-panel")).toHaveCount(0);
+  await expect(page.getByTestId("match-player-alice")).toHaveCount(0);
+  await expect(page.getByTestId("dev-join-id")).toHaveValue("");
+  await expect(page.getByTestId("dev-join-token")).toHaveValue("");
+  const afterLeave = observedHeaders.length;
+  await page.waitForTimeout(5600);
+  expect(observedHeaders).toHaveLength(afterLeave);
+  const storage = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(storage)).not.toContain("a".repeat(64));
+  expect(JSON.stringify(storage)).not.toContain("b".repeat(64));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+
+  // Leaving never revokes the server capability: rejoin is explicit and
+  // obtains a new authenticated, atomic seat bootstrap.
+  await page.getByTestId("dev-join-id").fill(id);
+  await page.getByTestId("dev-join-token").fill("b".repeat(64));
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(observedHeaders.some(x => x.path.endsWith("/seat")
+    && x.token === "b".repeat(64))).toBe(true);
+});
+
+test("local exit rejects a delayed old-seat heartbeat and keeps the lab empty", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { delayFirstAlicePresence: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect.poll(() => observedHeaders.filter(x => x.path.endsWith("/presence")).length)
+    .toBeGreaterThan(0);
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await page.waitForTimeout(1100);
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+  await expect(page.getByTestId("dev-presence-panel")).toHaveCount(0);
+  await expect(page.getByTestId("match-player-alice")).toHaveCount(0);
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+});

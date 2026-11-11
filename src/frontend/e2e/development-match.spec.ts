@@ -2292,3 +2292,34 @@ test("same-street public seats show a zero-edge path and no implied combat", asy
   await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
 });
+
+test("eight-player public proximity orders all seven other seats without exposing current actor", async ({ page }) => {
+  await mockMatchApi(page, { playerCount: 8 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-other-seats-list").locator("li")).toHaveCount(7);
+  await expect(page.getByTestId("dev-other-seats-count")).toContainText("7 altri giocatori");
+  await expect(page.getByTestId("dev-other-seat-heidi")).toHaveAttribute("data-steps", "0");
+  await expect(page.getByTestId("dev-other-seat-alice")).toHaveCount(0);
+  await page.getByTestId("dev-seat-heidi").click();
+  await expect(page.getByTestId("dev-other-seats-list").locator("li")).toHaveCount(7);
+  await expect(page.getByTestId("dev-other-seat-alice")).toHaveAttribute("data-steps", "0");
+  await expect(page.getByTestId("dev-other-seat-heidi")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("fallen opponent henchmen remain publicly controlled but are not standing", async ({ page }) => {
+  await mockMatchApi(page, { fallenHenchman: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-other-seat-bob")).toHaveAttribute("data-owned", "1");
+  await expect(page.getByTestId("dev-other-seat-bob")).toHaveAttribute("data-standing", "0");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-other-seat-alice")).toHaveAttribute("data-owned", "1");
+  await expect(page.getByTestId("dev-other-seat-alice")).toHaveAttribute("data-standing", "1");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+});

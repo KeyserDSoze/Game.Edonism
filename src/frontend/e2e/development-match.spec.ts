@@ -1803,7 +1803,7 @@ test("first-round progress is verified by server after moves and completed turns
   const panel = page.getByTestId("dev-turn-progress");
   await expect(panel).toBeVisible();
   await expect(page.getByTestId("dev-turn-progress-count")).toContainText("0 di 2");
-  await expect(page.getByTestId("dev-turn-progress-seats").locator("li"))
+  await expect(page.getByTestId("dev-turn-progress-seats").locator('[data-player-id="alice"]'))
     .toHaveAttribute("data-progress-state", "active");
   await expect(page.getByTestId("dev-turn-progress-seats").locator('[data-player-id="bob"]'))
     .toHaveAttribute("data-progress-state", "waiting");

@@ -85,6 +85,24 @@ type UncontrolledRoutes = Readonly<{
   routes: readonly UncontrolledRoute[];
 }>;
 
+// Public-only other-seat scouting; NEVER faction, combat or action permission.
+type OtherSeatRoute = Readonly<{
+  otherPlayerId: string;
+  streetId: string;
+  streetSteps: number;
+  streetPath: readonly string[];
+  controlledActivities: number;
+  standingHenchmen: number;
+}>;
+type OtherSeatRoutes = Readonly<{
+  matchId: string;
+  playerId: string;
+  round: number;
+  verifiedRevision: number;
+  fromStreetId: string;
+  others: readonly OtherSeatRoute[];
+}>;
+
 type FirstRoundTurnProgress = Readonly<{
   matchId: string;
   round: number;
@@ -215,6 +233,9 @@ export function DevelopmentMatchLab({
   const [routesLease, setRoutesLease] = useState<{
     token: string; data: UncontrolledRoutes;
   } | null>(null);
+  const [otherSeatLease, setOtherSeatLease] = useState<{
+    token: string; data: OtherSeatRoutes;
+  } | null>(null);
   const [turnProgressLease, setTurnProgressLease] = useState<{
     token: string; data: FirstRoundTurnProgress;
   } | null>(null);
@@ -308,6 +329,13 @@ export function DevelopmentMatchLab({
     && routesLease.data.verifiedRevision === session?.state.revision
     && routesLease.data.fromStreetId === session?.state.players.find(p => p.playerId === actorId)?.streetId
     ? routesLease.data : null;
+  const otherSeatRoutes = otherSeatLease && token
+    && otherSeatLease.token === token
+    && otherSeatLease.data.matchId === session?.matchId
+    && otherSeatLease.data.playerId === actorId
+    && otherSeatLease.data.verifiedRevision === session?.state.revision
+    && otherSeatLease.data.fromStreetId === player?.streetId
+    ? otherSeatLease.data : null;
   const turnProgress = turnProgressLease && token
     && turnProgressLease.token === token
     && turnProgressLease.data.matchId === session?.matchId
@@ -677,6 +705,79 @@ export function DevelopmentMatchLab({
       })
       .catch(() => {
         // A malformed/stale/revoked response never manufactures a route.
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.matchId, session?.state.revision, actorId, token]);
+
+  // #51: informational roster of OTHER public seats at an audited revision.
+  // The server authorizes the bearer, and the browser independently verifies
+  // the complete public graph path, owned lots and standing posture counts.
+  useEffect(() => {
+    const matchId = session?.matchId;
+    const state = session?.state;
+    const revision = state?.revision;
+    const seatId = actorId;
+    const actorToken = token;
+    setOtherSeatLease(null);
+    if (!matchId || !state || revision === undefined || !seatId || !actorToken) return;
+    const controller = new AbortController();
+    void fetch(`/api/dev/matches/${matchId}/other-player-routes`, {
+      headers: { "X-Edonism-Dev-Token": actorToken },
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(response => {
+        if (response.status === 404 && !controller.signal.aborted)
+          reconcileRevokedSeat(matchId, seatId, actorToken);
+        return responseJson<OtherSeatRoutes>(response);
+      })
+      .then(result => {
+        const scope = currentActorScope.current;
+        if (controller.signal.aborted || scope?.matchId !== matchId
+          || scope.seatId !== seatId || scope.token !== actorToken
+          || currentRevision.current !== revision) return;
+        const origin = state.players.find(p => p.playerId === seatId)?.streetId;
+        if (!origin || !result || result.matchId !== matchId
+          || result.playerId !== seatId || result.round !== state.round
+          || result.verifiedRevision !== revision
+          || result.fromStreetId !== origin || !Array.isArray(result.others)
+          || result.others.length !== state.players.length - 1) return;
+        const expected = new Map(state.players.filter(p => p.playerId !== seatId)
+          .map(p => [p.playerId, p] as const));
+        const encountered = new Set<string>();
+        let previousSteps = -1;
+        let previousId = "";
+        for (const other of result.others) {
+          if (!other || typeof other.otherPlayerId !== "string"
+            || encountered.has(other.otherPlayerId)) return;
+          const expectedPlayer = expected.get(other.otherPlayerId);
+          const canonical = shortestStreetPath(origin, other.streetId);
+          const controls = state.controlledActivities.filter(c =>
+            c.ownerPlayerId === other.otherPlayerId);
+          const standing = controls.filter(c => c.posture === 0).length;
+          if (!expectedPlayer || other.streetId !== expectedPlayer.streetId
+            || !canonical || !Array.isArray(other.streetPath)
+            || other.streetPath.length !== canonical.length
+            || other.streetPath.some((id: string, index: number) => id !== canonical[index])
+            || !Number.isInteger(other.streetSteps)
+            || other.streetSteps !== canonical.length - 1
+            || !Number.isInteger(other.controlledActivities)
+            || other.controlledActivities !== controls.length
+            || !Number.isInteger(other.standingHenchmen)
+            || other.standingHenchmen !== standing
+            || other.streetSteps < previousSteps
+            || (other.streetSteps === previousSteps && other.otherPlayerId <= previousId))
+            return;
+          encountered.add(other.otherPlayerId);
+          previousSteps = other.streetSteps;
+          previousId = other.otherPlayerId;
+        }
+        setOtherSeatLease({ token: actorToken, data: result });
+      })
+      .catch(() => {
+        // A temporary failure or forged/stale route never asserts a rival's
+        // location and never enables an attack or a player command.
       });
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1590,6 +1691,54 @@ export function DevelopmentMatchLab({
                   <span className="text-muted-foreground">{t("dev.position")}: </span>
                   <strong data-testid="dev-position">{streetById(player.streetId)?.name ?? player.streetId}</strong>
                 </p>
+                <section aria-label={t("dev.otherSeatsTitle")}
+                  data-testid="dev-other-seats"
+                  className="space-y-2 rounded-xl border border-border p-3 text-xs">
+                  <p className="font-semibold">{t("dev.otherSeatsTitle")}</p>
+                  {!otherSeatRoutes ? (
+                    <p data-testid="dev-other-seats-unavailable"
+                      className="text-muted-foreground">{t("dev.otherSeatsUnavailable")}</p>
+                  ) : (
+                    <>
+                      <p data-testid="dev-other-seats-count" aria-live="polite">
+                        {t("dev.otherSeatsCount", { count: otherSeatRoutes.others.length })}
+                      </p>
+                      <ol data-testid="dev-other-seats-list" className="grid gap-2 sm:grid-cols-2">
+                        {otherSeatRoutes.others.map(other => (
+                          <li key={other.otherPlayerId}
+                            data-testid={`dev-other-seat-${other.otherPlayerId}`}
+                            data-steps={other.streetSteps}
+                            data-path={other.streetPath.join(">")}
+                            data-owned={other.controlledActivities}
+                            data-standing={other.standingHenchmen}
+                            className="min-w-0 rounded-md bg-muted p-2">
+                            <span className="block font-semibold">{other.otherPlayerId}</span>
+                            <span className="block text-muted-foreground">
+                              {streetById(other.streetId)?.name ?? other.streetId} · {
+                                t("dev.routeSteps", { count: other.streetSteps })
+                              }
+                            </span>
+                            <span className="block break-words text-muted-foreground"
+                              data-testid={`dev-other-path-${other.otherPlayerId}`}>
+                              {t("dev.routePath")}: {other.streetPath.map(id =>
+                                streetById(id)?.name ?? id).join(" → ")}
+                            </span>
+                            <span className="block text-muted-foreground">
+                              {t("dev.otherSeatsControls", {
+                                owned: other.controlledActivities,
+                                standing: other.standingHenchmen,
+                              })}
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    </>
+                  )}
+                  <p data-testid="dev-other-seats-note"
+                    className="text-[11px] leading-5 text-muted-foreground">
+                    {t("dev.otherSeatsNote")}
+                  </p>
+                </section>
                 <section aria-label={t("dev.routesTitle")}
                   data-testid="dev-route-planner"
                   className="space-y-2 rounded-xl border border-border p-3 text-xs">

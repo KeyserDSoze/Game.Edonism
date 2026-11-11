@@ -66,6 +66,8 @@ type MockOptions = {
   delayFirstAliceRoutes?: boolean;
   invalidRoutePath?: boolean;
   invalidRouteSteps?: boolean;
+  invalidOtherSeatRoutes?: "revision" | "path" | "steps" | "count" | "identity";
+  delayFirstAliceOtherSeatRoutes?: boolean;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
@@ -95,6 +97,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayedSettlement = false;
   let delayedAliceTurnProgress = false;
   let delayedAliceRoutes = false;
+  let delayedAliceOtherSeats = false;
   const presentSeats = new Set<Seat>();
   const acceptedKeys = new Map<string, {
     kind: string; expectedRevision: number; destinationStreetId?: string;
@@ -302,6 +305,42 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           playerId: options.invalidPresence && id === "bob" ? "intruder" : id,
           isActive: presentSeats.has(id),
         })),
+      } });
+    }
+
+    if (path.endsWith("/other-player-routes")) {
+      const state = snapshot();
+      const origin = streets[seat];
+      const others = seats.filter(id => id !== seat).map(id => {
+        const streetId = streets[id];
+        const canonical = shortestStreetPath(origin, streetId) ?? [];
+        const controls = state.controlledActivities.filter(c => c.ownerPlayerId === id);
+        return {
+          otherPlayerId: id,
+          streetId,
+          streetSteps: canonical.length - 1,
+          streetPath: canonical,
+          controlledActivities: controls.length,
+          standingHenchmen: controls.filter(c => c.posture === 0).length,
+        };
+      }).sort((a, b) => a.streetSteps - b.streetSteps
+        || (a.otherPlayerId < b.otherPlayerId ? -1 : a.otherPlayerId > b.otherPlayerId ? 1 : 0));
+      if (others.length && options.invalidOtherSeatRoutes) {
+        const target = others[0];
+        if (options.invalidOtherSeatRoutes === "path") target.streetPath = [origin, "main-square"];
+        if (options.invalidOtherSeatRoutes === "steps") target.streetSteps++;
+        if (options.invalidOtherSeatRoutes === "count") target.controlledActivities++;
+        if (options.invalidOtherSeatRoutes === "identity") target.otherPlayerId = "intruder";
+      }
+      if (options.delayFirstAliceOtherSeatRoutes && seat === "alice"
+        && !delayedAliceOtherSeats) {
+        delayedAliceOtherSeats = true;
+        await new Promise(resolve => setTimeout(resolve, 900));
+      }
+      return reply({ status: 200, json: {
+        matchId: state.matchId, playerId: seat, round: state.round,
+        verifiedRevision: options.invalidOtherSeatRoutes === "revision" ? revision + 99 : revision,
+        fromStreetId: origin, others,
       } });
     }
 

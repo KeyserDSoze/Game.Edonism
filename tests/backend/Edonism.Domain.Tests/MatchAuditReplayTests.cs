@@ -171,6 +171,94 @@ public sealed class MatchAuditReplayTests
     }
 
     [Fact]
+    public void VerifiedHistoryFramesAreRevisionAlignedAndImmutableAfterFutureMoves()
+    {
+        var match = NewMatch();
+        var genesis = match.VerifyPublicAudit();
+        Assert.True(genesis.IsValid);
+        var start = Assert.Single(genesis.Frames);
+        Assert.Equal(0, start.Revision);
+        Assert.Equal("match-created", start.Kind);
+        Assert.Equal("system", start.ActorId);
+        Assert.Equal("alice", start.ActivePlayerId);
+        Assert.Equal("gauss", start.Players[0].StreetId);
+        Assert.False(start.Players[0].FreeMoveUsed);
+        Assert.Equal("einstein", start.Players[1].StreetId);
+
+        Assert.True(match.TryFreeMove("alice", "planck", 0).Accepted);
+        Assert.True(match.TryEndTurn("alice", 1).Accepted);
+        Assert.True(match.TryFreeMove("bob", "newton", 2).Accepted);
+        Assert.True(match.TryEndTurn("bob", 3).Accepted);
+        var verified = match.VerifyPublicAudit();
+
+        Assert.True(verified.IsValid, verified.Code);
+        Assert.Equal(5, verified.Frames.Count);
+        Assert.Equal(new long[] { 0, 1, 2, 3, 4 },
+            verified.Frames.Select(frame => frame.Revision).ToArray());
+        Assert.Equal(new[] { "match-created", "free-move", "turn-ended",
+                "free-move", "round-settlement-pending" },
+            verified.Frames.Select(frame => frame.Kind).ToArray());
+        Assert.Equal(new[] { "alice", "alice", "bob", "bob", null },
+            verified.Frames.Select(frame => frame.ActivePlayerId).ToArray());
+        Assert.Equal("gauss", verified.Frames[0].Players[0].StreetId);
+        Assert.Equal("planck", verified.Frames[1].Players[0].StreetId);
+        Assert.Equal("planck", verified.Frames[4].Players[0].StreetId);
+        Assert.Equal("einstein", verified.Frames[0].Players[1].StreetId);
+        Assert.Equal("einstein", verified.Frames[2].Players[1].StreetId);
+        Assert.Equal("newton", verified.Frames[3].Players[1].StreetId);
+        Assert.False(verified.Frames[0].Players[0].FreeMoveUsed);
+        Assert.True(verified.Frames[1].Players[0].FreeMoveUsed);
+        Assert.False(verified.Frames[2].Players[1].FreeMoveUsed);
+        Assert.True(verified.Frames[3].Players[1].FreeMoveUsed);
+        Assert.Equal(MatchPhase.AwaitingRoundSettlement, verified.Frames[4].Phase);
+        Assert.Null(verified.Frames[4].ActivePlayerId);
+        Assert.Equal(verified.Players, verified.Frames[^1].Players);
+        Assert.Equal(match.Revision + 1, verified.Frames.Count);
+    }
+
+    [Fact]
+    public void EightSeatHistoryFollowsCanonicalTurnsAndNeverInventsExtraEvents()
+    {
+        var board = BoardCatalog.LoadDefault();
+        var participants = board.Slots.Take(8)
+            .Select((slot, index) => new MatchParticipantSeed($"p{index}", slot.Id)).ToArray();
+        var match = GameMatch.CreateFromTrustedSetup(Guid.NewGuid(), board, participants);
+        Assert.Equal(8, match.VerifyPublicAudit().Frames[0].Players.Count);
+        for (var turn = 0; turn < 8; turn++)
+        {
+            var actor = match.ActivePlayerId!;
+            Assert.True(match.TryEndTurn(actor, match.Revision).Accepted);
+            var audit = match.VerifyPublicAudit();
+            Assert.True(audit.IsValid, audit.Code);
+            Assert.Equal(turn + 2, audit.Frames.Count);
+            Assert.Equal(match.Revision, audit.Frames[^1].Revision);
+            Assert.Equal(8, audit.Frames[^1].Players.Count);
+            Assert.Equal(turn == 7 ? null : $"p{turn + 1}",
+                audit.Frames[^1].ActivePlayerId);
+        }
+        Assert.Equal(MatchPhase.AwaitingRoundSettlement,
+            match.VerifyPublicAudit().Frames[^1].Phase);
+    }
+
+    [Fact]
+    public void FailedVerificationNeverReturnsPartialHistoryToClients()
+    {
+        var match = Complete();
+        var wrong = ReplaceEvent(match, 3, e => e with { ActorId = "alice" });
+        var invalid = MatchAuditReplay.Verify(BoardCatalog.LoadDefault(), wrong);
+        Assert.False(invalid.IsValid);
+        Assert.Empty(invalid.Frames);
+        var alteredPosition = match with
+        {
+            Players = Array.AsReadOnly(match.Players.Select((p, i) =>
+                i == 0 ? p with { StreetId = "not-a-street" } : p).ToArray())
+        };
+        var tampered = MatchAuditReplay.Verify(BoardCatalog.LoadDefault(), alteredPosition);
+        Assert.False(tampered.IsValid);
+        Assert.Empty(tampered.Frames);
+    }
+
+    [Fact]
     public void FullDeckReplayContainsNoActionHandsTokensOrDrawPile()
     {
         var match = GameMatch.CreateFromTrustedFullDeckSetup(

@@ -119,6 +119,25 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "match_not_found" });
         });
 
+        // A heartbeat is an ephemeral, bearer-authenticated hint that a
+        // Development seat's browser is recently active. It neither mutates
+        // Domain state nor grants gameplay permissions. GET never marks a
+        // seat active merely by observing it.
+        group.MapGet("/{matchId:guid}/presence", (Guid matchId, HttpContext context,
+            DevelopmentMatchStore store) =>
+        {
+            return store.TryReadPresence(matchId, Token(context), out var presence)
+                ? Results.Ok(presence)
+                : Results.NotFound(new { code = "match_not_found" });
+        });
+        group.MapPost("/{matchId:guid}/presence", (Guid matchId, HttpContext context,
+            DevelopmentMatchStore store) =>
+        {
+            return store.TryHeartbeat(matchId, Token(context), out var presence)
+                ? Results.Ok(presence)
+                : Results.NotFound(new { code = "match_not_found" });
+        });
+
         // A single Development bootstrap joins state, this actor's private
         // hand and the Domain's permissions at one revision under one lock.
         // Authorization comes only from the bearer header, never query playerId.

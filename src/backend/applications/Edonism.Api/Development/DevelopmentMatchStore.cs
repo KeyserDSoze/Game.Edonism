@@ -33,6 +33,13 @@ public sealed record DevRevisionWaitResult(
 public sealed record DevPublicHistory(
     Guid MatchId, long VerifiedRevision, IReadOnlyList<MatchReplayFrame> Frames);
 
+/// <summary>
+/// A non-authoritative, short-lived Development hint that an authenticated
+/// browser recently signaled a seat. Never serialize timestamps or tokens.
+/// </summary>
+public sealed record DevSeatPresence(string PlayerId, bool IsActive);
+public sealed record DevMatchPresence(Guid MatchId, IReadOnlyList<DevSeatPresence> Seats);
+
 public sealed class DevelopmentMatchStore
 {
     private const int MaxRetainedReceipts = 64;
@@ -40,14 +47,19 @@ public sealed class DevelopmentMatchStore
     // but never let one bearer monopolize a multi-seat match.
     public const int MaxPendingWaitsPerActor = 4;
     public const int MaxPendingWaitsPerMatch = 32;
+    public static readonly TimeSpan PresenceTtl = TimeSpan.FromSeconds(15);
 
     private sealed record RevisionWaiter(
         string ActorId, TaskCompletionSource<bool> Signal);
     private readonly DevelopmentMatchCheckpointFiles? _checkpointFiles;
+    private readonly TimeProvider _clock;
 
-    public DevelopmentMatchStore(DevelopmentMatchCheckpointFiles? checkpointFiles = null)
+    public DevelopmentMatchStore(
+        DevelopmentMatchCheckpointFiles? checkpointFiles = null,
+        TimeProvider? timeProvider = null)
     {
         _checkpointFiles = checkpointFiles;
+        _clock = timeProvider ?? TimeProvider.System;
     }
 
     private sealed class Entry
@@ -64,6 +76,11 @@ public sealed class DevelopmentMatchStore
         public GameMatch Match { get; set; }
         public Dictionary<string, byte[]> TokenDigests { get; }
         public List<DevCommandReceipt> CommandReceipts { get; }
+
+        // Up to one time value for each actor, never one per tab or token.
+        // Not checkpointed: a process restart means nobody recently pinged.
+        public Dictionary<string, DateTimeOffset> LastPresenceByActor { get; } =
+            new(StringComparer.Ordinal);
 
         // A bounded list of in-flight conditional HTTP reads. On every state
         // change, signal all waiters asynchronously; on timeout or cancellation,
@@ -252,6 +269,10 @@ public sealed class DevelopmentMatchStore
             _checkpointFiles?.Save(entry.Match.CaptureCheckpoint(), nextDigests,
                 entry.CommandReceipts);
             entry.TokenDigests[actor] = digest;
+            // Rotation is a capability change, not a gameplay event.
+            // The seat is inactive until the new bearer pings again; other
+            // seats retain their independent presence.
+            entry.LastPresenceByActor.Remove(actor);
             // A revocation changes no public revision, but old subscribers
             // must wake and reauthenticate instead of waiting for gameplay.
             entry.NotifySubscribers();
@@ -403,6 +424,46 @@ public sealed class DevelopmentMatchStore
                 return false;
             history = new DevPublicHistory(
                 matchId, verification.VerifiedRevision, verification.Frames);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Development-only presence. GET must not manufacture an online signal;
+    /// POST changes exactly the bearer-derived actor. Neither operation
+    /// touches canonical match state, audit, encryption files or revision
+    /// notifications. All observations are made under the match lock.
+    /// </summary>
+    public bool TryReadPresence(
+        Guid matchId, string? token, out DevMatchPresence? presence) =>
+        TryPresence(matchId, token, heartbeat: false, out presence);
+
+    public bool TryHeartbeat(
+        Guid matchId, string? token, out DevMatchPresence? presence) =>
+        TryPresence(matchId, token, heartbeat: true, out presence);
+
+    private bool TryPresence(
+        Guid matchId, string? token, bool heartbeat, out DevMatchPresence? presence)
+    {
+        presence = null;
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            var actor = entry.ResolveActor(token);
+            if (actor is null) return false;
+
+            var now = _clock.GetUtcNow();
+            if (heartbeat) entry.LastPresenceByActor[actor] = now;
+            // Compute the current status for every canonical seat. The public
+            // response excludes lastSeen, bearer and any private player state.
+            var seats = entry.Match.Snapshot().Players.Select(player =>
+            {
+                var active = entry.LastPresenceByActor.TryGetValue(
+                    player.PlayerId, out var last)
+                    && now >= last && now - last < PresenceTtl;
+                return new DevSeatPresence(player.PlayerId, active);
+            }).ToArray();
+            presence = new DevMatchPresence(matchId, Array.AsReadOnly(seats));
             return true;
         }
     }

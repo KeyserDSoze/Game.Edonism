@@ -316,6 +316,50 @@ export function DevelopmentMatchLab({
   const inspectedRevision = historyRevision ?? history?.verifiedRevision;
   const inspectedFrame = history?.frames.find(frame =>
     frame.revision === inspectedRevision);
+
+  /** Navigate the authenticated, #55-verified audit, never the LIVE match.
+   * Movement events may focus only the actor's server-verified arrival street.
+   * All other public events select a frame but cannot invent a map move.
+   */
+  function jumpToAuditedEvent(entry: PublicMatchEvent) {
+    if (!session || !history || !token || !actorId) return;
+    const scope = currentActorScope.current;
+    if (scope?.matchId !== session.matchId || scope.seatId !== actorId
+      || scope.token !== token || history.matchId !== session.matchId
+      || history.verifiedRevision !== session.state.revision) return;
+    const original = session.state.events[entry.revision];
+    const frame = history.frames[entry.revision];
+    if (!original || original.revision !== entry.revision
+      || original.kind !== entry.kind || original.actorId !== entry.actorId
+      || !frame || frame.revision !== entry.revision
+      || frame.kind !== entry.kind || frame.actorId !== entry.actorId) return;
+
+    let moveFocus: HistoricalStreetFocus | null = null;
+    if (entry.kind === "free-move") {
+      const arrival = frame.players.filter(p => p.playerId === entry.actorId);
+      if (original.fromStreetId !== entry.fromStreetId
+        || original.toStreetId !== entry.toStreetId
+        || arrival.length !== 1
+        || arrival[0].streetId !== entry.toStreetId
+        || !streetById(entry.toStreetId ?? "")) return;
+      moveFocus = {
+        matchId: session.matchId,
+        sourceRevision: history.verifiedRevision,
+        historyRevision: frame.revision,
+        playerId: entry.actorId,
+        streetId: arrival[0].streetId,
+      };
+    } else if (entry.kind !== "match-created"
+      && entry.kind !== "turn-ended"
+      && entry.kind !== "round-settlement-pending") return;
+
+    // The revision selector and the city overlay are intentionally local.
+    // Never change live player positions, actor authority or command options.
+    onHistoricalFocus(moveFocus);
+    setHistoryRevision(frame.revision === history.verifiedRevision
+      ? null : frame.revision);
+  }
+
   const uncontrolledRoutes = routesLease && token
     && routesLease.token === token
     && routesLease.data.matchId === session?.matchId
@@ -1857,7 +1901,7 @@ export function DevelopmentMatchLab({
                     <span className="min-w-9 rounded bg-muted px-1 py-0.5 text-center font-mono text-muted-foreground">
                       #{entry.revision}
                     </span>
-                    <span>
+                    <span className="min-w-0 flex-1">
                       {entry.kind === "match-created"
                         ? t("dev.auditCreated")
                         : entry.kind === "free-move"
@@ -1870,6 +1914,19 @@ export function DevelopmentMatchLab({
                             ? t("dev.auditEnd", { actor: entry.actorId })
                             : t("dev.auditPending", { actor: entry.actorId })}
                     </span>
+                    <Button type="button" size="sm" variant="outline"
+                      data-testid={`dev-audit-jump-${entry.revision}`}
+                      className="h-auto min-h-8 shrink-0 whitespace-normal text-xs"
+                      aria-current={inspectedFrame?.revision === entry.revision ? "step" : undefined}
+                      aria-label={t(entry.kind === "free-move"
+                        ? "dev.auditJumpMove" : "dev.auditJumpEvent", {
+                          revision: entry.revision, actor: entry.actorId,
+                        })}
+                      disabled={!history || history.frames[entry.revision]?.kind !== entry.kind
+                        || history.frames[entry.revision]?.actorId !== entry.actorId}
+                      onClick={() => jumpToAuditedEvent(entry)}>
+                      {t("dev.auditJump")}
+                    </Button>
                   </li>
                 ))}
               </ol>

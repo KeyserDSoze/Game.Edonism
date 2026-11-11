@@ -1241,6 +1241,21 @@ test("real .NET: two browsers inspect verified first-round history without chang
     await expect(guest.getByTestId("dev-history-positions")
       .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", destination);
     await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    // Jump from actual public .NET audit into the already verified timeline,
+    // without changing public LIVE player positions or actor turn permissions.
+    await expect(guest.getByTestId("dev-audit-jump-0")).toBeEnabled();
+    await guest.getByTestId("dev-audit-jump-0").click();
+    await expect(guest.getByTestId("dev-history-revision")).toContainText("#0");
+    await expect(guest.getByTestId("city-historical-focus")).toHaveCount(0);
+    await expect(guest.getByTestId("dev-audit-jump-1")).toBeEnabled();
+    await guest.getByTestId("dev-audit-jump-1").click();
+    await expect(guest.getByTestId("dev-history-revision")).toContainText("#1");
+    await expect(guest.getByTestId("city-renderer"))
+      .toHaveAttribute("data-history-street", destination);
+    await expect(guest.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-street-id", destination);
+    await expect(guest.getByTestId("dev-revision")).toHaveText("1");
+    await expect(guest.getByTestId("dev-end-turn")).toBeDisabled();
 
     const fromApi = await request.get(api + "/history", { headers: auth(bobToken) });
     expect(fromApi.status()).toBe(200);

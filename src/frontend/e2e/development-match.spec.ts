@@ -1522,6 +1522,74 @@ test("saturated conditional polling recovers without revoking private hand or re
   expect(JSON.stringify(data)).not.toContain("b".repeat(64));
 });
 
+test("public audit buttons jump to verified replay and map without moving LIVE players", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-audit-jump-0")).toBeEnabled();
+  await expect(page.getByTestId("dev-audit-jump-0"))
+    .toHaveAttribute("aria-label", "Inspect public event at revision #0 in the replay");
+  await page.getByTestId("dev-move-planck").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-audit-jump-1")).toBeEnabled();
+  await expect(page.getByTestId("dev-audit-jump-1"))
+    .toHaveAttribute("aria-label", "Show alice's movement at revision #1 on the city");
+
+  await page.getByTestId("dev-audit-jump-0").click();
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#0");
+  await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
+  await page.getByTestId("dev-audit-jump-1").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
+  await expect(page.getByTestId("dev-audit-jump-1")).toHaveAttribute("aria-current", "step");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-history-street", "planck");
+  await expect(page.getByTestId("city-historical-target"))
+    .toContainText("Revision #1 · alice was on Planck Avenue");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "planck");
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("2");
+  await expect(page.getByTestId("dev-audit-jump-2")).toBeEnabled();
+  await page.getByTestId("dev-audit-jump-2").click();
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#2");
+  await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("dev-history-active")).toContainText("bob's turn");
+  await page.getByTestId("dev-audit-jump-1").click();
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
+  await expect(page.getByTestId("city-historical-target")).toContainText("alice was on Planck Avenue");
+  await expect(page.getByTestId("dev-revision")).toHaveText("2");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "planck");
+  expect(observedHeaders.filter(v => v.path.endsWith("/history")).length).toBeGreaterThanOrEqual(3);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+});
+
+test("settlement and turn-ended audit jumps never fabricate a historical movement", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("2");
+  await expect(page.getByTestId("dev-audit-jump-2")).toBeEnabled();
+  await page.getByTestId("dev-audit-jump-1").click();
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
+  await expect(page.getByTestId("dev-history-active")).toContainText("bob");
+  await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
+  await page.getByTestId("dev-audit-jump-2").click();
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#2");
+  await expect(page.getByTestId("dev-history-active")).toContainText("fine round");
+  await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("2");
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+});
+
 test("verified read-only history scrubs first-round streets without moving the live city", async ({ page }) => {
   const { observedHeaders } = await mockMatchApi(page);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -1607,6 +1675,11 @@ test("Italian historical city overlay is accessible without WebGL and clears on 
   await expect(page.getByText("Il 3D non è disponibile", { exact: false })).toBeVisible();
   await page.getByTestId("dev-create").click();
   await expect(page.getByTestId("dev-history-revision")).toContainText("#0");
+  await expect(page.getByTestId("dev-audit-jump-0")).toBeEnabled();
+  await expect(page.getByTestId("dev-audit-jump-0"))
+    .toHaveAttribute("aria-label", "Esplora l'evento pubblico alla revisione #0 nel replay");
+  await page.getByTestId("dev-audit-jump-0").click();
+  await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
   await expect(page.getByTestId("dev-history-focus-alice"))
     .toHaveAttribute("aria-label", "Mostra alice alla revisione #0 sulla città");
   await page.getByTestId("dev-history-focus-alice").click();
@@ -1617,6 +1690,12 @@ test("Italian historical city overlay is accessible without WebGL and clears on 
   await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
   await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-history-street", "");
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await page.getByTestId("dev-move-planck").click();
+  await expect(page.getByTestId("dev-audit-jump-1")).toBeEnabled();
+  await page.getByTestId("dev-audit-jump-1").click();
+  await expect(page.getByTestId("city-historical-target"))
+    .toContainText("Revisione #1 · alice era su Planck Avenue");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "planck");
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
 });
 
@@ -1626,6 +1705,7 @@ test("invalid public history fails closed without disabling server-confirmed com
   await page.getByTestId("dev-create").click();
   await expect(page.getByTestId("dev-history-unavailable")).toBeVisible();
   await expect(page.getByTestId("dev-history-positions")).toHaveCount(0);
+  await expect(page.getByTestId("dev-audit-jump-0")).toBeDisabled();
   await expect(page.getByTestId("dev-history-focus-alice")).toHaveCount(0);
   await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
   await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");

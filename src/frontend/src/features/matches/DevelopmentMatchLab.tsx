@@ -78,6 +78,13 @@ type PublicHistory = Readonly<{
   frames: readonly PublicHistoryFrame[];
 }>;
 
+// Development-only transport hint. Absence means no recent heartbeat,
+// NOT proof that a person disconnected or that their turn can be skipped.
+type DevPresence = Readonly<{
+  matchId: string;
+  seats: readonly Readonly<{ playerId: string; isActive: boolean }>[];
+}>;
+
 const quotaAndExtras = [
   ["public-financing", 5, 2],
   ["private-financing", 5, 2],
@@ -160,6 +167,9 @@ export function DevelopmentMatchLab({
   // null follows the latest server-confirmed revision, while a number means
   // the user has intentionally chosen a historical read-only frame.
   const [historyRevision, setHistoryRevision] = useState<number | null>(null);
+  const [presenceLease, setPresenceLease] = useState<{
+    token: string; data: DevPresence;
+  } | null>(null);
   // The credential identity is held only in component memory.
   const [optionLease, setOptionLease] = useState<{
     token: string; options: ActorTurnOptions
@@ -213,6 +223,10 @@ export function DevelopmentMatchLab({
   const inspectedRevision = historyRevision ?? history?.verifiedRevision;
   const inspectedFrame = history?.frames.find(frame =>
     frame.revision === inspectedRevision);
+  const presence = presenceLease && token
+    && presenceLease.token === token
+    && presenceLease.data.matchId === session?.matchId
+    ? presenceLease.data : null;
 
   function publishPublicPositions(state: DemoMatch | null) {
     onPublicState(state
@@ -425,6 +439,98 @@ export function DevelopmentMatchLab({
     // Each fetch is bound to a unique match/seat/token/revision.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.matchId, session?.state.revision, actorId, token]);
+
+  // Only a visible, authenticated Development browser sends a heartbeat.
+  // It is never a game command: no local game revision or 3D projection is
+  // changed and server presence cannot grant turn options.
+  useEffect(() => {
+    const matchId = session?.matchId;
+    const actorToken = token;
+    const seatId = actorId;
+    setPresenceLease(null);
+    if (!matchId || !actorToken || !seatId) return;
+    const life = new AbortController();
+    let pending: AbortController | null = null;
+    let inFlight = false;
+    const knownIds = new Set(session.state.players.map(p => p.playerId));
+
+    const heartbeat = async () => {
+      if (life.signal.aborted || inFlight
+        || document.visibilityState === "hidden" || !navigator.onLine) return;
+      const request = new AbortController();
+      pending = request;
+      inFlight = true;
+      try {
+        const response = await fetch(`/api/dev/matches/${matchId}/presence`, {
+          method: "POST",
+          headers: { "X-Edonism-Dev-Token": actorToken },
+          signal: request.signal,
+          cache: "no-store",
+        });
+        if (request.signal.aborted || life.signal.aborted) return;
+        if (response.status === 404) {
+          // Same 404 semantics as other actor-scoped reads, but a late 404
+          // from the old seat must not revoke a newly joined or rotated seat.
+          if (currentActorScope.current?.matchId === matchId
+            && currentActorScope.current.seatId === seatId
+            && currentActorScope.current.token === actorToken)
+            reconcileRevokedSeat(matchId, seatId, actorToken);
+          setPresenceLease(null);
+          return;
+        }
+        const result = await responseJson<DevPresence>(response);
+        if (request.signal.aborted || life.signal.aborted
+          || currentActorScope.current?.matchId !== matchId
+          || currentActorScope.current.seatId !== seatId
+          || currentActorScope.current.token !== actorToken) return;
+        if (result?.matchId !== matchId || !Array.isArray(result.seats)
+          || result.seats.length !== knownIds.size
+          || new Set(result.seats.map(x => x.playerId)).size !== knownIds.size
+          || !result.seats.every(x => knownIds.has(x.playerId)
+            && typeof x.isActive === "boolean")) {
+          setPresenceLease(null);
+          return;
+        }
+        setPresenceLease({ token: actorToken, data: result });
+      } catch {
+        // Network failures are NOT revocation: keep the match and private
+        // hand, but fail closed on the transient presence projection.
+        if (!request.signal.aborted && !life.signal.aborted)
+          setPresenceLease(null);
+      } finally {
+        pending = null;
+        inFlight = false;
+      }
+    };
+    const visible = () => {
+      if (document.visibilityState === "hidden") {
+        pending?.abort();
+        setPresenceLease(null);
+      } else {
+        void heartbeat();
+      }
+    };
+    const online = () => void heartbeat();
+    const offline = () => {
+      pending?.abort();
+      setPresenceLease(null);
+    };
+    void heartbeat();
+    const interval = window.setInterval(() => void heartbeat(), 5000);
+    document.addEventListener("visibilitychange", visible);
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
+    return () => {
+      life.abort();
+      pending?.abort();
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", visible);
+      window.removeEventListener("online", online);
+      window.removeEventListener("offline", offline);
+    };
+    // Browser activity is bound only to the exact match, actor and token.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.matchId, actorId, token]);
 
   // Long-poll an authenticated, revision-scoped ETag instead of issuing
   // full snapshots while idle. 304 still verifies the bearer on the server.
@@ -944,6 +1050,36 @@ export function DevelopmentMatchLab({
                   : t("dev.settlement")}
               </p>
             </div>
+
+            <section aria-label={t("dev.presenceTitle")}
+              data-testid="dev-presence-panel"
+              className="space-y-2 rounded-xl border border-border p-3">
+              <p className="text-xs font-semibold">{t("dev.presenceTitle")}</p>
+              <ul data-testid="dev-presence-seats"
+                className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                {session.state.players.map(seat => {
+                  const recentlyActive = presence?.seats.find(p =>
+                    p.playerId === seat.playerId)?.isActive;
+                  return (
+                    <li key={seat.playerId} data-player-id={seat.playerId}
+                      data-presence={recentlyActive === undefined ? "unknown"
+                        : recentlyActive ? "active" : "inactive"}
+                      className="rounded-md bg-muted px-2 py-2">
+                      <span className="block font-semibold">{seat.playerId}</span>
+                      <span className="text-muted-foreground">
+                        {recentlyActive === undefined ? t("dev.presenceUnknown")
+                          : recentlyActive ? t("dev.presenceRecent")
+                          : t("dev.presenceInactive")}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p data-testid="dev-presence-note"
+                className="text-[11px] leading-5 text-muted-foreground">
+                {t("dev.presenceNote")}
+              </p>
+            </section>
 
             <div role="group" aria-label={t("dev.seatLabel")} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {session.credentials.map((seat) => (

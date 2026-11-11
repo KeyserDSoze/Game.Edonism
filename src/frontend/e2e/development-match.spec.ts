@@ -2335,15 +2335,18 @@ test("concurrent old-token read 404 cannot log out a seat during successful toke
   await page.getByTestId("dev-create").click();
   await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
   const matchPath = "/api/dev/matches/00000000-0000-0000-0000-000000000020";
+  // Presence heartbeat is not blocked by the command-in-flight guard, unlike
+  // match revision polling. It reliably reproduces a concurrent old-token 404.
+  const oldReadPath = `${matchPath}/presence`;
   const oldToken = "a".repeat(64);
-  const baseline = observedHeaders.filter(e => e.path === matchPath && e.token === oldToken).length;
+  const baseline = observedHeaders.filter(e => e.path === oldReadPath && e.token === oldToken).length;
   const rotation = page.waitForResponse(response =>
     new URL(response.url()).pathname.endsWith("/rotate-token")
       && response.request().method() === "POST");
   await page.getByTestId("dev-rotate-token").click();
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect.poll(() => observedHeaders
-    .filter(e => e.path === matchPath && e.token === oldToken).length,
+    .filter(e => e.path === oldReadPath && e.token === oldToken).length,
   { timeout: 10000 }).toBeGreaterThan(baseline);
   const response = await rotation;
   expect(response.status()).toBe(200);

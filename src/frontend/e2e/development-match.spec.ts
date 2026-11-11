@@ -68,6 +68,7 @@ type MockOptions = {
   invalidRouteSteps?: boolean;
   invalidOtherSeatRoutes?: "revision" | "path" | "steps" | "count" | "identity";
   delayFirstAliceOtherSeatRoutes?: boolean;
+  delayRotationAcknowledgement?: boolean;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
@@ -460,6 +461,10 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       tokenToSeat.delete(token!);
       presentSeats.delete(seat);
       tokenToSeat.set(fresh, seat);
+      // The server revokes old access BEFORE the browser receives the ACK.
+      // A separate concurrent GET may legitimately return 404 meanwhile.
+      if (options.delayRotationAcknowledgement)
+        await new Promise(resolve => setTimeout(resolve, 1400));
       return reply({
         status: 200,
         headers: { "Cache-Control": "no-store" },
@@ -2322,4 +2327,31 @@ test("fallen opponent henchmen remain publicly controlled but are not standing",
   await expect(page.getByTestId("dev-other-seat-alice")).toHaveAttribute("data-owned", "1");
   await expect(page.getByTestId("dev-other-seat-alice")).toHaveAttribute("data-standing", "1");
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
+});
+
+test("concurrent old-token read 404 cannot log out a seat during successful token rotation", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { delayRotationAcknowledgement: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  const matchPath = "/api/dev/matches/00000000-0000-0000-0000-000000000020";
+  const oldToken = "a".repeat(64);
+  const baseline = observedHeaders.filter(e => e.path === matchPath && e.token === oldToken).length;
+  const rotation = page.waitForResponse(response =>
+    new URL(response.url()).pathname.endsWith("/rotate-token")
+      && response.request().method() === "POST");
+  await page.getByTestId("dev-rotate-token").click();
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect.poll(() => observedHeaders
+    .filter(e => e.path === matchPath && e.token === oldToken).length,
+  { timeout: 10000 }).toBeGreaterThan(baseline);
+  const response = await rotation;
+  expect(response.status()).toBe(200);
+  await expect(page.getByTestId("dev-session")).toBeVisible();
+  await expect(page.getByTestId("dev-rotation-notice")).toContainText("Token aggiornato");
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
 });

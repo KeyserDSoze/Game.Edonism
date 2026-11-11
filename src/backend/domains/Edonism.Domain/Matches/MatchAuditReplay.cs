@@ -61,7 +61,7 @@ public static class MatchAuditReplay
         for (var i = 0; i < snapshot.Players.Count; i++)
         {
             var player = snapshot.Players[i];
-            if (player is null || string.IsNullOrWhiteSpace(player.PlayerId)
+            if (player is null || !MatchParticipantId.IsValid(player.PlayerId)
                 || string.IsNullOrWhiteSpace(player.StartingSlotId)
                 || snapshot.TurnOrder[i] != player.PlayerId
                 || !ids.Add(player.PlayerId) || !startingSlots.Add(player.StartingSlotId)

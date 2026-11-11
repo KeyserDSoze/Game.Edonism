@@ -193,6 +193,36 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   expect(final.boardActivities).toEqual(created.state.boardActivities);
 });
 
+test("real .NET: rejects spoofable and oversized technical player IDs before issuing seats", async ({
+  page, request,
+}) => {
+  const api = "http://127.0.0.1:5080/api/dev/matches/";
+  for (const invalidId of ["A".repeat(65), "alice\nother", "alice\u202Eother"]) {
+    const rejected = await request.post(api, {
+      data: {
+        players: [
+          { playerId: invalidId, startingSlotId: "N-01" },
+          { playerId: "bob", startingSlotId: "S-01" },
+        ],
+      },
+    });
+    expect(rejected.status()).toBe(400);
+    expect(rejected.headers()["cache-control"]).toBe("no-store");
+    const body = await rejected.json() as Record<string, unknown>;
+    expect(body.code).toBe("invalid_preview_setup");
+    expect(body).not.toHaveProperty("credentials");
+    expect(body).not.toHaveProperty("state");
+  }
+
+  // A valid two-seat full-deck fixture must still be admitted and authorized.
+  // The browser stays actor-scoped; no secret is placed in localStorage.
+  const created = await startRealMatch(page);
+  expect(created.state.players).toHaveLength(2);
+  expect(created.credentials).toHaveLength(2);
+  await expect(page.getByTestId("dev-seat-alice")).toBeVisible();
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+});
+
 test("real .NET: token isolation, secret hand privacy and no token in browser storage", async ({
   page,
   request,

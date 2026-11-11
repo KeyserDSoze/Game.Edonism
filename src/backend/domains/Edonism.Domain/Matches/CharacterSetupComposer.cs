@@ -39,7 +39,7 @@ public static class CharacterSetupComposer
         // Two to eight is a Development fixture bound, NOT a decision about the
         // final minimum player count. The box contains eight colored pawn sets.
         if (playerIds.Count is < 2 or > 8 ||
-            playerIds.Any(string.IsNullOrWhiteSpace) ||
+            playerIds.Any(id => !MatchParticipantId.IsValid(id)) ||
             playerIds.Distinct(StringComparer.Ordinal).Count() != playerIds.Count)
             throw new ArgumentException("Expected 2-8 distinct valid Development players.", nameof(playerIds));
 

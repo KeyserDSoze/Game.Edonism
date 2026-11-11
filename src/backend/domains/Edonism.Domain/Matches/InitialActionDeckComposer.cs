@@ -45,7 +45,7 @@ public static class InitialActionDeckComposer
         ArgumentNullException.ThrowIfNull(playerIds);
 
         if (playerIds.Count is < 2 or > 8 ||
-            playerIds.Any(string.IsNullOrWhiteSpace) ||
+            playerIds.Any(id => !MatchParticipantId.IsValid(id)) ||
             playerIds.Distinct(StringComparer.Ordinal).Count() != playerIds.Count)
             throw new ArgumentException("Expected 2-8 unique valid Development participants.", nameof(playerIds));
 

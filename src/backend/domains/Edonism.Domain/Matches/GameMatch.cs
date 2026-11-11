@@ -154,7 +154,7 @@ public sealed partial class GameMatch
         ArgumentNullException.ThrowIfNull(participants);
         if (participants.Count is < 2 or > MaxPrintedPlayers ||
             participants.Any(p => p is null ||
-                string.IsNullOrWhiteSpace(p.PlayerId) ||
+                !MatchParticipantId.IsValid(p.PlayerId) ||
                 string.IsNullOrWhiteSpace(p.StartingCardId)) ||
             participants.Select(p => p.PlayerId).Distinct(StringComparer.Ordinal).Count() != participants.Count)
         {
@@ -273,7 +273,7 @@ public sealed partial class GameMatch
         // Preview fixture bounds; the printed set has eight colored players.
         // The production match's minimum player count still needs design approval.
         if (participants.Count is < 2 or > MaxPrintedPlayers
-            || participants.Any(p => p is null || string.IsNullOrWhiteSpace(p.PlayerId)
+            || participants.Any(p => p is null || !MatchParticipantId.IsValid(p.PlayerId)
                 || string.IsNullOrWhiteSpace(p.StartingSlotId))
             || participants.Select(p => p.PlayerId).Distinct(StringComparer.Ordinal).Count() != participants.Count
             || participants.Select(p => p.StartingSlotId).Distinct(StringComparer.Ordinal).Count() != participants.Count)

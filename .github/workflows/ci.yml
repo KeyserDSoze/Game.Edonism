@@ -26,9 +26,11 @@ jobs:
 
   frontend:
     name: React / Playwright
-    # #47: ubuntu-latest moved to Ubuntu 26.04 (resolute), where Chromium
-    # --with-deps apt downloads failed before any browser test ran.
+    # #47: apt DNS failed on both Ubuntu 26.04 and 24.04 runner hosts.
+    # Use the version-matched official browser image with system deps already installed.
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.55.0-noble
     defaults:
       run:
         working-directory: src/frontend
@@ -41,8 +43,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Typecheck and bundle
         run: npm run build
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Verify preinstalled Chromium can launch
+        run: node -e "const { chromium } = require('@playwright/test'); (async () => { const b = await chromium.launch(); await b.close(); console.log('Chromium ready'); })().catch(e => { console.error(e); process.exit(1); })"
       - name: Playwright E2E
         run: npm run test:e2e
       - name: Upload Playwright diagnostics
@@ -58,8 +60,10 @@ jobs:
 
   fullstack:
     name: Live React + .NET / Playwright
-    # Keep the full-stack browser on the same supported Ubuntu runner.
+    # Run the real .NET API and Playwright in the same version-matched browser image.
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.55.0-noble
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -76,9 +80,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: src/frontend
         run: npm install --no-audit --no-fund
-      - name: Install Chromium
+      - name: Verify preinstalled Chromium can launch
         working-directory: src/frontend
-        run: npx playwright install --with-deps chromium
+        run: node -e "const { chromium } = require('@playwright/test'); (async () => { const b = await chromium.launch(); await b.close(); console.log('Chromium ready'); })().catch(e => { console.error(e); process.exit(1); })"
       - name: Start local Development API
         shell: bash
         run: |

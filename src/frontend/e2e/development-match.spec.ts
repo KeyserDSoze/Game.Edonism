@@ -2428,7 +2428,8 @@ test("English mobile tactical focus remains accessible when WebGL is unavailable
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/");
   await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
-  await expect(page.getByRole("status")).toContainText("3D is not available");
+  await expect(page.getByText("3D is not available on this device.", { exact: false }))
+    .toBeVisible();
   await page.getByTestId("dev-create").click();
   const button = page.getByTestId("dev-focus-player-bob");
   await expect(button).toHaveAttribute("aria-label", "View bob on map");

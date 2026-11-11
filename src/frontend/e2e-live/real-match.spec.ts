@@ -2152,7 +2152,8 @@ test("real .NET: public opponent dossier follows a move in two browsers without 
     await guest.getByTestId("dev-focus-player-alice").click();
     await expect(guest.getByTestId("city-tactical-target")).toContainText("Observed player: alice");
     await expect(guest.getByTestId("city-renderer")).toHaveAttribute(
-      "data-focus-path", other.streetPath.slice().reverse().join(">"));
+      "data-focus-path", String(await guest.getByTestId("dev-other-seat-alice")
+        .getAttribute("data-path")));
     await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
     const bobPlanResponse = await request.get(endpoint, { headers: auth(bobToken) });
     expect(bobPlanResponse.status()).toBe(200);

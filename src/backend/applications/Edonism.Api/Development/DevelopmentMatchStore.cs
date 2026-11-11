@@ -26,6 +26,13 @@ public sealed record DevSeatBootstrap(
 public sealed record DevRevisionWaitResult(
     bool Found, MatchSnapshot? State, bool Saturated = false);
 
+/// <summary>
+/// Only movement/turn data reconstructed and fully validated by the Domain
+/// verifier; no hands, deck, setup secrets, capability tokens or money.
+/// </summary>
+public sealed record DevPublicHistory(
+    Guid MatchId, long VerifiedRevision, IReadOnlyList<MatchReplayFrame> Frames);
+
 public sealed class DevelopmentMatchStore
 {
     private const int MaxRetainedReceipts = 64;
@@ -374,6 +381,28 @@ public sealed class DevelopmentMatchStore
         {
             if (entry.ResolveActor(token) is null) return false;
             verification = entry.Match.VerifyPublicAudit();
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// A bearer-authorized history from the same locked, canonical Domain
+    /// audit replay. Reject verification failure without partial frames.
+    /// </summary>
+    public bool TryReadHistory(
+        Guid matchId, string? token, out DevPublicHistory? history)
+    {
+        history = null;
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            if (entry.ResolveActor(token) is null) return false;
+            var verification = entry.Match.VerifyPublicAudit();
+            if (!verification.IsValid || verification.Frames.Count == 0
+                || verification.Frames.Count != entry.Match.Revision + 1)
+                return false;
+            history = new DevPublicHistory(
+                matchId, verification.VerifiedRevision, verification.Frames);
             return true;
         }
     }

@@ -108,6 +108,17 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "match_not_found" });
         });
 
+        // Reconstruct historical player positions exclusively inside the
+        // .NET verifier. This endpoint is read-only, bearer-authorized and
+        // never exposes hands, character secrets or unverified event frames.
+        group.MapGet("/{matchId:guid}/history", (Guid matchId, HttpContext context,
+            DevelopmentMatchStore store) =>
+        {
+            return store.TryReadHistory(matchId, Token(context), out var history)
+                ? Results.Ok(history)
+                : Results.NotFound(new { code = "match_not_found" });
+        });
+
         // A single Development bootstrap joins state, this actor's private
         // hand and the Domain's permissions at one revision under one lock.
         // Authorization comes only from the bearer header, never query playerId.

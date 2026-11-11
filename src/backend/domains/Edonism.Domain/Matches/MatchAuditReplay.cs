@@ -5,6 +5,14 @@ namespace Edonism.Domain.Matches;
 /// <summary>Only the first-round public movement/turn state can be replayed at present.</summary>
 public sealed record ReplayedMatchPlayer(string PlayerId, string StreetId, bool FreeMoveUsed);
 
+/// <summary>
+/// Public, immutable first-round projection AFTER one verified audit event.
+/// This is read-only history, never a private checkpoint or a command state.
+/// </summary>
+public sealed record MatchReplayFrame(
+    long Revision, string Kind, string ActorId, MatchPhase Phase,
+    string? ActivePlayerId, IReadOnlyList<ReplayedMatchPlayer> Players);
+
 /// <summary>Verification of the CURRENT public command subset; not a persisted match restore.</summary>
 public sealed record MatchAuditReplayResult(
     bool IsValid,
@@ -12,7 +20,13 @@ public sealed record MatchAuditReplayResult(
     long VerifiedRevision,
     MatchPhase Phase,
     string? ActivePlayerId,
-    IReadOnlyList<ReplayedMatchPlayer> Players);
+    IReadOnlyList<ReplayedMatchPlayer> Players)
+{
+    // Never return partial history from a failed audit. The only success
+    // path publishes the entire verified sequence, including genesis.
+    public IReadOnlyList<MatchReplayFrame> Frames { get; init; } =
+        Array.Empty<MatchReplayFrame>();
+}
 
 /// <summary>
 /// Reconstructs the first round's movement/turn projection from genesis and public
@@ -70,6 +84,19 @@ public static class MatchAuditReplay
         var revision = 0L;
         var turnIndex = 0;
         var phase = MatchPhase.PlayerTurns;
+        var frames = new List<MatchReplayFrame>(snapshot.Events.Count);
+        void CaptureFrame(MatchAuditEvent eventEntry)
+        {
+            // Capture copies at every revision. Later moves may not mutate
+            // earlier positions, even though they share the source dictionary.
+            var playersAtRevision = Array.AsReadOnly(snapshot.TurnOrder.Select(id =>
+                new ReplayedMatchPlayer(id, positions[id], moved[id])).ToArray());
+            frames.Add(new MatchReplayFrame(revision, eventEntry.Kind, eventEntry.ActorId,
+                phase, phase == MatchPhase.PlayerTurns
+                    ? snapshot.TurnOrder[turnIndex] : null, playersAtRevision));
+        }
+
+        CaptureFrame(snapshot.Events[0]);
         for (var i = 1; i < snapshot.Events.Count; i++)
         {
             var entry = snapshot.Events[i];
@@ -114,6 +141,7 @@ public static class MatchAuditReplay
                     return Fail("unknown_event_kind", revision);
             }
             revision++;
+            CaptureFrame(entry);
         }
 
         var active = phase == MatchPhase.PlayerTurns ? snapshot.TurnOrder[turnIndex] : null;
@@ -128,6 +156,9 @@ public static class MatchAuditReplay
         return new MatchAuditReplayResult(true, "ok", revision, phase, active,
             Array.AsReadOnly(snapshot.TurnOrder
                 .Select(id => new ReplayedMatchPlayer(id, positions[id], moved[id]))
-                .ToArray()));
+                .ToArray()))
+        {
+            Frames = Array.AsReadOnly(frames.ToArray())
+        };
     }
 }

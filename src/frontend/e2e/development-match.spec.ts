@@ -1529,3 +1529,41 @@ test("reselecting an already active fallback seat cannot erase its private hand"
     .locator('[data-player-id="bob"]')).toHaveAttribute("data-presence", "active");
   await expect(page.getByTestId("dev-session")).toBeVisible();
 });
+
+test("backgrounded Development browser stops presence heartbeats and refreshes on return", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const calls = () => observedHeaders.filter(x => x.path.endsWith("/presence"));
+  await expect.poll(() => calls().length).toBeGreaterThan(0);
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="alice"]')).toHaveAttribute("data-presence", "active");
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true, get: () => "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="alice"]')).toHaveAttribute("data-presence", "unknown");
+  const hiddenCount = calls().length;
+  // Give the 5-second heartbeat interval time to fire while the tab is
+  // hidden. No request should be sent and no private/game state should move.
+  await page.waitForTimeout(5600);
+  expect(calls()).toHaveLength(hiddenCount);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true, get: () => "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect.poll(() => calls().length).toBeGreaterThan(hiddenCount);
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="alice"]')).toHaveAttribute("data-presence", "active");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+});

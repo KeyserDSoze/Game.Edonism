@@ -23,6 +23,9 @@ type MockOptions = {
   overloadFirstConditionalWait?: boolean;
   historyUnavailable?: boolean;
   corruptHistory?: boolean;
+  presenceUnavailable?: boolean;
+  invalidPresence?: boolean;
+  delayFirstAlicePresence?: boolean;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
@@ -48,6 +51,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let firstResponseDropped = false;
   let firstHttp503 = false;
   let firstOverloadedPoll = false;
+  let delayedAlicePresence = false;
+  const presentSeats = new Set<Seat>();
   const acceptedKeys = new Map<string, {
     kind: string; expectedRevision: number; destinationStreetId?: string;
   }>();
@@ -236,6 +241,23 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       });
     }
 
+    if (path.endsWith("/presence")) {
+      if (options.presenceUnavailable)
+        return reply({ status: 503, json: { code: "temporarily_unavailable" } });
+      if (options.delayFirstAlicePresence && seat === "alice" && !delayedAlicePresence) {
+        delayedAlicePresence = true;
+        await new Promise(resolve => setTimeout(resolve, 900));
+      }
+      if (request.method() === "POST") presentSeats.add(seat);
+      return reply({ status: 200, json: {
+        matchId: snapshot().matchId,
+        seats: seats.map(id => ({
+          playerId: options.invalidPresence && id === "bob" ? "intruder" : id,
+          isActive: presentSeats.has(id),
+        })),
+      } });
+    }
+
     if (path.endsWith("/history")) {
       if (options.historyUnavailable)
         return reply({ status: 503, json: { code: "unavailable" } });
@@ -290,6 +312,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         + (seats.indexOf(seat) + 1).toString(16).toUpperCase()
         + (rotationSequence % 16).toString(16).toUpperCase();
       tokenToSeat.delete(token!);
+      presentSeats.delete(seat);
       tokenToSeat.set(fresh, seat);
       return reply({
         status: 200,
@@ -411,6 +434,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       const previous = [...tokenToSeat.entries()].find(([, id]) => id === seat)?.[0];
       expect(previous).toBeTruthy();
       tokenToSeat.delete(previous!);
+      presentSeats.delete(seat);
       rotationSequence++;
       const fresh = "F".repeat(62)
         + (seats.indexOf(seat) + 1).toString(16).toUpperCase()
@@ -1405,4 +1429,81 @@ test("successful credential rotation resets replay selection without changing li
   const historyCalls = observedHeaders.filter(v => v.path.endsWith("/history"));
   expect(historyCalls.some(v => v.token === "a".repeat(64))).toBe(true);
   expect(historyCalls.some(v => v.token?.startsWith("F".repeat(62)))).toBe(true);
+});
+
+test("Development seat presence shows only bearer-checked active seats on mobile in English", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="alice"]')).toHaveAttribute("data-presence", "active");
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="bob"]')).toHaveAttribute("data-presence", "inactive");
+  await expect(page.getByTestId("dev-presence-panel")).toContainText("Recent seat activity");
+  await expect(page.getByTestId("dev-presence-note")).toContainText("15 seconds");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="bob"]')).toHaveAttribute("data-presence", "active");
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="alice"]')).toHaveAttribute("data-presence", "active");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-active-player")).toHaveText("alice");
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  const calls = observedHeaders.filter(x => x.path.endsWith("/presence"));
+  expect(calls.some(x => x.token === "a".repeat(64))).toBe(true);
+  expect(calls.some(x => x.token === "b".repeat(64))).toBe(true);
+  const storage = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(storage)).not.toContain("a".repeat(64));
+  expect(JSON.stringify(storage)).not.toContain("b".repeat(64));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("HTTP 503 or unknown seat presence fails closed but never revokes or grants commands", async ({ page }) => {
+  await mockMatchApi(page, { presenceUnavailable: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="alice"]')).toHaveAttribute("data-presence", "unknown");
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(2);
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+});
+
+test("malformed presence never makes an invented opponent appear", async ({ page }) => {
+  await mockMatchApi(page, { invalidPresence: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="alice"]')).toHaveAttribute("data-presence", "unknown");
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="bob"]')).toHaveAttribute("data-presence", "unknown");
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="intruder"]')).toHaveCount(0);
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+});
+
+test("delayed presence for a previous seat cannot overwrite the new seat scope", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { delayFirstAlicePresence: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect.poll(() => observedHeaders.filter(x => x.path.endsWith("/presence")).length)
+    .toBeGreaterThan(0);
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="bob"]')).toHaveAttribute("data-presence", "active");
+  await page.waitForTimeout(1100);
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="bob"]')).toHaveAttribute("data-presence", "active");
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
 });

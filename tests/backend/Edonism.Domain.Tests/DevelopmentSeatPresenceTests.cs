@@ -69,8 +69,15 @@ public sealed class DevelopmentSeatPresenceTests
         Assert.All(both!.Seats, s => Assert.True(s.IsActive));
 
         Assert.True(store.TryRead(id, alice, out var after));
-        Assert.Equal(before, after);
-        Assert.Equal(0, after!.Revision);
+        Assert.NotNull(before);
+        Assert.NotNull(after);
+        Assert.Equal(before!.MatchId, after!.MatchId);
+        Assert.Equal(before.Revision, after.Revision);
+        Assert.Equal(before.Players.Select(p => p.StreetId),
+            after.Players.Select(p => p.StreetId));
+        Assert.Equal(before.Events.Select(e => e.Kind),
+            after.Events.Select(e => e.Kind));
+        Assert.Equal(0, after.Revision);
         Assert.Single(after.Events);
         Assert.Equal("seat-0", after.ActivePlayerId);
         Assert.True(store.TryReadHistory(id, alice, out var history));

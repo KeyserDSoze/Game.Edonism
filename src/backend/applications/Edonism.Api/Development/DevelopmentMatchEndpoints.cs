@@ -157,6 +157,16 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "match_not_found" });
         });
 
+        // #49: actor-authorized, read-only shortest street graph distances to
+        // currently uncontrolled public activities. NOT a purchase action.
+        group.MapGet("/{matchId:guid}/uncontrolled-routes",
+            (Guid matchId, HttpContext context, DevelopmentMatchStore store) =>
+        {
+            return store.TryReadUncontrolledRoutes(matchId, Token(context), out var routes)
+                ? Results.Ok(routes)
+                : Results.NotFound(new { code = "match_not_found" });
+        });
+
         // #43: actor-authorized, audit-verified completed/remaining turn order.
         // Does not grant turn permissions, reveal private cards or skip actors.
         group.MapGet("/{matchId:guid}/turn-progress",

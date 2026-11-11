@@ -1512,3 +1512,66 @@ test("real .NET: malformed command UUID checks bearer before key, including revo
     await guestContext.close();
   }
 });
+
+test("real .NET: two browser turn badge follows server and clears after round or local exit", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const baseTitle = "Edonism — City Preview";
+  await expect(page.getByTestId("dev-turn-signal")).toHaveAttribute("data-turn-state", "mine");
+  await expect.poll(() => page.title()).toBe(`È il tuo turno · ${baseTitle}`);
+
+  const guestContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto("/");
+    await guest.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+    await guest.getByTestId("dev-join-id").fill(id);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-turn-signal")).toHaveAttribute("data-turn-state", "other");
+    await expect(guest.getByTestId("dev-turn-signal-text")).toContainText("alice");
+    await expect.poll(() => guest.title()).toBe(baseTitle);
+
+    await page.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("dev-turn-signal")).toHaveAttribute("data-turn-state", "other");
+    await expect.poll(() => page.title()).toBe(baseTitle);
+    // No synthetic UI timer decides the turn: Bob learns about Alice's
+    // authoritative command through the real authenticated .NET long poll.
+    await expect(guest.getByTestId("dev-revision")).toHaveText("1", { timeout: 9000 });
+    await expect(guest.getByTestId("dev-turn-signal")).toHaveAttribute("data-turn-state", "mine");
+    await expect(guest.getByTestId("dev-turn-signal-text")).toHaveText("It's your turn");
+    await expect.poll(() => guest.title()).toBe(`Your turn · ${baseTitle}`);
+    await expect(guest.getByTestId("dev-end-turn")).toBeEnabled();
+    await guest.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-revision")).toHaveText("2");
+    await expect(guest.getByTestId("dev-turn-signal")).toHaveAttribute("data-turn-state", "pending");
+    await expect.poll(() => guest.title()).toBe(baseTitle);
+    await expect(page.getByTestId("dev-revision")).toHaveText("2", { timeout: 9000 });
+    await expect(page.getByTestId("dev-turn-signal")).toHaveAttribute("data-turn-state", "pending");
+
+    const state = await request.get(`http://127.0.0.1:5080/api/dev/matches/${id}`, {
+      headers: auth(aliceToken),
+    });
+    expect(state.status()).toBe(200);
+    const final = await state.json() as PublicMatch;
+    expect(final.revision).toBe(2);
+    expect(final.phase).toBe(1);
+    expect(final.events).toHaveLength(3);
+    await guest.getByTestId("dev-leave").click();
+    await expect(guest.getByTestId("dev-turn-signal")).toHaveCount(0);
+    await expect.poll(() => guest.title()).toBe(baseTitle);
+    const stored = await guest.evaluate(() => ({
+      url: location.href, local: Object.values(localStorage),
+      session: Object.values(sessionStorage), title: document.title,
+    }));
+    expect(JSON.stringify(stored)).not.toContain(aliceToken);
+    expect(JSON.stringify(stored)).not.toContain(bobToken);
+  } finally {
+    await guestContext.close();
+  }
+});

@@ -1630,3 +1630,75 @@ test("local exit rejects a delayed old-seat heartbeat and keeps the lab empty", 
   await expect(page.getByTestId("match-player-alice")).toHaveCount(0);
   await expect(page.getByTestId("dev-error")).toHaveCount(0);
 });
+
+test("server-backed turn status follows live turns and clears the tab badge on exit", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.goto("/");
+  const normalTitle = await page.title();
+  await expect(page.getByTestId("dev-turn-signal")).toHaveCount(0);
+  await page.getByTestId("dev-create").click();
+  const status = page.getByTestId("dev-turn-signal");
+  await expect(status).toHaveAttribute("role", "status");
+  await expect(status).toHaveAttribute("aria-live", "polite");
+  await expect(status).toHaveAttribute("data-turn-state", "mine");
+  await expect(page.getByTestId("dev-turn-signal-text")).toHaveText("È il tuo turno");
+  await expect.poll(() => page.title()).toBe(`È il tuo turno · ${normalTitle}`);
+
+  // Creator test fixture can switch seats: selection affects the status
+  // and tab title, but never advances the server's revision.
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(status).toHaveAttribute("data-turn-state", "other");
+  await expect(page.getByTestId("dev-turn-signal-text")).toContainText("alice");
+  await expect.poll(() => page.title()).toBe(normalTitle);
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  await page.getByTestId("dev-seat-alice").click();
+  await expect(status).toHaveAttribute("data-turn-state", "mine");
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(status).toHaveAttribute("data-turn-state", "other");
+  await expect.poll(() => page.title()).toBe(normalTitle);
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(status).toHaveAttribute("data-turn-state", "mine");
+  await expect.poll(() => page.title()).toBe(`È il tuo turno · ${normalTitle}`);
+  await page.getByTestId("dev-end-turn").click();
+  await expect(status).toHaveAttribute("data-turn-state", "pending");
+  await expect(page.getByTestId("dev-turn-signal-text")).toContainText("saldo del round");
+  await expect.poll(() => page.title()).toBe(normalTitle);
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  await page.getByTestId("dev-leave").click();
+  await expect(status).toHaveCount(0);
+  await expect.poll(() => page.title()).toBe(normalTitle);
+});
+
+test("turn announcement is bilingual on mobile and revocation clears stale title", async ({ page }) => {
+  const { revokeSeat } = await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  const normalTitle = await page.title();
+  await page.getByTestId("dev-create").click();
+  const status = page.getByTestId("dev-turn-signal");
+  await expect(status).toHaveAttribute("data-turn-state", "mine");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(page.getByTestId("dev-turn-signal-text")).toHaveText("It's your turn");
+  await expect.poll(() => page.title()).toBe(`Your turn · ${normalTitle}`);
+  await expect(status).toContainText("Informational only");
+  revokeSeat("alice");
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByTestId("dev-seat-bob")).toHaveAttribute("aria-pressed", "true", {
+    timeout: 12000,
+  });
+  await expect(status).toHaveAttribute("data-turn-state", "other");
+  await expect(page.getByTestId("dev-turn-signal-text")).toContainText("alice");
+  await expect.poll(() => page.title()).toBe(normalTitle);
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+  const storage = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+    title: document.title,
+  }));
+  expect(JSON.stringify(storage)).not.toContain("a".repeat(64));
+  expect(JSON.stringify(storage)).not.toContain("b".repeat(64));
+});

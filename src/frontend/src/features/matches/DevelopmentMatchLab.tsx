@@ -156,7 +156,7 @@ export function DevelopmentMatchLab({
   /** A public-only server snapshot projection for the 3D scene and DOM fallback. */
   onPublicState: (state: PublicMatchSceneState | null) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [session, setSession] = useState<DemoSession | null>(null);
   const [playerCount, setPlayerCount] = useState(2);
   const [actorId, setActorId] = useState("");
@@ -198,10 +198,16 @@ export function DevelopmentMatchLab({
     matchId: string; seatId: string; token: string; revision: number;
     handPending: boolean; optionsPending: boolean;
   } | null>(null);
+  // The title is UI-only and never contains actor IDs, card IDs or tokens.
+  const initialDocumentTitle = useRef<string | null>(null);
 
   const token = session?.credentials.find((seat) => seat.playerId === actorId)?.token;
   const player = session?.state.players.find((seat) => seat.playerId === actorId);
-  const isMyTurn = session?.state.phase === 0 && session.state.activePlayerId === actorId;
+  const isMyTurn = Boolean(session && token && actorId
+    && session.state.phase === 0 && session.state.activePlayerId === actorId);
+  // Informational only: no turn permissions are derived from this label.
+  const turnSignal = session?.state.phase === 0
+    ? isMyTurn ? "mine" : "other" : "pending";
   const turnOptions = optionLease && token
     && optionLease.token === token
     && optionLease.options.matchId === session?.matchId
@@ -227,6 +233,18 @@ export function DevelopmentMatchLab({
     && presenceLease.token === token
     && presenceLease.data.matchId === session?.matchId
     ? presenceLease.data : null;
+
+  // Live .NET snapshots (including remote poll updates) control the tab title.
+  // Never send an OS notification, persist a credential or infer commands.
+  useEffect(() => {
+    if (initialDocumentTitle.current === null)
+      initialDocumentTitle.current = document.title;
+    const normalTitle = initialDocumentTitle.current;
+    document.title = session && isMyTurn
+      ? `${t("dev.turnTabPrefix")} · ${normalTitle}`
+      : normalTitle;
+    return () => { document.title = normalTitle; };
+  }, [session?.matchId, isMyTurn, actorId, token, i18n.resolvedLanguage, t]);
 
   function publishPublicPositions(state: DemoMatch | null) {
     onPublicState(state
@@ -1101,6 +1119,19 @@ export function DevelopmentMatchLab({
                   ? session.state.activePlayerId
                   : t("dev.settlement")}
               </p>
+            </div>
+
+            <div role="status" aria-live="polite" aria-atomic="true"
+              data-testid="dev-turn-signal" data-turn-state={turnSignal}
+              className="space-y-1 rounded-xl border border-border bg-muted/40 p-3 text-sm">
+              <p className="text-xs text-muted-foreground">{t("dev.turnSignalTitle")}</p>
+              <p className="font-semibold" data-testid="dev-turn-signal-text">
+                {turnSignal === "mine" ? t("dev.turnSignalMine")
+                  : turnSignal === "other"
+                    ? t("dev.turnSignalOther", { actor: session.state.activePlayerId })
+                    : t("dev.turnSignalPending")}
+              </p>
+              <p className="text-[11px] text-muted-foreground">{t("dev.turnSignalNote")}</p>
             </div>
 
             <section aria-label={t("dev.presenceTitle")}

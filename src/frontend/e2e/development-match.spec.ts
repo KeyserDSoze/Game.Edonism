@@ -1523,6 +1523,7 @@ test("reselecting an already active fallback seat cannot erase its private hand"
   await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
   await page.getByTestId("dev-seat-bob").click();
   await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
   await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
   await expect(page.getByTestId("dev-presence-seats")
     .locator('[data-player-id="bob"]')).toHaveAttribute("data-presence", "active");

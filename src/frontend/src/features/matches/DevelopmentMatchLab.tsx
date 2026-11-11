@@ -928,7 +928,13 @@ export function DevelopmentMatchLab({
     // A 404 from another tab may already have selected this fallback seat.
     // Re-clicking its button must NOT erase its loaded private hand, because
     // token/actor dependencies would be unchanged and no refetch would run.
-    if (actorId === id) return;
+    if (actorId === id) {
+      // The previous capability may have been revoked already, selecting
+      // this valid fallback seat automatically. A user confirming that seat
+      // acknowledges the old warning but must never erase the loaded hand.
+      setError(null);
+      return;
+    }
     currentActorScope.current = {
       matchId: session.matchId, seatId: id, token: credential.token,
     };

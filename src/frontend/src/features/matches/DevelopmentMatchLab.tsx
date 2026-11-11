@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { shortestStreetPath, streetById, slotById } from "@/features/city/board";
 import type { TacticalFocus } from "@/features/city/tacticalFocus";
+import type { HistoricalStreetFocus } from "@/features/city/historicalStreetFocus";
 import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
 import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
 
@@ -211,12 +212,15 @@ export function DevelopmentMatchLab({
   onStreetSelect,
   onPublicState,
   onTacticalFocus,
+  onHistoricalFocus,
 }: {
   onStreetSelect: (id: string) => void;
   /** A public-only server snapshot projection for the 3D scene and DOM fallback. */
   onPublicState: (state: PublicMatchSceneState | null) => void;
   /** Public-only map highlight; NEVER a move, token or action command. */
   onTacticalFocus: (focus: TacticalFocus | null) => void;
+  /** A read-only public historic street, scoped to the validated replay. */
+  onHistoricalFocus: (focus: HistoricalStreetFocus | null) => void;
 }) {
   const { t, i18n } = useTranslation();
   const [session, setSession] = useState<DemoSession | null>(null);
@@ -2000,7 +2004,10 @@ export function DevelopmentMatchLab({
                     <Button type="button" size="sm" variant="outline"
                       data-testid="dev-history-previous"
                       disabled={inspectedFrame.revision <= 0}
-                      onClick={() => setHistoryRevision(inspectedFrame.revision - 1)}>
+                      onClick={() => {
+                        onHistoricalFocus(null);
+                        setHistoryRevision(inspectedFrame.revision - 1);
+                      }}>
                       {t("dev.historyPrevious")}
                     </Button>
                     <span data-testid="dev-history-revision"
@@ -2011,6 +2018,7 @@ export function DevelopmentMatchLab({
                       data-testid="dev-history-next"
                       disabled={inspectedFrame.revision >= history.verifiedRevision}
                       onClick={() => {
+                        onHistoricalFocus(null);
                         const next = inspectedFrame.revision + 1;
                         setHistoryRevision(next === history.verifiedRevision ? null : next);
                       }}>
@@ -2019,7 +2027,10 @@ export function DevelopmentMatchLab({
                     <Button type="button" size="sm" variant="ghost"
                       data-testid="dev-history-latest"
                       disabled={inspectedFrame.revision === history.verifiedRevision}
-                      onClick={() => setHistoryRevision(null)}>
+                      onClick={() => {
+                        onHistoricalFocus(null);
+                        setHistoryRevision(null);
+                      }}>
                       {t("dev.historyLatest")}
                     </Button>
                   </div>
@@ -2036,6 +2047,31 @@ export function DevelopmentMatchLab({
                         className="rounded-md bg-muted px-2 py-1">
                         <span className="font-semibold">{p.playerId}: </span>
                         {streetById(p.streetId)?.name ?? p.streetId}
+                        <Button type="button" size="sm" variant="outline"
+                          data-testid={`dev-history-focus-${p.playerId}`}
+                          className="ml-2 h-auto min-h-8 whitespace-normal text-xs"
+                          aria-label={t("dev.historyFocusPlayerOnMap", {
+                            player: p.playerId, revision: inspectedFrame.revision,
+                          })}
+                          onClick={() => {
+                            if (!session || !history || !token || !actorId) return;
+                            const scope = currentActorScope.current;
+                            if (scope?.matchId !== session.matchId
+                              || scope.seatId !== actorId || scope.token !== token
+                              || history.matchId !== session.matchId
+                              || history.verifiedRevision !== session.state.revision) return;
+                            const frame = history.frames.find(f => f.revision === inspectedFrame.revision);
+                            const exact = frame?.players.filter(x => x.playerId === p.playerId);
+                            if (!frame || exact?.length !== 1 || exact[0].streetId !== p.streetId
+                              || !streetById(p.streetId)) return;
+                            onHistoricalFocus({
+                              matchId: session.matchId,
+                              sourceRevision: history.verifiedRevision,
+                              historyRevision: frame.revision,
+                              playerId: p.playerId,
+                              streetId: p.streetId,
+                            });
+                          }}>{t("dev.historyFocusOnMap")}</Button>
                       </li>
                     ))}
                   </ul>

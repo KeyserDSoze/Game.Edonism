@@ -9,6 +9,7 @@ import { cityBoard, slotById, slotsOnStreet, streetById } from "@/features/city/
 import { playerMarkerPlacements } from "@/features/city/playerMarkers";
 import { controlledLotMarkers, publicGrossSalaryQuotes, type PublicMatchSceneState } from "@/features/city/activityMarkers";
 import { verifiedTacticalFocus, type TacticalFocus } from "@/features/city/tacticalFocus";
+import { verifiedHistoricalStreetFocus, type HistoricalStreetFocus } from "@/features/city/historicalStreetFocus";
 import { useTheme, type Theme } from "@/features/settings/useTheme";
 import { changeLanguage } from "@/i18n";
 
@@ -31,8 +32,10 @@ export default function App() {
   // Only a public projection supplied by the Development API: never tokens/hands.
   const [publicPlayers, setPublicPlayers] = useState<PublicMatchSceneState | null>(null);
   const [tacticalFocus, setTacticalFocus] = useState<TacticalFocus | null>(null);
-  // Revalidate focus against actual public match data on every render.
+  const [historicalFocus, setHistoricalFocus] = useState<HistoricalStreetFocus | null>(null);
+  // Both overlays fail closed against the current public match snapshot.
   const verifiedFocus = verifiedTacticalFocus(publicPlayers, tacticalFocus);
+  const verifiedHistorical = verifiedHistoricalStreetFocus(publicPlayers, historicalFocus);
   const playerMarkers = publicPlayers
     ? playerMarkerPlacements(publicPlayers.players, publicPlayers.activePlayerId)
     : [];
@@ -44,6 +47,7 @@ export default function App() {
 
   const chooseStreet = (streetId: string) => {
     setTacticalFocus(null);
+    setHistoricalFocus(null);
     setSelectedStreetId(streetId);
     setSelectedSlotId(slotsOnStreet(streetId)[0]?.id ?? null);
   };
@@ -52,6 +56,7 @@ export default function App() {
     const slot = slotById(slotId);
     if (!slot) return;
     setTacticalFocus(null);
+    setHistoricalFocus(null);
     setSelectedSlotId(slotId);
     setSelectedStreetId(slot.streetId);
   };
@@ -69,11 +74,14 @@ export default function App() {
 
   const chooseTacticalFocus = (requested: TacticalFocus | null) => {
     if (!requested) {
+      // Existing match/actor/token/revision invalidation covers both overlays.
       setTacticalFocus(null);
+      setHistoricalFocus(null);
       return;
     }
     const valid = verifiedTacticalFocus(publicPlayers, requested);
     if (!valid) return;
+    setHistoricalFocus(null);
     // All displayed coordinates and paths derive from public board IDs.
     const targetStreet = valid.streetPath[valid.streetPath.length - 1];
     setTacticalFocus(valid);
@@ -82,8 +90,23 @@ export default function App() {
       ? valid.targetId : slotsOnStreet(targetStreet)[0]?.id ?? null);
   };
 
+  const chooseHistoricalFocus = (requested: HistoricalStreetFocus | null) => {
+    if (!requested) {
+      setHistoricalFocus(null);
+      return;
+    }
+    const valid = verifiedHistoricalStreetFocus(publicPlayers, requested);
+    if (!valid) return;
+    // Do not reproject LIVE markers, private hands or command permissions.
+    setTacticalFocus(null);
+    setHistoricalFocus(valid);
+    setSelectedStreetId(valid.streetId);
+    setSelectedSlotId(slotsOnStreet(valid.streetId)[0]?.id ?? null);
+  };
+
   const updatePublicState = (state: PublicMatchSceneState | null) => {
     setTacticalFocus(null);
+    setHistoricalFocus(null);
     setPublicPlayers(state);
   };
 
@@ -166,11 +189,15 @@ export default function App() {
               data-focus-path={verifiedFocus?.streetPath.join(">") ?? ""}
               data-focus-target={verifiedFocus?.targetId ?? ""}
               data-focus-kind={verifiedFocus?.kind ?? ""}
+              data-history-street={verifiedHistorical?.streetId ?? ""}
+              data-history-revision={verifiedHistorical?.historyRevision ?? ""}
+              data-history-player={verifiedHistorical?.playerId ?? ""}
             >
               <CityScene
                 selectedStreetId={selectedStreetId}
                 selectedSlotId={selectedSlotId}
                 tacticalFocus={verifiedFocus}
+                historicalFocus={verifiedHistorical}
                 onStreetSelect={chooseStreet}
                 onSlotSelect={chooseSlot}
                 playerMarkers={playerMarkers}
@@ -226,6 +253,26 @@ export default function App() {
                   </ol>
                 </nav>
                 <p className="text-muted-foreground">{t("city.tacticalFocusNote")}</p>
+              </section>
+            )}
+            {verifiedHistorical && (
+              <section data-testid="city-historical-focus"
+                aria-label={t("city.historicalFocusTitle")}
+                className="mx-3 mt-3 space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/5 px-3 py-3 text-xs sm:mx-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold">{t("city.historicalFocusTitle")}</p>
+                  <Button type="button" variant="outline" size="sm"
+                    data-testid="city-clear-historical-focus"
+                    onClick={() => setHistoricalFocus(null)}>{t("city.clearHistoricalFocus")}</Button>
+                </div>
+                <p data-testid="city-historical-target" className="font-medium">
+                  {t("city.historicalFocusTarget", {
+                    revision: verifiedHistorical.historyRevision,
+                    player: verifiedHistorical.playerId,
+                    street: streetById(verifiedHistorical.streetId)?.name ?? verifiedHistorical.streetId,
+                  })}
+                </p>
+                <p className="text-muted-foreground">{t("city.historicalFocusNote")}</p>
               </section>
             )}
             <CardContent className="mt-5 flex items-start gap-2 text-xs leading-5 text-muted-foreground">
@@ -404,7 +451,8 @@ export default function App() {
               <Suspense fallback={null}>
                 <DevelopmentMatchLab onStreetSelect={chooseStreet}
                   onPublicState={updatePublicState}
-                  onTacticalFocus={chooseTacticalFocus} />
+                  onTacticalFocus={chooseTacticalFocus}
+                  onHistoricalFocus={chooseHistoricalFocus} />
               </Suspense>
             )}
           </aside>

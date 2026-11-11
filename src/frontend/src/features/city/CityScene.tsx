@@ -6,11 +6,13 @@ import { cityBoard, toScene, type ActivitySlot, type RoadArea, type Street } fro
 import type { PlayerMarkerPlacement } from "./playerMarkers";
 import type { ControlledLotMarker } from "./activityMarkers";
 import type { TacticalFocus } from "./tacticalFocus";
+import type { HistoricalStreetFocus } from "./historicalStreetFocus";
 
 type SceneProps = {
   selectedStreetId: string;
   selectedSlotId: string | null;
   tacticalFocus: TacticalFocus | null;
+  historicalFocus: HistoricalStreetFocus | null;
   onStreetSelect: (streetId: string) => void;
   onSlotSelect: (slotId: string) => void;
   /** Server-originated public match positions; never client-selected coordinates. */
@@ -26,8 +28,9 @@ function footprintId(id: string): number {
   return Array.from(id).reduce((sum, letter) => sum * 31 + letter.charCodeAt(0), 7) >>> 0;
 }
 
-function Road({ road, selected, highlighted, onSelect }: {
-  road: RoadArea; selected: boolean; highlighted: boolean; onSelect: (id: string) => void;
+function Road({ road, selected, highlighted, historical, onSelect }: {
+  road: RoadArea; selected: boolean; highlighted: boolean; historical: boolean;
+  onSelect: (id: string) => void;
 }) {
   const [x, z] = toScene(road.center);
   const sizeX = road.width / 95;
@@ -40,9 +43,9 @@ function Road({ road, selected, highlighted, onSelect }: {
     >
       <boxGeometry args={[sizeX, 0.06, sizeZ]} />
       <meshStandardMaterial
-        color={highlighted ? "#31b7aa" : selected ? "#496f77" : road.streetId === "main-square" ? "#65747a" : "#495661"}
-        emissive={highlighted ? "#127b73" : "#000000"}
-        emissiveIntensity={highlighted ? 0.35 : 0}
+        color={historical ? "#f0b55b" : highlighted ? "#31b7aa" : selected ? "#496f77" : road.streetId === "main-square" ? "#65747a" : "#495661"}
+        emissive={historical ? "#ad6b18" : highlighted ? "#127b73" : "#000000"}
+        emissiveIntensity={historical || highlighted ? 0.35 : 0}
         roughness={1} />
     </mesh>
   );
@@ -232,7 +235,7 @@ function RoadLabel({ street }: { street: Street }) {
   );
 }
 
-function World({ selectedStreetId, selectedSlotId, tacticalFocus,
+function World({ selectedStreetId, selectedSlotId, tacticalFocus, historicalFocus,
   onStreetSelect, onSlotSelect, playerMarkers, controlMarkers, hasActiveMatch }: SceneProps) {
   const roads = useMemo(() => cityBoard.roads, []);
   const slots = useMemo(() => cityBoard.slots, []);
@@ -258,6 +261,7 @@ function World({ selectedStreetId, selectedSlotId, tacticalFocus,
       {roads.map((road, index) => (
         <Road key={index} road={road} selected={road.streetId === selectedStreetId}
           highlighted={tacticalFocus?.streetPath.includes(road.streetId) ?? false}
+          historical={historicalFocus?.streetId === road.streetId}
           onSelect={onStreetSelect} />
       ))}
       {slots.map((slot) => (

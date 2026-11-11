@@ -1527,7 +1527,24 @@ test("verified read-only history scrubs first-round streets without moving the l
   await expect(page.getByTestId("dev-position")).not.toBeEmpty();
   await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "planck");
   await expect(page.getByTestId("dev-history-warning"))
-    .toContainText("does not change the live match");
+    .toContainText("live markers and legal moves stay unchanged");
+  await expect(page.getByTestId("dev-history-focus-alice"))
+    .toHaveAttribute("aria-label", "Show alice at revision #0 on the city");
+  await page.getByTestId("dev-history-focus-alice").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("city-historical-focus")).toBeVisible();
+  await expect(page.getByTestId("city-historical-target"))
+    .toContainText("Revision #0 · alice was on Gauss Avenue");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-history-street", "gauss");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-history-revision", "0");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "planck");
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await page.getByTestId("city-clear-historical-focus").click();
+  await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
+  await page.getByTestId("dev-history-focus-bob").click();
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-history-player", "bob");
+  await page.getByTestId("dev-history-next").click();
+  await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
   await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
   await page.getByTestId("dev-history-next").click();
   await expect(page.getByTestId("dev-history-positions")
@@ -1551,12 +1568,45 @@ test("verified read-only history scrubs first-round streets without moving the l
     .toBe(false);
 });
 
+test("Italian historical city overlay is accessible without WebGL and clears on manual inspection", async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: function (this: HTMLCanvasElement, type: string, ...args: unknown[]) {
+        if (type === "webgl" || type === "webgl2" || type === "experimental-webgl")
+          return null;
+        return Reflect.apply(original, this, [type, ...args]);
+      },
+    });
+  });
+  await mockMatchApi(page);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await expect(page.getByText("Il 3D non è disponibile", { exact: false })).toBeVisible();
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#0");
+  await expect(page.getByTestId("dev-history-focus-alice"))
+    .toHaveAttribute("aria-label", "Mostra alice alla revisione #0 sulla città");
+  await page.getByTestId("dev-history-focus-alice").click();
+  await expect(page.getByTestId("city-historical-target"))
+    .toContainText("Revisione #0 · alice era su Gauss Avenue");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-history-player", "alice");
+  await page.getByTestId("street-picker-newton").click();
+  await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-history-street", "");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+});
+
 test("invalid public history fails closed without disabling server-confirmed commands", async ({ page }) => {
   const { observedHeaders } = await mockMatchApi(page, { corruptHistory: true });
   await page.goto("/");
   await page.getByTestId("dev-create").click();
   await expect(page.getByTestId("dev-history-unavailable")).toBeVisible();
   await expect(page.getByTestId("dev-history-positions")).toHaveCount(0);
+  await expect(page.getByTestId("dev-history-focus-alice")).toHaveCount(0);
+  await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
   await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
   await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
   await page.getByTestId("dev-end-turn").click();
@@ -1573,7 +1623,10 @@ test("history is token-bound and creator seat switch discards the prior inspecte
   await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
   await page.getByTestId("dev-history-previous").click();
   await expect(page.getByTestId("dev-history-revision")).toContainText("#0");
+  await page.getByTestId("dev-history-focus-alice").click();
+  await expect(page.getByTestId("city-historical-focus")).toBeVisible();
   await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
   await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
   await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
   const historyCalls = observedHeaders.filter(v => v.path.endsWith("/history"));
@@ -1590,7 +1643,10 @@ test("successful credential rotation resets replay selection without changing li
   await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
   await page.getByTestId("dev-history-previous").click();
   await expect(page.getByTestId("dev-history-revision")).toContainText("#0");
+  await page.getByTestId("dev-history-focus-alice").click();
+  await expect(page.getByTestId("city-historical-focus")).toBeVisible();
   await page.getByTestId("dev-rotate-token").click();
+  await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
   await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
   await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
   await expect(page.getByTestId("dev-revision")).toHaveText("1");

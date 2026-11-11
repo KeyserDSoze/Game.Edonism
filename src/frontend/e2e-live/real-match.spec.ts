@@ -1215,6 +1215,17 @@ test("real .NET: two browsers inspect verified first-round history without chang
     await expect(page.getByTestId("dev-history-revision")).toContainText("#0");
     await expect(page.getByTestId("dev-history-positions")
       .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", aliceStart);
+    await page.getByTestId("dev-history-focus-alice").click();
+    await expect(page.getByTestId("city-historical-focus")).toBeVisible();
+    await expect(page.getByTestId("city-renderer"))
+      .toHaveAttribute("data-history-street", aliceStart);
+    await expect(page.getByTestId("city-historical-target")).toContainText("alice");
+    await expect(page.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-street-id", destination);
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await page.getByTestId("dev-history-next").click();
+    await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
+    await page.getByTestId("dev-history-previous").click();
     await expect(page.getByTestId("match-player-alice"))
       .toHaveAttribute("data-street-id", destination);
     await expect(page.getByTestId("dev-revision")).toHaveText("1");
@@ -1255,8 +1266,14 @@ test("real .NET: two browsers inspect verified first-round history without chang
     await guest.getByTestId("dev-history-previous").click();
     await expect(guest.getByTestId("dev-history-positions")
       .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", aliceStart);
+    await guest.getByTestId("dev-history-focus-alice").click();
+    await expect(guest.getByTestId("city-renderer"))
+      .toHaveAttribute("data-history-street", aliceStart);
     await expect(guest.getByTestId("match-player-alice"))
       .toHaveAttribute("data-street-id", destination);
+    await expect(guest.getByTestId("dev-end-turn")).toBeEnabled();
+    await guest.getByTestId("city-clear-historical-focus").click();
+    await expect(guest.getByTestId("city-historical-focus")).toHaveCount(0);
     await expect(guest.getByTestId("dev-end-turn")).toBeEnabled();
 
     const oldHistory = await request.get(api + "/history", { headers: auth(aliceToken) });

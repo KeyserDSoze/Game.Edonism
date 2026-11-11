@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Edonism.Api.Development;
+using Edonism.Domain.Matches;
 using Edonism.Infrastructure.World;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -196,6 +198,39 @@ public sealed class DevelopmentIdempotencyEndpointTests
         using var absent = await Command(production, path,
             new { expectedRevision = 0 }, Guid.NewGuid().ToString("D"));
         Assert.Equal(HttpStatusCode.NotFound, absent.StatusCode);
+    }
+
+    [Fact]
+    public void ExplicitEmptyIdempotencyKeyIsNotEquivalentToAbsentKeyInsideStore()
+    {
+        var store = new DevelopmentMatchStore();
+        var created = store.Create([
+            new MatchParticipantSeed("alice", "N-01"),
+            new MatchParticipantSeed("bob", "S-01")
+        ]);
+        var matchId = created.MatchId;
+        var token = created.Credentials[0].Token;
+        Assert.False(store.TryEndTurn(matchId, new string('F', 64), 0,
+            out var unauthorized, ""));
+        Assert.Null(unauthorized);
+
+        Assert.True(store.TryEndTurn(matchId, token, 0, out var invalidEnd, ""));
+        Assert.NotNull(invalidEnd);
+        Assert.False(invalidEnd.Accepted);
+        Assert.Equal("invalid_idempotency_key", invalidEnd.Code);
+        Assert.True(store.TryFreeMove(matchId, token, "planck", 0,
+            out var invalidMove, ""));
+        Assert.NotNull(invalidMove);
+        Assert.False(invalidMove.Accepted);
+        Assert.Equal("invalid_idempotency_key", invalidMove.Code);
+        Assert.True(store.TryRead(matchId, token, out var before));
+        Assert.NotNull(before);
+        Assert.Equal(0, before.Revision);
+        Assert.Single(before.Events);
+        Assert.True(store.TryEndTurn(matchId, token, 0, out var legacy));
+        Assert.NotNull(legacy);
+        Assert.True(legacy.Accepted);
+        Assert.Equal(1, legacy.State.Revision);
     }
 
     [Theory]

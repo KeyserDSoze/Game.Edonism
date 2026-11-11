@@ -2358,3 +2358,107 @@ test("concurrent old-token read 404 cannot log out a seat during successful toke
   await page.getByTestId("dev-end-turn").click();
   await expect(page.getByTestId("dev-revision")).toHaveText("1");
 });
+
+// #52: the optional public tactical focus must never submit gameplay commands.
+test("public player and free-card focus select canonical streets, and manual inspection clears it", async ({ page }) => {
+  await mockMatchApi(page, { routePlannerWithFreeCards: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-focus-player-bob")).toBeVisible();
+  await page.getByTestId("dev-focus-player-bob").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await expect(page.getByTestId("city-tactical-target")).toContainText("Giocatore osservato: bob");
+  await expect(page.getByTestId("city-tactical-route"))
+    .toContainText("Gauss Avenue → Main Square → Einstein Avenue");
+  await expect(page.getByTestId("selected-street")).toHaveText("Einstein Avenue");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute(
+    "data-focus-path", "gauss>main-square>einstein");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-kind", "player");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await page.getByTestId("city-clear-tactical-focus").click();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-path", "");
+
+  await page.getByTestId("dev-focus-activity-S-02").click();
+  await expect(page.getByTestId("city-tactical-target")).toContainText("Attività osservata: S-02");
+  await expect(page.getByTestId("selected-slot")).toHaveText("S-02");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute(
+    "data-focus-path", "gauss>main-square>einstein");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-kind", "activity");
+  await page.getByTestId("street-picker-newton").click();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("selected-street")).toHaveText("Newton Avenue");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+});
+
+test("tactical focus resets on actor switch, confirmed server movement and local exit", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await page.getByTestId("dev-focus-player-bob").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-target", "");
+  await page.getByTestId("dev-focus-player-alice").click();
+  await expect(page.getByTestId("city-tactical-route"))
+    .toContainText("Einstein Avenue → Main Square → Gauss Avenue");
+  await page.getByTestId("dev-seat-alice").click();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await page.getByTestId("dev-focus-player-bob").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await page.locator('[data-testid^="dev-move-"]:not([disabled])').first().click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-path", "");
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("English mobile tactical focus remains accessible when WebGL is unavailable", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true, value: () => null,
+    });
+  });
+  await mockMatchApi(page, { routePlannerWithFreeCards: true });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(page.getByRole("status")).toContainText("3D is not available");
+  await page.getByTestId("dev-create").click();
+  const button = page.getByTestId("dev-focus-player-bob");
+  await expect(button).toHaveAttribute("aria-label", "View bob on map");
+  await button.click();
+  await expect(page.getByTestId("city-tactical-target")).toContainText("Observed player: bob");
+  await expect(page.getByTestId("city-tactical-route"))
+    .toContainText("Gauss Avenue → Main Square → Einstein Avenue");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute(
+    "data-focus-path", "gauss>main-square>einstein");
+  await page.getByTestId("city-clear-tactical-focus").click();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await page.getByTestId("dev-focus-activity-N-02").click();
+  await expect(page.getByTestId("city-tactical-target")).toContainText("Observed activity: N-02");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-path", "gauss");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("forged and stale player/lot projections never enable tactical focus", async ({ page }) => {
+  await mockMatchApi(page, { invalidOtherSeatRoutes: "path", invalidRoutePath: true,
+    routePlannerWithFreeCards: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-other-seats-unavailable")).toBeVisible();
+  await expect(page.getByTestId("dev-routes-unavailable")).toBeVisible();
+  await expect(page.getByTestId("dev-focus-player-bob")).toHaveCount(0);
+  await expect(page.getByTestId("dev-focus-activity-S-02")).toHaveCount(0);
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-path", "");
+});

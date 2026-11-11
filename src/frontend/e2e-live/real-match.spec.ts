@@ -2038,6 +2038,14 @@ test("real .NET: two browser street route plans follow public activity ownership
       .toHaveAttribute("data-steps", String(route.streetSteps));
     await expect(page.getByTestId(`dev-route-${route.slotId}`))
       .toHaveAttribute("data-path", route.streetPath.join(">"));
+    if (route.slotId === firstPlan.routes[0].slotId) {
+      await page.getByTestId(`dev-focus-activity-${route.slotId}`).click();
+      await expect(page.getByTestId("city-renderer")).toHaveAttribute(
+        "data-focus-path", route.streetPath.join(">"));
+      await expect(page.getByTestId("city-tactical-target"))
+        .toContainText(`Attività osservata: ${route.slotId}`);
+      await page.getByTestId("city-clear-tactical-focus").click();
+    }
     await expect(page.getByTestId(`dev-route-path-${route.slotId}`)).toBeVisible();
   }
 
@@ -2121,6 +2129,11 @@ test("real .NET: public opponent dossier follows a move in two browsers without 
   expect(other.streetPath).toHaveLength(other.streetSteps + 1);
   await expect(page.getByTestId("dev-other-seat-bob"))
     .toHaveAttribute("data-path", other.streetPath.join(">"));
+  await page.getByTestId("dev-focus-player-bob").click();
+  await expect(page.getByTestId("city-tactical-target")).toContainText("Giocatore osservato: bob");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute(
+    "data-focus-path", other.streetPath.join(">"));
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
   expect(JSON.stringify(plan)).not.toContain(aliceToken);
   expect(JSON.stringify(plan)).not.toContain(bobToken);
   expect(JSON.stringify(plan)).not.toContain("cardIds");
@@ -2136,6 +2149,10 @@ test("real .NET: public opponent dossier follows a move in two browsers without 
     await guest.getByTestId("dev-join").click();
     await expect(guest.getByTestId("dev-other-seats-count")).toContainText("1 other players");
     await expect(guest.getByTestId("dev-other-seat-alice")).toHaveAttribute("data-owned", "1");
+    await guest.getByTestId("dev-focus-player-alice").click();
+    await expect(guest.getByTestId("city-tactical-target")).toContainText("Observed player: alice");
+    await expect(guest.getByTestId("city-renderer")).toHaveAttribute(
+      "data-focus-path", other.streetPath.slice().reverse().join(">"));
     await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
     const bobPlanResponse = await request.get(endpoint, { headers: auth(bobToken) });
     expect(bobPlanResponse.status()).toBe(200);
@@ -2145,6 +2162,7 @@ test("real .NET: public opponent dossier follows a move in two browsers without 
 
     await page.locator('[data-testid^="dev-move-"]:not([disabled])').first().click();
     await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
     const moved = await request.get(endpoint, { headers: auth(aliceToken) });
     expect(moved.status()).toBe(200);
     const movedPlan = await moved.json() as typeof plan;
@@ -2153,6 +2171,7 @@ test("real .NET: public opponent dossier follows a move in two browsers without 
     await expect(page.getByTestId("dev-other-seat-bob"))
       .toHaveAttribute("data-path", movedPlan.others[0].streetPath.join(">"));
     await expect(guest.getByTestId("dev-revision")).toHaveText("1", { timeout: 10000 });
+    await expect(guest.getByTestId("city-tactical-focus")).toHaveCount(0);
     await expect(guest.getByTestId("dev-other-seat-alice"))
       .toHaveAttribute("data-owned", "1");
     await guest.getByTestId("dev-leave").click();

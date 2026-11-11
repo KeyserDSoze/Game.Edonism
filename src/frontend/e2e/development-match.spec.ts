@@ -54,6 +54,7 @@ type MockOptions = {
   overloadFirstConditionalWait?: boolean;
   historyUnavailable?: boolean;
   corruptHistory?: boolean;
+  tamperHistoryFrame?: "street" | "move-flag" | "active" | "phase" | "actor";
   presenceUnavailable?: boolean;
   invalidPresence?: boolean;
   delayFirstAlicePresence?: boolean;
@@ -188,13 +189,33 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         })),
       };
     });
+    const responseFrames = frames.map((frame, index) => {
+      // A forged INTERMEDIATE frame: genesis and the latest authoritative
+      // revision remain genuine, so matching only the final frame is unsafe.
+      if (index !== 1 || frames.length < 3 || !options.tamperHistoryFrame)
+        return frame;
+      switch (options.tamperHistoryFrame) {
+        case "street":
+          return { ...frame, players: frame.players.map(player =>
+            player.playerId === "alice" ? { ...player, streetId: "main-square" } : player) };
+        case "move-flag":
+          return { ...frame, players: frame.players.map(player =>
+            player.playerId === "alice" ? { ...player, freeMoveUsed: false } : player) };
+        case "active":
+          return { ...frame, activePlayerId: "bob" };
+        case "phase":
+          return { ...frame, phase: 1 };
+        case "actor":
+          return { ...frame, actorId: "bob" };
+      }
+    });
     return {
       matchId: snapshot().matchId,
       verifiedRevision: revision,
       frames: options.corruptHistory
-        ? frames.map((frame, index) => index === 0
+        ? responseFrames.map((frame, index) => index === 0
           ? { ...frame, kind: "secret-action" } : frame)
-        : frames,
+        : responseFrames,
     };
   };
 
@@ -1614,6 +1635,55 @@ test("invalid public history fails closed without disabling server-confirmed com
   await expect(page.getByTestId("dev-history-unavailable")).toBeVisible();
   expect(observedHeaders.some(v => v.path.endsWith("/history"))).toBe(true);
 });
+
+// #55: a forged middle frame must never drive the historical city, unread
+// opponent timeline or any other public replay view; latest is still correct.
+for (const tamper of ["street", "move-flag", "active", "phase", "actor"] as const) {
+  test(`forged intermediate public history (${tamper}) fails closed`, async ({ page }) => {
+    const { observedHeaders } = await mockMatchApi(page, { tamperHistoryFrame: tamper });
+    await page.goto("/");
+    await page.getByTestId("dev-create").click();
+    await expect(page.getByTestId("dev-history-revision")).toContainText("#0");
+    await page.getByTestId("dev-move-planck").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await page.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("2");
+    await expect(page.getByTestId("dev-history-unavailable")).toBeVisible();
+    await expect(page.getByTestId("dev-history-positions")).toHaveCount(0);
+    await expect(page.getByTestId("dev-history-focus-alice")).toHaveCount(0);
+    await expect(page.getByTestId("city-historical-focus")).toHaveCount(0);
+    await expect(page.getByTestId("dev-unread-activity-events")).toHaveCount(0);
+    await expect(page.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-street-id", "planck");
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+    expect(observedHeaders.some(x => x.path.endsWith("/history"))).toBe(true);
+  });
+}
+
+// Check the same replay contract beyond the two-seat default. Only known,
+// first-round public events may become an accessible history.
+for (const playerCount of [4, 8] as const) {
+  test(`verified public replay preserves all ${playerCount} players after a legal move`, async ({ page }) => {
+    await mockMatchApi(page, { playerCount });
+    await page.goto("/");
+    await page.getByTestId("dev-player-count").selectOption(String(playerCount));
+    await page.getByTestId("dev-create").click();
+    await expect(page.getByTestId("dev-history-positions").locator("li")).toHaveCount(playerCount);
+    await page.getByTestId("dev-move-planck").click();
+    await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
+    await page.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-history-revision")).toContainText("#2");
+    await expect(page.getByTestId("dev-history-positions").locator("li")).toHaveCount(playerCount);
+    await page.getByTestId("dev-history-previous").click();
+    await page.getByTestId("dev-history-previous").click();
+    await expect(page.getByTestId("dev-history-revision")).toContainText("#0");
+    await expect(page.getByTestId("dev-history-positions")
+      .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", "gauss");
+    await expect(page.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-street-id", "planck");
+    await expect(page.getByTestId("dev-revision")).toHaveText("2");
+  });
+}
 
 test("history is token-bound and creator seat switch discards the prior inspected frame", async ({ page }) => {
   const { observedHeaders } = await mockMatchApi(page);

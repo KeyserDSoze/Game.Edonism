@@ -9,6 +9,7 @@ import type { TacticalFocus } from "@/features/city/tacticalFocus";
 import type { HistoricalStreetFocus } from "@/features/city/historicalStreetFocus";
 import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
 import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
+import { verifiedPublicHistory, type PublicHistory } from "./verifiedPublicHistory";
 
 type DemoCredential = Readonly<{ playerId: string; token: string }>;
 type DemoPlayer = Readonly<{
@@ -115,27 +116,6 @@ type FirstRoundTurnProgress = Readonly<{
   completedTurns: number;
   completedPlayerIds: readonly string[];
   remainingPlayerIds: readonly string[];
-}>;
-
-type PublicHistoryFrame = Readonly<{
-  revision: number;
-  kind: string;
-  actorId: string;
-  phase: number;
-  activePlayerId: string | null;
-  players: readonly Readonly<{
-    playerId: string;
-    streetId: string;
-    freeMoveUsed: boolean;
-  }>[];
-}>;
-
-// Read-only timeline verified by .NET. Never drive the active 3D scene,
-// commands, turn options or private hands from a historical frame.
-type PublicHistory = Readonly<{
-  matchId: string;
-  verifiedRevision: number;
-  frames: readonly PublicHistoryFrame[];
 }>;
 
 // Development-only transport hint. Absence means no recent heartbeat,
@@ -555,8 +535,7 @@ export function DevelopmentMatchLab({
     setHistoryLease(null);
     if (!matchId || revision === undefined || !seatId || !actorToken) return;
     const controller = new AbortController();
-    const expectedPlayers = session.state.players;
-    const expectedEvents = session.state.events;
+    const expectedSnapshot = session.state;
     void fetch(`/api/dev/matches/${matchId}/history`, {
       headers: { "X-Edonism-Dev-Token": actorToken },
       signal: controller.signal,
@@ -572,34 +551,11 @@ export function DevelopmentMatchLab({
           || currentRevision.current !== revision
           || currentActorScope.current?.seatId !== seatId
           || currentActorScope.current?.token !== actorToken) return;
-        const allowed = new Set(["match-created", "free-move",
-          "turn-ended", "round-settlement-pending"]);
-        const ids = new Set(expectedPlayers.map(p => p.playerId));
-        const frames = result?.frames;
-        // Fail closed for incomplete, reordered or unexpected future data.
-        // The live snapshot is still authoritative even while replay loads.
-        if (result.matchId !== matchId || result.verifiedRevision !== revision
-          || !Array.isArray(frames) || frames.length !== expectedEvents.length
-          || frames.length !== revision + 1
-          || !frames.every((frame, index) => frame.revision === index
-            && allowed.has(frame.kind) && frame.kind === expectedEvents[index]?.kind
-            && frame.actorId === expectedEvents[index]?.actorId
-            && (frame.phase === 0 || frame.phase === 1)
-            && (frame.activePlayerId === null || ids.has(frame.activePlayerId))
-            && Array.isArray(frame.players) && frame.players.length === ids.size
-            && new Set(frame.players.map((p: PublicHistoryFrame["players"][number]) => p.playerId)).size === ids.size
-            && frame.players.every((p: PublicHistoryFrame["players"][number]) => ids.has(p.playerId)
-              && typeof p.freeMoveUsed === "boolean"
-              && typeof p.streetId === "string" && Boolean(streetById(p.streetId)))))
-          return;
-        const latest = frames[frames.length - 1];
-        if (latest.phase !== session.state.phase
-          || latest.activePlayerId !== session.state.activePlayerId
-          || !latest.players.every((p: PublicHistoryFrame["players"][number]) => {
-            const current = expectedPlayers.find(actor => actor.playerId === p.playerId);
-            return current?.streetId === p.streetId
-              && current?.freeMoveUsed === p.freeMoveUsed;
-          })) return;
+        // Verify EVERY public first-round frame, not just the final one.
+        // The current snapshot plus its public events determine the unique
+        // intermediate player positions, turn, phase and free-move flags.
+        // A forged/missing frame invalidates the entire optional replay.
+        if (!verifiedPublicHistory(expectedSnapshot, result)) return;
         setHistoryLease({ token: actorToken, data: result });
       })
       .catch(() => {

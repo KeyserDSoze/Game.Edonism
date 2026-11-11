@@ -305,7 +305,7 @@ export function DevelopmentMatchLab({
     && routesLease.data.matchId === session?.matchId
     && routesLease.data.playerId === actorId
     && routesLease.data.verifiedRevision === session?.state.revision
-    && routesLease.data.fromStreetId === session.state.players.find(p => p.playerId === actorId)?.streetId
+    && routesLease.data.fromStreetId === session?.state.players.find(p => p.playerId === actorId)?.streetId
     ? routesLease.data : null;
   const turnProgress = turnProgressLease && token
     && turnProgressLease.token === token

@@ -21,6 +21,8 @@ type MockOptions = {
   dropFirstEndTurnResponse?: boolean;
   http503FirstEndTurn?: boolean;
   overloadFirstConditionalWait?: boolean;
+  historyUnavailable?: boolean;
+  corruptHistory?: boolean;
 };
 
 async function mockMatchApi(page: Page, options: MockOptions = {}) {
@@ -32,6 +34,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     id, index === 1 && options.unknownStreet ? "unmapped-road"
       : index === 1 && options.sameStreet ? "gauss" : mockStreets[index],
   ]));
+  const startingStreets: Record<Seat, string> = { ...streets };
   const moved: Record<Seat, boolean> = Object.fromEntries(seats.map((id) => [id, false]));
   let revision = 0;
   let phase = 0;
@@ -105,6 +108,39 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       },
     ],
   });
+
+  const verifiedHistory = () => {
+    const past: Record<Seat, string> = { ...startingStreets };
+    const used: Record<Seat, boolean> = Object.fromEntries(seats.map(id => [id, false]));
+    let turn: Seat | null = seats[0];
+    let pastPhase = 0;
+    const frames = auditEvents.map(entry => {
+      if (entry.kind === "free-move") {
+        past[entry.actorId] = entry.toStreetId!;
+        used[entry.actorId] = true;
+      } else if (entry.kind === "turn-ended") {
+        turn = seats[seats.indexOf(entry.actorId) + 1];
+      } else if (entry.kind === "round-settlement-pending") {
+        turn = null;
+        pastPhase = 1;
+      }
+      return {
+        revision: entry.revision, kind: entry.kind, actorId: entry.actorId,
+        phase: pastPhase, activePlayerId: turn,
+        players: seats.map(playerId => ({
+          playerId, streetId: past[playerId], freeMoveUsed: used[playerId],
+        })),
+      };
+    });
+    return {
+      matchId: snapshot().matchId,
+      verifiedRevision: revision,
+      frames: options.corruptHistory
+        ? frames.map((frame, index) => index === 0
+          ? { ...frame, kind: "secret-action" } : frame)
+        : frames,
+    };
+  };
 
   await page.route("**/api/dev/matches/**", async (route) => {
     // Mirror the server-wide #33 cache policy in browser mocks. Only the
@@ -198,6 +234,12 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           },
         },
       });
+    }
+
+    if (path.endsWith("/history")) {
+      if (options.historyUnavailable)
+        return reply({ status: 503, json: { code: "unavailable" } });
+      return reply({ status: 200, json: verifiedHistory() });
     }
 
     if (path.endsWith("/turn-options")) {
@@ -1263,4 +1305,85 @@ test("saturated conditional polling recovers without revoking private hand or re
   }));
   expect(JSON.stringify(data)).not.toContain("a".repeat(64));
   expect(JSON.stringify(data)).not.toContain("b".repeat(64));
+});
+
+test("verified read-only history scrubs first-round streets without moving the live city", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-history-revision"))
+    .toContainText("Historical revision #0");
+  await expect(page.getByTestId("dev-history-positions")
+    .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", "gauss");
+  await page.getByTestId("dev-move-planck").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-history-revision"))
+    .toContainText("Historical revision #1");
+  await expect(page.getByTestId("dev-history-positions")
+    .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", "planck");
+
+  await page.getByTestId("dev-history-previous").click();
+  await expect(page.getByTestId("dev-history-revision"))
+    .toContainText("Historical revision #0");
+  await expect(page.getByTestId("dev-history-positions")
+    .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", "gauss");
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-position")).not.toBeEmpty();
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "planck");
+  await expect(page.getByTestId("dev-history-warning"))
+    .toContainText("does not change the live match");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await page.getByTestId("dev-history-next").click();
+  await expect(page.getByTestId("dev-history-positions")
+    .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", "planck");
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-history-revision"))
+    .toContainText("Historical revision #2");
+  await expect(page.getByTestId("dev-history-active")).toContainText("bob's turn");
+  await page.getByTestId("dev-history-previous").click();
+  await page.getByTestId("dev-history-previous").click();
+  await expect(page.getByTestId("dev-history-positions")
+    .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", "gauss");
+  await expect(page.getByTestId("dev-revision")).toHaveText("2");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "planck");
+  await page.getByTestId("dev-history-latest").click();
+  await expect(page.getByTestId("dev-history-revision"))
+    .toContainText("Historical revision #2");
+  expect(observedHeaders.filter(v => v.path.endsWith("/history")).length)
+    .toBeGreaterThanOrEqual(3);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("invalid public history fails closed without disabling server-confirmed commands", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { corruptHistory: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-history-unavailable")).toBeVisible();
+  await expect(page.getByTestId("dev-history-positions")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-history-unavailable")).toBeVisible();
+  expect(observedHeaders.some(v => v.path.endsWith("/history"))).toBe(true);
+});
+
+test("history is token-bound and creator seat switch discards the prior inspected frame", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
+  await page.getByTestId("dev-history-previous").click();
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#0");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  const historyCalls = observedHeaders.filter(v => v.path.endsWith("/history"));
+  expect(historyCalls.some(v => v.token === "a".repeat(64))).toBe(true);
+  expect(historyCalls.some(v => v.token === "b".repeat(64))).toBe(true);
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
 });

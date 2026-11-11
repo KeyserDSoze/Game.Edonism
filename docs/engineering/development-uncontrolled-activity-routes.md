@@ -23,3 +23,7 @@ xUnit: 2/4/8 giocatori, tutte le 30 carte pubbliche meno quelle controllate, BFS
 Il grafo `edonism-streets-v1` contiene archi ricostruiti dalla plancia; rimane la verifica R-10 con il game designer. I prezzi, gli acquisti, le carte e le fasi successive non sono introdotti e seguono #4/#6/#7/#19.
 
 Tracking: [#49](https://github.com/KeyserDSoze/Game.Edonism/issues/49).
+
+## Verifica codice e browser
+
+La [CI #43048278643](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43048278643) ha passato **296 xUnit, 69 Playwright UI e 28 Playwright full-stack reali** (393/393, tre job verdi). Il gate documentale finale viene registrato sulla issue #49.

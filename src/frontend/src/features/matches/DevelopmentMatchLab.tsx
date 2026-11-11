@@ -4,7 +4,7 @@ import { CircleDot, FlaskConical, Hand, LogOut, MoveRight, RotateCw, Users } fro
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { streetById } from "@/features/city/board";
+import { streetById, slotById } from "@/features/city/board";
 import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
 import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
 
@@ -64,6 +64,24 @@ type PendingSettlementPreview = Readonly<{
   verifiedRevision: number;
   nextTurnOrder: readonly string[];
   grossSalaryQuotes: readonly PublicGrossSalaryQuote[];
+}>;
+
+// Read-only, server-verified routes to uncontrolled PUBLIC activities.
+// Street steps are graph edges, never turns or purchase permissions.
+type UncontrolledRoute = Readonly<{
+  slotId: string;
+  cardId: string;
+  category: string;
+  streetId: string;
+  streetSteps: number;
+}>;
+type UncontrolledRoutes = Readonly<{
+  matchId: string;
+  playerId: string;
+  round: number;
+  verifiedRevision: number;
+  fromStreetId: string;
+  routes: readonly UncontrolledRoute[];
 }>;
 
 type FirstRoundTurnProgress = Readonly<{
@@ -193,6 +211,9 @@ export function DevelopmentMatchLab({
   const [activityRead, setActivityRead] = useState<{
     matchId: string; seatId: string; token: string; revision: number;
   } | null>(null);
+  const [routesLease, setRoutesLease] = useState<{
+    token: string; data: UncontrolledRoutes;
+  } | null>(null);
   const [turnProgressLease, setTurnProgressLease] = useState<{
     token: string; data: FirstRoundTurnProgress;
   } | null>(null);
@@ -279,6 +300,13 @@ export function DevelopmentMatchLab({
   const inspectedRevision = historyRevision ?? history?.verifiedRevision;
   const inspectedFrame = history?.frames.find(frame =>
     frame.revision === inspectedRevision);
+  const uncontrolledRoutes = routesLease && token
+    && routesLease.token === token
+    && routesLease.data.matchId === session?.matchId
+    && routesLease.data.playerId === actorId
+    && routesLease.data.verifiedRevision === session?.state.revision
+    && routesLease.data.fromStreetId === session.state.players.find(p => p.playerId === actorId)?.streetId
+    ? routesLease.data : null;
   const turnProgress = turnProgressLease && token
     && turnProgressLease.token === token
     && turnProgressLease.data.matchId === session?.matchId
@@ -583,6 +611,67 @@ export function DevelopmentMatchLab({
       .catch(() => {
         // Temporary HTTP failures or invalid payloads never advance or
         // authoritatively skip a turn; the server's current state remains.
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.matchId, session?.state.revision, actorId, token]);
+
+  // #49: read-only actor-scoped public location planner, never a buy/action
+  // affordance. Check the server projection against the public board placement
+  // and current revision, without deriving movement permissions in React.
+  useEffect(() => {
+    const matchId = session?.matchId;
+    const revision = session?.state.revision;
+    const seatId = actorId;
+    const actorToken = token;
+    const state = session?.state;
+    setRoutesLease(null);
+    if (!matchId || !state || revision === undefined || !seatId || !actorToken) return;
+    const controller = new AbortController();
+    void fetch(`/api/dev/matches/${matchId}/uncontrolled-routes`, {
+      headers: { "X-Edonism-Dev-Token": actorToken },
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(response => {
+        if (response.status === 404 && !controller.signal.aborted)
+          reconcileRevokedSeat(matchId, seatId, actorToken);
+        return responseJson<UncontrolledRoutes>(response);
+      })
+      .then(result => {
+        const scope = currentActorScope.current;
+        if (controller.signal.aborted || scope?.matchId !== matchId
+          || scope.seatId !== seatId || scope.token !== actorToken
+          || currentRevision.current !== revision) return;
+        const position = state.players.find(p => p.playerId === seatId)?.streetId;
+        const controlled = new Set(state.controlledActivities.map(c => c.slotId));
+        const expected = state.boardActivities.filter(a => !controlled.has(a.slotId));
+        if (!position || result.matchId !== matchId || result.playerId !== seatId
+          || result.round !== state.round || result.verifiedRevision !== revision
+          || result.fromStreetId !== position || !Array.isArray(result.routes)
+          || result.routes.length !== expected.length) return;
+        const expectedBySlot = new Map(expected.map(card => [card.slotId, card]));
+        const used = new Set<string>();
+        let previousSteps = -1;
+        let previousSlot = "";
+        for (const route of result.routes) {
+          if (!route || typeof route.slotId !== "string" || used.has(route.slotId)
+            || !Number.isInteger(route.streetSteps) || route.streetSteps < 0
+            || route.streetSteps > 6 || typeof route.streetId !== "string") return;
+          const card = expectedBySlot.get(route.slotId);
+          if (!card || route.cardId !== card.cardId || route.category !== card.category
+            || slotById(route.slotId)?.streetId !== route.streetId
+            || (route.streetId === position) !== (route.streetSteps === 0)
+            || route.streetSteps < previousSteps
+            || (route.streetSteps === previousSteps && route.slotId <= previousSlot)) return;
+          used.add(route.slotId);
+          previousSteps = route.streetSteps;
+          previousSlot = route.slotId;
+        }
+        setRoutesLease({ token: actorToken, data: result });
+      })
+      .catch(() => {
+        // A malformed/stale/revoked response never manufactures a route.
       });
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1496,6 +1585,39 @@ export function DevelopmentMatchLab({
                   <span className="text-muted-foreground">{t("dev.position")}: </span>
                   <strong data-testid="dev-position">{streetById(player.streetId)?.name ?? player.streetId}</strong>
                 </p>
+                <section aria-label={t("dev.routesTitle")}
+                  data-testid="dev-route-planner"
+                  className="space-y-2 rounded-xl border border-border p-3 text-xs">
+                  <p className="font-semibold">{t("dev.routesTitle")}</p>
+                  {!uncontrolledRoutes ? (
+                    <p data-testid="dev-routes-unavailable"
+                      className="text-muted-foreground">{t("dev.routesUnavailable")}</p>
+                  ) : (
+                    <>
+                      <p data-testid="dev-routes-count" aria-live="polite">
+                        {t("dev.routesCount", { count: uncontrolledRoutes.routes.length })}
+                      </p>
+                      <ol data-testid="dev-routes-list" className="space-y-1">
+                        {uncontrolledRoutes.routes.slice(0, 5).map(route => (
+                          <li key={route.slotId} data-testid={`dev-route-${route.slotId}`}
+                            data-street-id={route.streetId}
+                            data-steps={route.streetSteps}
+                            data-card-id={route.cardId}
+                            className="rounded-md bg-muted p-2">
+                            <span className="font-semibold">{route.slotId} · {route.category}</span>
+                            <span className="block text-muted-foreground">
+                              {streetById(route.streetId)?.name ?? route.streetId} · {
+                                t("dev.routeSteps", { count: route.streetSteps })
+                              }
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    </>
+                  )}
+                  <p className="text-[11px] leading-5 text-muted-foreground"
+                    data-testid="dev-routes-note">{t("dev.routesNote")}</p>
+                </section>
                 <p className="flex items-center gap-2 text-xs text-muted-foreground">
                   <CircleDot aria-hidden="true" className="size-3.5" />
                   {player.freeMoveUsed ? t("dev.moveUsed") : t("dev.moveAvailable")}

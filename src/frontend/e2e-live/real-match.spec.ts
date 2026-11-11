@@ -1956,3 +1956,45 @@ test("real .NET creators reject oversized payload before binding, but two browse
     await guestContext.close();
   }
 });
+
+
+test("real .NET: a second fixture creation never invalidates the first PvP seat", async ({
+  page, browser, request,
+}) => {
+  const first = await startRealMatch(page);
+  const aliceToken = tokenFor(first, "alice");
+  const bobToken = tokenFor(first, "bob");
+
+  const second = await request.post("http://127.0.0.1:5080/api/dev/matches/", {
+    data: { players: [
+      { playerId: "carol", startingSlotId: "N-01" },
+      { playerId: "dan", startingSlotId: "S-01" },
+    ] },
+  });
+  expect(second.status()).toBe(201);
+  expect(second.headers()["cache-control"]).toBe("no-store");
+  const another = await second.json() as CreatedMatch;
+  expect(another.matchId).not.toBe(first.matchId);
+
+  const guestContext = await browser.newContext();
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(first.matchId);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-session")).toBeVisible();
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+
+    const oldSeat = await request.get(
+      `http://127.0.0.1:5080/api/dev/matches/${first.matchId}/seat`,
+      { headers: auth(aliceToken) },
+    );
+    expect(oldSeat.status()).toBe(200);
+    const seat = await oldSeat.json() as { playerId: string; state: PublicMatch };
+    expect(seat.playerId).toBe("alice");
+    expect(seat.state.revision).toBe(0);
+  } finally {
+    await guestContext.close();
+  }
+});

@@ -696,6 +696,10 @@ export function DevelopmentMatchLab({
       // No change to match, public audit or gameplay revision.
       // Update only the actor's in-memory seat secret.
       currentActorScope.current = { matchId, seatId, token: result.token };
+      // The old actor-scoped history selection must not survive a capability
+      // change, even if public game revision is intentionally unchanged.
+      setHistoryLease(null);
+      setHistoryRevision(null);
       lastPublicTag.current = null;
       setSession((previous) => previous?.matchId === matchId
         ? {

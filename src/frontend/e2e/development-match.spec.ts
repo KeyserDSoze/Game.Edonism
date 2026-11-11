@@ -1387,3 +1387,22 @@ test("history is token-bound and creator seat switch discards the prior inspecte
   expect(historyCalls.some(v => v.token === "b".repeat(64))).toBe(true);
   await expect(page.getByTestId("dev-error")).toHaveCount(0);
 });
+
+test("successful credential rotation resets replay selection without changing live revision", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await page.getByTestId("dev-move-planck").click();
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
+  await page.getByTestId("dev-history-previous").click();
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#0");
+  await page.getByTestId("dev-rotate-token").click();
+  await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "planck");
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  const historyCalls = observedHeaders.filter(v => v.path.endsWith("/history"));
+  expect(historyCalls.some(v => v.token === "a".repeat(64))).toBe(true);
+  expect(historyCalls.some(v => v.token?.startsWith("F".repeat(62)))).toBe(true);
+});

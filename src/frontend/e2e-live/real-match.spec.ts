@@ -1647,3 +1647,111 @@ test("real .NET settlement preview is authenticated, gross-only and consistent i
     await secondContext.close();
   }
 });
+
+test("real .NET turn progress authenticates both browsers and never skips a player", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const path = `http://127.0.0.1:5080/api/dev/matches/${id}/turn-progress`;
+  const denied = await request.get(path);
+  expect(denied.status()).toBe(404);
+  expect(denied.headers()["cache-control"]).toBe("no-store");
+  const forged = await request.get(path, { headers: auth("f".repeat(64)) });
+  expect(forged.status()).toBe(404);
+  const aliceInitial = await request.get(path, { headers: auth(aliceToken) });
+  expect(aliceInitial.status()).toBe(200);
+  expect(aliceInitial.headers()["cache-control"]).toBe("no-store");
+  const start = await aliceInitial.json() as {
+    matchId: string; round: number; verifiedRevision: number; phase: number;
+    activePlayerId: string | null; totalTurns: number; completedTurns: number;
+    completedPlayerIds: string[]; remainingPlayerIds: string[];
+  };
+  expect(start.matchId).toBe(id);
+  expect(start.round).toBe(1);
+  expect(start.completedTurns).toBe(0);
+  expect(start.totalTurns).toBe(2);
+  expect(start.activePlayerId).toBe("alice");
+  expect(start.completedPlayerIds).toEqual([]);
+  expect(start.remainingPlayerIds).toEqual(["alice", "bob"]);
+  await expect(page.getByTestId("dev-turn-progress-count")).toContainText("0 di 2");
+
+  const guestContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto("/");
+    await guest.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+    await guest.getByTestId("dev-join-id").fill(id);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-turn-progress-count")).toContainText("0 of 2");
+    await expect(guest.getByTestId("dev-turn-progress-seats").locator('[data-player-id="alice"]'))
+      .toHaveAttribute("data-progress-state", "active");
+    await page.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("dev-turn-progress-count")).toContainText("1 di 2");
+    await expect(guest.getByTestId("dev-revision")).toHaveText("1", { timeout: 9000 });
+    await expect(guest.getByTestId("dev-turn-progress-count")).toContainText("1 of 2");
+    await expect(guest.getByTestId("dev-turn-progress-seats").locator('[data-player-id="bob"]'))
+      .toHaveAttribute("data-progress-state", "active");
+
+    const both = await Promise.all([
+      request.get(path, { headers: auth(aliceToken) }),
+      request.get(path, { headers: auth(bobToken) }),
+    ]);
+    expect(both.every(r => r.status() === 200)).toBe(true);
+    const aliceProgress = await both[0].json();
+    const bobProgress = await both[1].json();
+    expect(aliceProgress).toEqual(bobProgress);
+    expect(aliceProgress.verifiedRevision).toBe(1);
+    expect(aliceProgress.completedPlayerIds).toEqual(["alice"]);
+    expect(aliceProgress.remainingPlayerIds).toEqual(["bob"]);
+
+    await guest.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-revision")).toHaveText("2");
+    await expect(guest.getByTestId("dev-turn-progress-count")).toContainText("2 of 2");
+    await expect(page.getByTestId("dev-revision")).toHaveText("2", { timeout: 9000 });
+    await expect(page.getByTestId("dev-turn-progress-count")).toContainText("2 di 2");
+    const finalR = await request.get(path, { headers: auth(bobToken) });
+    expect(finalR.status()).toBe(200);
+    const final = await finalR.json();
+    expect(final.completedTurns).toBe(2);
+    expect(final.phase).toBe(1);
+    expect(final.activePlayerId).toBeNull();
+    expect(final.completedPlayerIds).toEqual(["alice", "bob"]);
+    expect(final.remainingPlayerIds).toEqual([]);
+    expect(JSON.stringify(final)).not.toContain(aliceToken);
+    expect(JSON.stringify(final)).not.toContain(bobToken);
+    expect(JSON.stringify(final)).not.toContain("cardIds");
+    expect(JSON.stringify(final)).not.toContain("atoms");
+
+    const rotate = await request.post(
+      `http://127.0.0.1:5080/api/dev/matches/${id}/rotate-token`,
+      { headers: auth(aliceToken) },
+    );
+    expect(rotate.status()).toBe(200);
+    const newAliceToken = (await rotate.json() as { token: string }).token;
+    const revoked = await request.get(path, { headers: auth(aliceToken) });
+    expect(revoked.status()).toBe(404);
+    const renewed = await request.get(path, { headers: auth(newAliceToken) });
+    expect(renewed.status()).toBe(200);
+    expect(await renewed.json()).toEqual(final);
+    const state = await request.get(
+      `http://127.0.0.1:5080/api/dev/matches/${id}`,
+      { headers: auth(bobToken) },
+    );
+    expect(state.status()).toBe(200);
+    const snapshot = await state.json() as PublicMatch;
+    expect(snapshot.revision).toBe(2);
+    expect(snapshot.events).toHaveLength(3);
+    expect((snapshot.players as unknown as { atoms: number }[])
+      .every(p => p.atoms === 4)).toBe(true);
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    await guest.getByTestId("dev-leave").click();
+    await expect(guest.getByTestId("dev-turn-progress")).toHaveCount(0);
+  } finally {
+    await guestContext.close();
+  }
+});

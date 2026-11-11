@@ -74,6 +74,16 @@ public sealed record MatchPendingSettlementPreview(
     IReadOnlyList<MatchGrossSalaryQuote> GrossSalaryQuotes);
 
 /// <summary>
+/// A public first-round audit-verified ordered turn progress projection.
+/// This is not seat presence, a timeout policy or permission to skip turns.
+/// </summary>
+public sealed record MatchFirstRoundTurnProgress(
+    Guid MatchId, int Round, long VerifiedRevision, MatchPhase Phase,
+    string? ActivePlayerId, int TotalTurns, int CompletedTurns,
+    IReadOnlyList<string> CompletedPlayerIds,
+    IReadOnlyList<string> RemainingPlayerIds);
+
+/// <summary>
 /// Authoritative in-process movement/turn aggregate for the original street topology.
 /// One free move is permitted per player turn (rulebook2 pp.6-7).
 /// Round resolution deliberately pauses before salary, draws, votes and taxes (#6).
@@ -336,6 +346,33 @@ public sealed partial class GameMatch
             Array.AsReadOnly(state.ProposedNextRoundOrder.ToArray()),
             Array.AsReadOnly(GrossSalaryRules.Quote(
                 _board, _players, _controlledActivities).ToArray()));
+    }
+
+    /// <summary>
+    /// Public round-one turn progress derived from the independently verified
+    /// movement/turn audit. An intermediate free move is NOT a completed turn.
+    /// No clock, auto-pass, private hand, economy or presence is involved.
+    /// </summary>
+    public MatchFirstRoundTurnProgress VerifiedFirstRoundTurnProgress()
+    {
+        var state = Snapshot();
+        var verified = MatchAuditReplay.Verify(_board, state);
+        if (!verified.IsValid || verified.VerifiedRevision != state.Revision)
+            throw new InvalidOperationException("Cannot project unverified first-round turn progress.");
+
+        var completed = verified.Phase == MatchPhase.AwaitingRoundSettlement
+            ? state.TurnOrder.Count
+            : state.TurnOrder.ToList().IndexOf(verified.ActivePlayerId!);
+        if (completed < 0 || completed > state.TurnOrder.Count
+            || verified.Phase == MatchPhase.PlayerTurns && completed == state.TurnOrder.Count)
+            throw new InvalidOperationException("Verified turn progress has no valid active seat.");
+
+        return new MatchFirstRoundTurnProgress(
+            state.MatchId, state.Round, verified.VerifiedRevision,
+            verified.Phase, verified.ActivePlayerId,
+            state.TurnOrder.Count, completed,
+            Array.AsReadOnly(state.TurnOrder.Take(completed).ToArray()),
+            Array.AsReadOnly(state.TurnOrder.Skip(completed).ToArray()));
     }
 
     /// <summary>

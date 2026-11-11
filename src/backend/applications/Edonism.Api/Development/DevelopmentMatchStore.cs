@@ -378,6 +378,23 @@ public sealed class DevelopmentMatchStore
     }
 
     /// <summary>
+    /// Server-verified, read-only public first-round turn progression. A
+    /// forged/revoked token must never learn who already ended a turn.
+    /// </summary>
+    public bool TryReadFirstRoundTurnProgress(Guid matchId, string? token,
+        out MatchFirstRoundTurnProgress? progress)
+    {
+        progress = null;
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            if (entry.ResolveActor(token) is null) return false;
+            progress = entry.Match.VerifiedFirstRoundTurnProgress();
+            return true;
+        }
+    }
+
+    /// <summary>
     /// The bearer is checked under the match lock BEFORE reporting whether
     /// settlement is pending; no private hand, token or deck in the preview.
     /// Returning true with null means authenticated but not yet pending.

@@ -26,6 +26,8 @@ type MockOptions = {
   presenceUnavailable?: boolean;
   invalidPresence?: boolean;
   delayFirstAlicePresence?: boolean;
+  invalidTurnProgress?: boolean;
+  delayFirstAliceTurnProgress?: boolean;
   invalidSettlementPreview?: boolean;
   delayFirstSettlementPreview?: boolean;
 };
@@ -55,6 +57,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let firstOverloadedPoll = false;
   let delayedAlicePresence = false;
   let delayedSettlement = false;
+  let delayedAliceTurnProgress = false;
   const presentSeats = new Set<Seat>();
   const acceptedKeys = new Map<string, {
     kind: string; expectedRevision: number; destinationStreetId?: string;
@@ -258,6 +261,23 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           playerId: options.invalidPresence && id === "bob" ? "intruder" : id,
           isActive: presentSeats.has(id),
         })),
+      } });
+    }
+
+    if (path.endsWith("/turn-progress")) {
+      const completed = phase === 1 ? seats.length : seats.indexOf(active!);
+      if (options.delayFirstAliceTurnProgress && seat === "alice"
+        && !delayedAliceTurnProgress) {
+        delayedAliceTurnProgress = true;
+        await new Promise(resolve => setTimeout(resolve, 900));
+      }
+      return reply({ status: 200, json: {
+        matchId: snapshot().matchId, round: 1,
+        verifiedRevision: options.invalidTurnProgress ? revision + 99 : revision,
+        phase, activePlayerId: active, totalTurns: seats.length,
+        completedTurns: completed,
+        completedPlayerIds: seats.slice(0, completed),
+        remainingPlayerIds: seats.slice(completed),
       } });
     }
 
@@ -1774,4 +1794,71 @@ test("settlement preview rejects stale, malformed and switched bearer results on
     .toBe(false);
   await page.getByTestId("dev-leave").click();
   await expect(page.getByTestId("dev-settlement-panel")).toHaveCount(0);
+});
+
+test("first-round progress is verified by server after moves and completed turns", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const panel = page.getByTestId("dev-turn-progress");
+  await expect(panel).toBeVisible();
+  await expect(page.getByTestId("dev-turn-progress-count")).toContainText("0 di 2");
+  await expect(page.getByTestId("dev-turn-progress-seats").locator("li"))
+    .toHaveAttribute("data-progress-state", "active");
+  await expect(page.getByTestId("dev-turn-progress-seats").locator('[data-player-id="bob"]'))
+    .toHaveAttribute("data-progress-state", "waiting");
+  await page.getByTestId("dev-move-planck").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-turn-progress-count")).toContainText("0 di 2");
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("2");
+  await expect(page.getByTestId("dev-turn-progress-count")).toContainText("1 di 2");
+  await expect(page.getByTestId("dev-turn-progress-seats").locator('[data-player-id="alice"]'))
+    .toHaveAttribute("data-progress-state", "done");
+  await expect(page.getByTestId("dev-turn-progress-seats").locator('[data-player-id="bob"]'))
+    .toHaveAttribute("data-progress-state", "active");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-turn-progress-count")).toContainText("1 di 2");
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("3");
+  await expect(page.getByTestId("dev-turn-progress-count")).toContainText("2 di 2");
+  await expect(page.getByTestId("dev-turn-progress-seats").locator('[data-progress-state="done"]'))
+    .toHaveCount(2);
+  await expect(page.getByTestId("dev-turn-progress-note")).toContainText("non salta turni");
+  expect(observedHeaders.filter(x => x.path.endsWith("/turn-progress")).length).toBeGreaterThan(0);
+  await page.getByTestId("dev-leave").click();
+  await expect(panel).toHaveCount(0);
+});
+
+test("turn progress rejects a delayed old-seat response after switch on mobile EN", async ({ page }) => {
+  await mockMatchApi(page, { delayFirstAliceTurnProgress: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-turn-progress-count")).toContainText("0 of 2");
+  await expect(page.getByTestId("dev-turn-progress-seats").locator('[data-player-id="alice"]'))
+    .toHaveAttribute("data-progress-state", "active");
+  await page.waitForTimeout(1100);
+  await expect(page.getByTestId("dev-turn-progress-count")).toContainText("0 of 2");
+  await expect(page.getByTestId("dev-turn-progress-note")).toContainText("turns are never skipped");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-turn-progress")).toHaveCount(0);
+});
+
+test("turn progress never renders malformed revision even with a valid seat", async ({ page }) => {
+  await mockMatchApi(page, { invalidTurnProgress: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-turn-progress")).toBeVisible();
+  await expect(page.getByTestId("dev-turn-progress-unavailable")).toBeVisible();
+  await expect(page.getByTestId("dev-turn-progress-seats")).toHaveCount(0);
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-turn-progress-seats")).toHaveCount(0);
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-turn-progress")).toHaveCount(0);
 });

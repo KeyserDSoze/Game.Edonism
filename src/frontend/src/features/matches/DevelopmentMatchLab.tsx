@@ -66,6 +66,18 @@ type PendingSettlementPreview = Readonly<{
   grossSalaryQuotes: readonly PublicGrossSalaryQuote[];
 }>;
 
+type FirstRoundTurnProgress = Readonly<{
+  matchId: string;
+  round: number;
+  verifiedRevision: number;
+  phase: number;
+  activePlayerId: string | null;
+  totalTurns: number;
+  completedTurns: number;
+  completedPlayerIds: readonly string[];
+  remainingPlayerIds: readonly string[];
+}>;
+
 type PublicHistoryFrame = Readonly<{
   revision: number;
   kind: string;
@@ -176,6 +188,9 @@ export function DevelopmentMatchLab({
   // null follows the latest server-confirmed revision, while a number means
   // the user has intentionally chosen a historical read-only frame.
   const [historyRevision, setHistoryRevision] = useState<number | null>(null);
+  const [turnProgressLease, setTurnProgressLease] = useState<{
+    token: string; data: FirstRoundTurnProgress;
+  } | null>(null);
   const [settlementLease, setSettlementLease] = useState<{
     token: string; data: PendingSettlementPreview;
   } | null>(null);
@@ -241,6 +256,13 @@ export function DevelopmentMatchLab({
   const inspectedRevision = historyRevision ?? history?.verifiedRevision;
   const inspectedFrame = history?.frames.find(frame =>
     frame.revision === inspectedRevision);
+  const turnProgress = turnProgressLease && token
+    && turnProgressLease.token === token
+    && turnProgressLease.data.matchId === session?.matchId
+    && turnProgressLease.data.verifiedRevision === session?.state.revision
+    && turnProgressLease.data.phase === session?.state.phase
+    && turnProgressLease.data.activePlayerId === session?.state.activePlayerId
+    ? turnProgressLease.data : null;
   const settlement = settlementLease && token
     && settlementLease.token === token
     && settlementLease.data.matchId === session?.matchId
@@ -484,6 +506,62 @@ export function DevelopmentMatchLab({
       });
     return () => controller.abort();
     // Each fetch is bound to a unique match/seat/token/revision.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.matchId, session?.state.revision, actorId, token]);
+
+  // Authenticated, Domain-verified first-round progress. Never use browser
+  // event counts or presence as authority, and never leak a previous seat's
+  // result after a token change, stale revision, revocation or local leave.
+  useEffect(() => {
+    const matchId = session?.matchId;
+    const revision = session?.state.revision;
+    const seatId = actorId;
+    const actorToken = token;
+    const state = session?.state;
+    setTurnProgressLease(null);
+    if (!matchId || !state || revision === undefined || !seatId || !actorToken) return;
+    const controller = new AbortController();
+    void fetch(`/api/dev/matches/${matchId}/turn-progress`, {
+      headers: { "X-Edonism-Dev-Token": actorToken },
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(response => {
+        if (response.status === 404 && !controller.signal.aborted)
+          reconcileRevokedSeat(matchId, seatId, actorToken);
+        return responseJson<FirstRoundTurnProgress>(response);
+      })
+      .then(result => {
+        const scope = currentActorScope.current;
+        if (controller.signal.aborted || scope?.matchId !== matchId
+          || scope.seatId !== seatId || scope.token !== actorToken
+          || currentRevision.current !== revision) return;
+        const ids = state.turnOrder;
+        const activeIndex = state.activePlayerId === null
+          ? ids.length : ids.indexOf(state.activePlayerId);
+        if (!result || result.matchId !== matchId || result.round !== state.round
+          || result.verifiedRevision !== revision || result.phase !== state.phase
+          || result.activePlayerId !== state.activePlayerId
+          || !Number.isInteger(result.totalTurns) || result.totalTurns !== ids.length
+          || !Number.isInteger(result.completedTurns)
+          || result.completedTurns !== activeIndex
+          || (state.phase !== 0 && state.phase !== 1)
+          || (state.phase === 0 && (activeIndex < 0 || activeIndex >= ids.length))
+          || (state.phase === 1 && state.activePlayerId !== null)
+          || !Array.isArray(result.completedPlayerIds)
+          || !Array.isArray(result.remainingPlayerIds)
+          || result.completedPlayerIds.length !== activeIndex
+          || result.remainingPlayerIds.length !== ids.length - activeIndex
+          || result.completedPlayerIds.some((id, i) => id !== ids[i])
+          || result.remainingPlayerIds.some((id, i) => id !== ids[activeIndex + i]))
+          return;
+        setTurnProgressLease({ token: actorToken, data: result });
+      })
+      .catch(() => {
+        // Temporary HTTP failures or invalid payloads never advance or
+        // authoritatively skip a turn; the server's current state remains.
+      });
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.matchId, session?.state.revision, actorId, token]);
 
@@ -1212,6 +1290,52 @@ export function DevelopmentMatchLab({
               </p>
               <p className="text-[11px] text-muted-foreground">{t("dev.turnSignalNote")}</p>
             </div>
+
+            <section aria-label={t("dev.turnProgressTitle")}
+              data-testid="dev-turn-progress"
+              className="space-y-2 rounded-xl border border-border p-3">
+              <p className="text-xs font-semibold">{t("dev.turnProgressTitle")}</p>
+              {!turnProgress ? (
+                <p data-testid="dev-turn-progress-unavailable"
+                  className="text-xs text-muted-foreground">
+                  {t("dev.turnProgressUnavailable")}
+                </p>
+              ) : (
+                <>
+                  <p data-testid="dev-turn-progress-count" aria-live="polite"
+                    className="text-sm font-semibold">
+                    {t("dev.turnProgressCount", {
+                      completed: turnProgress.completedTurns,
+                      total: turnProgress.totalTurns,
+                    })}
+                  </p>
+                  <ol data-testid="dev-turn-progress-seats"
+                    className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                    {[...turnProgress.completedPlayerIds, ...turnProgress.remainingPlayerIds]
+                      .map((id, index) => {
+                        const stage = index < turnProgress.completedTurns
+                          ? "done"
+                          : id === turnProgress.activePlayerId ? "active" : "waiting";
+                        return (
+                          <li key={id} data-player-id={id} data-progress-state={stage}
+                            className="rounded-md bg-muted px-2 py-2">
+                            <span className="block font-semibold">{index + 1}. {id}</span>
+                            <span className="text-muted-foreground">
+                              {stage === "done" ? t("dev.turnProgressDone")
+                                : stage === "active" ? t("dev.turnProgressActive")
+                                : t("dev.turnProgressWaiting")}
+                            </span>
+                          </li>
+                        );
+                      })}
+                  </ol>
+                </>
+              )}
+              <p data-testid="dev-turn-progress-note"
+                className="text-[11px] leading-5 text-muted-foreground">
+                {t("dev.turnProgressNote")}
+              </p>
+            </section>
 
             {session.state.phase === 1 && (
               <section aria-label={t("dev.settlementPreviewTitle")}

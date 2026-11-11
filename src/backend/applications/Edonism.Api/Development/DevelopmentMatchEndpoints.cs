@@ -119,6 +119,16 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "match_not_found" });
         });
 
+        // #43: actor-authorized, audit-verified completed/remaining turn order.
+        // Does not grant turn permissions, reveal private cards or skip actors.
+        group.MapGet("/{matchId:guid}/turn-progress",
+            (Guid matchId, HttpContext context, DevelopmentMatchStore store) =>
+        {
+            return store.TryReadFirstRoundTurnProgress(matchId, Token(context), out var progress)
+                ? Results.Ok(progress)
+                : Results.NotFound(new { code = "match_not_found" });
+        });
+
         // #42: verified, immutable gross quote and NEXT order only after the
         // last first-round turn. Auth before phase check, no settlement writes.
         group.MapGet("/{matchId:guid}/settlement-preview",

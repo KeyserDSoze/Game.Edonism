@@ -30,3 +30,7 @@ In React, il token rimane solo in memoria. Ogni cambio del match, revisione, pos
 - Playwright live: due browser, due bearer privati, distanze, dati pubblici, movimento reale .NET e polling/refresh, nessun token esposto o mano di un altro posto.
 
 Mantenere [#51](https://github.com/KeyserDSoze/Game.Edonism/issues/51) aperta fino alla CI **3/3 job success sullo stesso HEAD finale di main**. Topologia R-10 ancora soggetta ad approvazione del game designer in #4; Production identity/persistenza resta #13.
+
+## Evidenza CI e regressioni aggiuntive
+
+La prima CI con test Domain/API e UI completa ([run #43056284767](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43056284767)) è verde: 306 xUnit + 79 Playwright mocked + 29 Playwright live real .NET = 414 test. Ulteriori test Playwright su 8 giocatori e uno scagnozzo atterrato completano il controllo dei posti e della postura; gli esiti sul final HEAD sono riportati nell'[issue #51](https://github.com/KeyserDSoze/Game.Edonism/issues/51).

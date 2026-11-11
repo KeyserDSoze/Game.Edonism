@@ -13,3 +13,7 @@ Una credenziale valida conserva la semantica di binding di ASP.NET Core: `400` p
 Le quattro route creator non richiedono un bearer perché rilasciano *fixture* di Development soltanto: non vanno esposte in Production. Letture e `/api/v1` restano invariati. Questo **non** implementa login Production, JWT/OAuth, persistenza distribuita o rate-limit; sono requisiti separati della #13. Non cambia il regolamento (#4/#6).
 
 **Nota sulla prima CI:** i test hanno scoperto che `415` veniva emesso prima del middleware originariamente basato su endpoint metadata, in caso di Content-Type non JSON. Questo ha richiesto il gate **pre-routing**, mantenendo immutata la logica di authorization sotto lock al momento del commit. Le verifiche 400/404/415 su entrambi i comandi impediscono la regressione.
+
+## Esito regressioni
+
+La prima [CI xUnit #43027994861](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43027994861) ha individuato **quattro fallimenti** per `415 UnsupportedMediaType` prima del filtro basato su metadati. La correzione pre-routing è nel commit `f89b4cd` e la [CI del codice #43028421354](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43028421354) è **`completed/success` con tutti i job verdi: 257 test xUnit + 64 Playwright UI + 25 Playwright live = 346 test superati**. Nessuna falla di autorizzazione residua è stata rilevata dalla matrice di test. La CI dell'HEAD documentale finale è gate separato richiesto per chiudere la issue #45.

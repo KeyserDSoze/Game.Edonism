@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { shortestStreetPath, streetById, slotById } from "@/features/city/board";
+import type { TacticalFocus } from "@/features/city/tacticalFocus";
 import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
 import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
 
@@ -209,10 +210,13 @@ async function responseJson<T>(response: Response): Promise<T> {
 export function DevelopmentMatchLab({
   onStreetSelect,
   onPublicState,
+  onTacticalFocus,
 }: {
   onStreetSelect: (id: string) => void;
   /** A public-only server snapshot projection for the 3D scene and DOM fallback. */
   onPublicState: (state: PublicMatchSceneState | null) => void;
+  /** Public-only map highlight; NEVER a move, token or action command. */
+  onTacticalFocus: (focus: TacticalFocus | null) => void;
 }) {
   const { t, i18n } = useTranslation();
   const [session, setSession] = useState<DemoSession | null>(null);
@@ -373,8 +377,12 @@ export function DevelopmentMatchLab({
   }, [session?.matchId, isMyTurn, actorId, token, i18n.resolvedLanguage, t]);
 
   function publishPublicPositions(state: DemoMatch | null) {
+    // A new authoritative snapshot (or match exit) invalidates all old paths.
+    onTacticalFocus(null);
     onPublicState(state
       ? {
+          matchId: state.matchId,
+          revision: state.revision,
           activePlayerId: state.activePlayerId,
           players: state.players.map((seat) => ({
             playerId: seat.playerId,
@@ -401,6 +409,7 @@ export function DevelopmentMatchLab({
       || active.token !== revokedToken || session?.matchId !== matchId) return;
 
     const remaining = session.credentials.filter((seat) => seat.playerId !== seatId);
+    onTacticalFocus(null);
     setHand(null);
     setHistoryLease(null);
     setHistoryRevision(null);
@@ -1235,6 +1244,7 @@ export function DevelopmentMatchLab({
         throw new Error("invalid_rotated_credential");
       // No change to match, public audit or gameplay revision.
       // Update only the actor's in-memory seat secret.
+      onTacticalFocus(null);
       currentActorScope.current = { matchId, seatId, token: result.token };
       // The old actor-scoped history selection must not survive a capability
       // change, even if public game revision is intentionally unchanged.
@@ -1401,6 +1411,7 @@ export function DevelopmentMatchLab({
     currentActorScope.current = {
       matchId: session.matchId, seatId: id, token: credential.token,
     };
+    onTacticalFocus(null);
     setRotationNotice(null);
     setHistoryLease(null);
     setHistoryRevision(null);
@@ -1746,6 +1757,20 @@ export function DevelopmentMatchLab({
                                 standing: other.standingHenchmen,
                               })}
                             </span>
+                            <Button type="button" size="sm" variant="outline"
+                              data-testid={`dev-focus-player-${other.otherPlayerId}`}
+                              aria-label={t("dev.focusPlayer", { player: other.otherPlayerId })}
+                              className="mt-2 h-8 w-full"
+                              onClick={() => onTacticalFocus({
+                                kind: "player",
+                                matchId: session.matchId,
+                                revision: session.state.revision,
+                                actorId,
+                                targetId: other.otherPlayerId,
+                                streetPath: [...other.streetPath],
+                              })}>
+                              {t("dev.focusOnMap")}
+                            </Button>
                           </li>
                         ))}
                       </ol>
@@ -1787,6 +1812,20 @@ export function DevelopmentMatchLab({
                               {t("dev.routePath")}: {route.streetPath.map(id =>
                                 streetById(id)?.name ?? id).join(" → ")}
                             </span>
+                            <Button type="button" size="sm" variant="outline"
+                              data-testid={`dev-focus-activity-${route.slotId}`}
+                              aria-label={t("dev.focusActivity", { slot: route.slotId })}
+                              className="mt-2 h-8 w-full"
+                              onClick={() => onTacticalFocus({
+                                kind: "activity",
+                                matchId: session.matchId,
+                                revision: session.state.revision,
+                                actorId,
+                                targetId: route.slotId,
+                                streetPath: [...route.streetPath],
+                              })}>
+                              {t("dev.focusOnMap")}
+                            </Button>
                           </li>
                         ))}
                       </ol>

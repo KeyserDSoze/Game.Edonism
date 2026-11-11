@@ -22,6 +22,8 @@ export type PublicGrossSalaryQuote = Readonly<{
 }>;
 
 export type PublicMatchSceneState = PublicPlayerPositions & Readonly<{
+  matchId: string;
+  revision: number;
   boardActivities: readonly PublicBoardActivity[];
   controlledActivities: readonly PublicControlledActivity[];
   grossSalaryQuotes: readonly PublicGrossSalaryQuote[];

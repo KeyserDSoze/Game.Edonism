@@ -8,6 +8,7 @@ import { CityScene } from "@/features/city/CityScene";
 import { cityBoard, slotById, slotsOnStreet, streetById } from "@/features/city/board";
 import { playerMarkerPlacements } from "@/features/city/playerMarkers";
 import { controlledLotMarkers, publicGrossSalaryQuotes, type PublicMatchSceneState } from "@/features/city/activityMarkers";
+import { verifiedTacticalFocus, type TacticalFocus } from "@/features/city/tacticalFocus";
 import { useTheme, type Theme } from "@/features/settings/useTheme";
 import { changeLanguage } from "@/i18n";
 
@@ -29,6 +30,9 @@ export default function App() {
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>("N-01");
   // Only a public projection supplied by the Development API: never tokens/hands.
   const [publicPlayers, setPublicPlayers] = useState<PublicMatchSceneState | null>(null);
+  const [tacticalFocus, setTacticalFocus] = useState<TacticalFocus | null>(null);
+  // Revalidate focus against actual public match data on every render.
+  const verifiedFocus = verifiedTacticalFocus(publicPlayers, tacticalFocus);
   const playerMarkers = publicPlayers
     ? playerMarkerPlacements(publicPlayers.players, publicPlayers.activePlayerId)
     : [];
@@ -39,6 +43,7 @@ export default function App() {
   const streetSlots = slotsOnStreet(selectedStreetId);
 
   const chooseStreet = (streetId: string) => {
+    setTacticalFocus(null);
     setSelectedStreetId(streetId);
     setSelectedSlotId(slotsOnStreet(streetId)[0]?.id ?? null);
   };
@@ -46,8 +51,29 @@ export default function App() {
   const chooseSlot = (slotId: string) => {
     const slot = slotById(slotId);
     if (!slot) return;
+    setTacticalFocus(null);
     setSelectedSlotId(slotId);
     setSelectedStreetId(slot.streetId);
+  };
+
+  const chooseTacticalFocus = (requested: TacticalFocus | null) => {
+    if (!requested) {
+      setTacticalFocus(null);
+      return;
+    }
+    const valid = verifiedTacticalFocus(publicPlayers, requested);
+    if (!valid) return;
+    // All displayed coordinates and paths derive from public board IDs.
+    const targetStreet = valid.streetPath[valid.streetPath.length - 1];
+    setTacticalFocus(valid);
+    setSelectedStreetId(targetStreet);
+    setSelectedSlotId(valid.kind === "activity"
+      ? valid.targetId : slotsOnStreet(targetStreet)[0]?.id ?? null);
+  };
+
+  const updatePublicState = (state: PublicMatchSceneState | null) => {
+    setTacticalFocus(null);
+    setPublicPlayers(state);
   };
 
   return (
@@ -126,10 +152,14 @@ export default function App() {
               aria-label={t("city.canvasLabel")}
               data-testid="city-renderer"
               data-board-version={cityBoard.version}
+              data-focus-path={verifiedFocus?.streetPath.join(">") ?? ""}
+              data-focus-target={verifiedFocus?.targetId ?? ""}
+              data-focus-kind={verifiedFocus?.kind ?? ""}
             >
               <CityScene
                 selectedStreetId={selectedStreetId}
                 selectedSlotId={selectedSlotId}
+                tacticalFocus={verifiedFocus}
                 onStreetSelect={chooseStreet}
                 onSlotSelect={chooseSlot}
                 playerMarkers={playerMarkers}
@@ -145,6 +175,27 @@ export default function App() {
                 <span className="rounded-lg bg-slate-950/60 px-3 py-2 font-mono backdrop-blur">{cityBoard.slots.length} {t("city.slotsShort")}</span>
               </div>
             </div>
+            {verifiedFocus && (
+              <section data-testid="city-tactical-focus"
+                aria-label={t("city.tacticalFocusTitle")}
+                className="mx-3 mt-3 space-y-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-3 text-xs sm:mx-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold">{t("city.tacticalFocusTitle")}</p>
+                  <Button type="button" variant="outline" size="sm"
+                    data-testid="city-clear-tactical-focus"
+                    onClick={() => setTacticalFocus(null)}>{t("city.clearTacticalFocus")}</Button>
+                </div>
+                <p data-testid="city-tactical-target" className="font-medium">
+                  {t(verifiedFocus.kind === "player"
+                    ? "city.tacticalTargetPlayer" : "city.tacticalTargetActivity",
+                    { target: verifiedFocus.targetId })}
+                </p>
+                <p data-testid="city-tactical-route" className="break-words text-muted-foreground">
+                  {verifiedFocus.streetPath.map(id => streetById(id)?.name ?? id).join(" → ")}
+                </p>
+                <p className="text-muted-foreground">{t("city.tacticalFocusNote")}</p>
+              </section>
+            )}
             <CardContent className="mt-5 flex items-start gap-2 text-xs leading-5 text-muted-foreground">
               <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary" />
               {t("city.notice")}
@@ -319,7 +370,9 @@ export default function App() {
             </Card>
             {DevelopmentMatchLab && (
               <Suspense fallback={null}>
-                <DevelopmentMatchLab onStreetSelect={chooseStreet} onPublicState={setPublicPlayers} />
+                <DevelopmentMatchLab onStreetSelect={chooseStreet}
+                  onPublicState={updatePublicState}
+                  onTacticalFocus={chooseTacticalFocus} />
               </Suspense>
             )}
           </aside>

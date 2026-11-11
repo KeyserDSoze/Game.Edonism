@@ -5,10 +5,12 @@ import { useTranslation } from "react-i18next";
 import { cityBoard, toScene, type ActivitySlot, type RoadArea, type Street } from "./board";
 import type { PlayerMarkerPlacement } from "./playerMarkers";
 import type { ControlledLotMarker } from "./activityMarkers";
+import type { TacticalFocus } from "./tacticalFocus";
 
 type SceneProps = {
   selectedStreetId: string;
   selectedSlotId: string | null;
+  tacticalFocus: TacticalFocus | null;
   onStreetSelect: (streetId: string) => void;
   onSlotSelect: (slotId: string) => void;
   /** Server-originated public match positions; never client-selected coordinates. */
@@ -24,7 +26,9 @@ function footprintId(id: string): number {
   return Array.from(id).reduce((sum, letter) => sum * 31 + letter.charCodeAt(0), 7) >>> 0;
 }
 
-function Road({ road, selected, onSelect }: { road: RoadArea; selected: boolean; onSelect: (id: string) => void }) {
+function Road({ road, selected, highlighted, onSelect }: {
+  road: RoadArea; selected: boolean; highlighted: boolean; onSelect: (id: string) => void;
+}) {
   const [x, z] = toScene(road.center);
   const sizeX = road.width / 95;
   const sizeZ = road.height / 95;
@@ -35,14 +39,19 @@ function Road({ road, selected, onSelect }: { road: RoadArea; selected: boolean;
       onClick={(event) => { event.stopPropagation(); onSelect(road.streetId); }}
     >
       <boxGeometry args={[sizeX, 0.06, sizeZ]} />
-      <meshStandardMaterial color={selected ? "#496f77" : road.streetId === "main-square" ? "#65747a" : "#495661"} roughness={1} />
+      <meshStandardMaterial
+        color={highlighted ? "#31b7aa" : selected ? "#496f77" : road.streetId === "main-square" ? "#65747a" : "#495661"}
+        emissive={highlighted ? "#127b73" : "#000000"}
+        emissiveIntensity={highlighted ? 0.35 : 0}
+        roughness={1} />
     </mesh>
   );
 }
 
-function Building({ slot, selected, onSelect, control }: {
+function Building({ slot, selected, focused, onSelect, control }: {
   slot: ActivitySlot;
   selected: boolean;
+  focused: boolean;
   onSelect: (id: string) => void;
   control?: ControlledLotMarker;
 }) {
@@ -52,6 +61,12 @@ function Building({ slot, selected, onSelect, control }: {
   const width = 1.03;
   return (
     <group position={[x, 0, z]}>
+      {focused && (
+        <mesh position={[0, 0.065, 0]}>
+          <boxGeometry args={[1.65, 0.05, 1.65]} />
+          <meshStandardMaterial color="#32ccc1" emissive="#15978a" emissiveIntensity={0.5} />
+        </mesh>
+      )}
       <mesh
         castShadow
         receiveShadow
@@ -167,9 +182,17 @@ function Pucciottino({ x, z, color }: { x: number; z: number; color: string }) {
 }
 
 /** A Pucciottino now represents a PUBLIC server player street, not an action. */
-function PlayerPucciottino({ marker }: { marker: PlayerMarkerPlacement }) {
+function PlayerPucciottino({ marker, focused }: {
+  marker: PlayerMarkerPlacement; focused: boolean;
+}) {
   return (
     <group position={[marker.x, 0, marker.z]}>
+      {focused && (
+        <mesh position={[0, 0.10, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.49, 0.075, 8, 32]} />
+          <meshStandardMaterial color="#5ce0d4" emissive="#17a79a" emissiveIntensity={0.7} />
+        </mesh>
+      )}
       {marker.isActive && (
         <mesh position={[0, 0.13, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <torusGeometry args={[0.37, 0.05, 8, 24]} />
@@ -209,7 +232,8 @@ function RoadLabel({ street }: { street: Street }) {
   );
 }
 
-function World({ selectedStreetId, selectedSlotId, onStreetSelect, onSlotSelect, playerMarkers, controlMarkers, hasActiveMatch }: SceneProps) {
+function World({ selectedStreetId, selectedSlotId, tacticalFocus,
+  onStreetSelect, onSlotSelect, playerMarkers, controlMarkers, hasActiveMatch }: SceneProps) {
   const roads = useMemo(() => cityBoard.roads, []);
   const slots = useMemo(() => cityBoard.slots, []);
   const [pucciX1, pucciZ1] = toScene({ x: 130, y: 225 });
@@ -232,15 +256,20 @@ function World({ selectedStreetId, selectedSlotId, onStreetSelect, onSlotSelect,
         <meshStandardMaterial color="#476a51" roughness={1} />
       </mesh>
       {roads.map((road, index) => (
-        <Road key={index} road={road} selected={road.streetId === selectedStreetId} onSelect={onStreetSelect} />
+        <Road key={index} road={road} selected={road.streetId === selectedStreetId}
+          highlighted={tacticalFocus?.streetPath.includes(road.streetId) ?? false}
+          onSelect={onStreetSelect} />
       ))}
       {slots.map((slot) => (
         <Building key={slot.id} slot={slot} selected={slot.id === selectedSlotId}
+          focused={tacticalFocus?.kind === "activity" && tacticalFocus.targetId === slot.id}
           onSelect={onSlotSelect} control={controlMarkers.find((marker) => marker.slotId === slot.id)} />
       ))}
       <CityHall />
       {hasActiveMatch
-        ? playerMarkers.map((marker) => <PlayerPucciottino key={marker.playerId} marker={marker} />)
+        ? playerMarkers.map((marker) => <PlayerPucciottino key={marker.playerId}
+            marker={marker}
+            focused={tacticalFocus?.kind === "player" && tacticalFocus.targetId === marker.playerId} />)
         : (
           <>
             <Pucciottino x={pucciX1} z={pucciZ1} color="#f2ad86" />

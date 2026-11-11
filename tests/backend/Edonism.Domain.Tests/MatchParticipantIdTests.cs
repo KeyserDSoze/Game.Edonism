@@ -33,12 +33,24 @@ public sealed class MatchParticipantIdTests
     [InlineData("alice\u2028")]
     [InlineData("alice\u2029")]
     [InlineData("alice\u00a0bob")]
-    [InlineData("\ud800")]
-    [InlineData("\udc00")]
     [InlineData("alice\U000E0001other")]
     public void RejectsBlankInvisibleOrControlIdentifiers(string? id)
     {
         Assert.False(MatchParticipantId.IsValid(id));
+    }
+
+    [Fact]
+    public void UnpairedUtf16SurrogatesAreRejectedWithoutXunitInlineDataSerialization()
+    {
+        // xUnit's InlineData discovery serializes malformed UTF-16 to the
+        // replacement character, so construct the invalid sequences in-test.
+        var isolatedHigh = new string('\uD800', 1);
+        var isolatedLow = new string('\uDC00', 1);
+        Assert.False(MatchParticipantId.IsValid(isolatedHigh));
+        Assert.False(MatchParticipantId.IsValid(isolatedLow));
+        Assert.False(MatchParticipantId.IsValid("alice" + isolatedHigh + "bob"));
+        Assert.False(MatchParticipantId.IsValid("alice" + isolatedLow + "bob"));
+        Assert.True(MatchParticipantId.IsValid("\U0001F642")); // paired, printable
     }
 
     [Fact]

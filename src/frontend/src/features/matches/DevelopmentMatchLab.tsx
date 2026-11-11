@@ -925,6 +925,10 @@ export function DevelopmentMatchLab({
     if (busy) return;
     const credential = session?.credentials.find((seat) => seat.playerId === id);
     if (!session || !credential) return;
+    // A 404 from another tab may already have selected this fallback seat.
+    // Re-clicking its button must NOT erase its loaded private hand, because
+    // token/actor dependencies would be unchanged and no refetch would run.
+    if (actorId === id) return;
     currentActorScope.current = {
       matchId: session.matchId, seatId: id, token: credential.token,
     };

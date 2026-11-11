@@ -1507,3 +1507,24 @@ test("delayed presence for a previous seat cannot overwrite the new seat scope",
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
   await expect(page.getByTestId("dev-error")).toHaveCount(0);
 });
+
+test("reselecting an already active fallback seat cannot erase its private hand", async ({ page }) => {
+  const { revokeSeat } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  revokeSeat("alice");
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  // Presence or ordinary polling may detect revocation first. The creator
+  // keeps Bob's valid seat and its hand under either arrival order.
+  await expect(page.getByTestId("dev-seat-bob")).toHaveAttribute("aria-pressed", "true", {
+    timeout: 12000,
+  });
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await page.getByTestId("dev-seat-bob").click();
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-presence-seats")
+    .locator('[data-player-id="bob"]')).toHaveAttribute("data-presence", "active");
+  await expect(page.getByTestId("dev-session")).toBeVisible();
+});

@@ -43,3 +43,13 @@ La CI completa deve superare i job xUnit, Playwright UI e Playwright live su `ma
 ## Verifica finale CI
 
 [GitHub Actions #42705247221](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42705247221) su commit `b1c9671`: `completed/success` per tutti e tre i job, **153/153 xUnit**, **20/20 Playwright UI**, **4/4 Playwright live** collegati all'API .NET reale. Build .NET 10 con 0 errori e 0 warning, TypeScript/Vite verde. Il nuovo audit non autorizza il secondo round, non convalida l'economia e non riabilita in Production le route Development.
+
+## Frame storici pubblici verificati (#37)
+
+`MatchAuditReplay.Verify` continua a verificare completamente lo snapshot pubblico del **primo round**. Dopo un controllo iniziale del setup e del `match-created`, conserva una copia immutabile delle posizioni, dei flag di movimento e del turno **dopo ogni evento pubblico verificato**, incluso l'evento 0 di creazione. Ogni `MatchReplayFrame` contiene `Revision`, `Kind`, `ActorId`, `Phase`, `ActivePlayerId`, `Players`. Un evento futuro non noto o una alterazione del grafo/turno/riepilogo blocca il replay: **`IsValid = false`, `Frames = []`**, senza mostrare progressi parziali.
+
+La nuova API Development `GET /api/dev/matches/{id}/history` chiama lo stesso verifier attraverso `DevelopmentMatchStore` con un singolo lock e dopo verifica della capability. Restituisce `{ matchId, verifiedRevision, frames }` con `no-store`, esclusivamente se `IsValid` e `frames.Count = revision + 1`. Un bearer falso/revocato, match non valido o una timeline alterata non autorizza alcun frame. Nessun evento pubblico storico ha informazioni su mani, carte riservate, mazzo privato, token o digest. In Production l'endpoint non esiste.
+
+Il frontend Development usa questi frame **soltanto per consultazione visiva** e scarta risposte riferite ad altro token, partita o revisione, o dati che non corrispondono agli eventi e allo stato finale confermati dal server. La visualizzazione dei giocatori attuali, i comandi validi, le opzioni Domain, i marker 3D e la privacy delle mani rimangono dipendenti unicamente dallo snapshot live. Il primo round può terminare nella fase `AwaitingRoundSettlement`; non viene simulato un round successivo.
+
+Dettagli di UI/test: [development-public-history.md](development-public-history.md). Tracciamento: [#37](https://github.com/KeyserDSoze/Game.Edonism/issues/37).

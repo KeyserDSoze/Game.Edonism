@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Globalization;
+using System.Text;
 
 namespace Edonism.Domain.Matches;
 
@@ -17,16 +19,24 @@ public static class MatchParticipantId
             || id[0] == ' ' || id[^1] == ' ')
             return false;
 
-        foreach (var codeUnit in id)
+        // Check Unicode SCALAR VALUES, not isolated UTF-16 code units.
+        // A lone surrogate is not a valid actor ID: JSON may substitute it,
+        // making server-side identity differ from client-visible identity.
+        for (var offset = 0; offset < id.Length;)
         {
+            var status = Rune.DecodeFromUtf16(id.AsSpan(offset),
+                out var scalar, out var consumed);
+            if (status != OperationStatus.Done) return false;
+
             // C0/C1, DEL, bidi isolates/overrides, zero-width format chars
-            // and Unicode line/paragraph separators make audit actor IDs
-            // ambiguous in JSON/logs/accessible UI.
-            var category = CharUnicodeInfo.GetUnicodeCategory(codeUnit);
+            // (including supplementary tag characters) and Unicode line/
+            // paragraph separators make audit actor IDs ambiguous.
+            var category = Rune.GetUnicodeCategory(scalar);
             if (category is UnicodeCategory.Control or UnicodeCategory.Format
                 or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator
-                || char.IsWhiteSpace(codeUnit) && codeUnit != ' ')
+                || Rune.IsWhiteSpace(scalar) && scalar.Value != ' ')
                 return false;
+            offset += consumed;
         }
 
         return true;

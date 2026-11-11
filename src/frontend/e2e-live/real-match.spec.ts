@@ -197,7 +197,8 @@ test("real .NET: rejects spoofable and oversized technical player IDs before iss
   page, request,
 }) => {
   const api = "http://127.0.0.1:5080/api/dev/matches/";
-  for (const invalidId of ["A".repeat(65), "alice\nother", "alice\u202Eother"]) {
+  for (const invalidId of ["A".repeat(65), "alice\nother",
+    "alice\u202Eother", "alice\u{E0001}other"]) {
     const rejected = await request.post(api, {
       data: {
         players: [

@@ -24,3 +24,7 @@ Test xUnit parametrizzati: ASCII/Unicode stampabile, limite esatto 64 e 65 unit�
 [Issue #57](https://github.com/KeyserDSo/Game.Edonism/issues/57) è la fonte del tracking e del link alla CI conclusiva 3/3 sullo stesso HEAD finale di `main`.
 
 Restano aperti il vero ciclo del secondo round/economia e le scelte del regolamento #4/#6, la sicurezza Production #13, i poteri #7/#8 e i dati originali #9/#19.
+
+## Unicode scalar completo
+
+Il controllo non deve iterare su `char` singoli assumendoli sempre scalari Unicode. La policy usa `Rune.DecodeFromUtf16` e rifiuta sequenze UTF-16 non well-formed (high/low surrogate isolati), perché un encoder JSON potrebbe sostituire l'unità malformata cambiando l'identità visibile al client. La categoria Unicode viene valutata su **ogni rune completa**, includendo i format code point supplementari come U+E0001 (LANGUAGE TAG): la loro coppia surrogate non deve aggirare il blocco `Format`. Un emoji valido costituito da due unità UTF-16 resta ammesso. I test Domain contengono surrogate isolati e un tag invisibile supplementare, Playwright live invia il tag supplementare valido all'API reale e verifica 400.

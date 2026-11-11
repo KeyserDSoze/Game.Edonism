@@ -888,6 +888,10 @@ export function DevelopmentMatchLab({
         setError(t("dev.createPayloadTooLarge"));
         return;
       }
+      if (response.status === 503) {
+        setError(t("dev.createCapacityReached"));
+        return;
+      }
       const created = await responseJson<DemoSession>(response);
       const playerIds = demoSeatIds.slice(0, playerCount);
       if (created.credentials.length !== playerCount || created.state.players.length !== playerCount

@@ -40,6 +40,39 @@ public sealed class DevelopmentCheckpointPersistenceTests
             ActionDeckFixture.ActionIds(), ActionDeckFixture.ElectionDayId, 2026);
 
     [Fact]
+    public void EphemeralSeatPresenceNeverWritesEncryptedCheckpointAndRestartsInactive()
+    {
+        using var temp = new TempDirectory();
+        var first = new DevelopmentMatchStore(temp.Files());
+        var created = Create(first);
+        var id = created.MatchId;
+        var alice = created.Credentials[0].Token;
+        var bob = created.Credentials[1].Token;
+        var location = Path.Combine(temp.PathOnDisk, id.ToString("N") + ".edonism");
+        var originalBytes = File.ReadAllBytes(location);
+        Assert.True(first.TryHeartbeat(id, alice, out var active));
+        Assert.True(active!.Seats[0].IsActive);
+        Assert.False(active.Seats[1].IsActive);
+        Assert.True(first.TryHeartbeat(id, bob, out var both));
+        Assert.All(both!.Seats, s => Assert.True(s.IsActive));
+        Assert.Equal(originalBytes, File.ReadAllBytes(location));
+
+        // A completely new DevelopmentMatchStore restores private state and
+        // credentials from AES-GCM, but nobody is 'recently active' yet.
+        var restored = new DevelopmentMatchStore(temp.Files());
+        Assert.True(restored.TryReadPresence(id, alice, out var inactive));
+        Assert.All(inactive!.Seats, s => Assert.False(s.IsActive));
+        Assert.True(restored.TryReadHand(id, alice, out var aliceHand));
+        Assert.True(restored.TryReadHand(id, bob, out var bobHand));
+        Assert.Equal(4, aliceHand!.CardIds.Count);
+        Assert.Equal(4, bobHand!.CardIds.Count);
+        Assert.True(restored.TryRead(id, bob, out var state));
+        Assert.Equal(0, state!.Revision);
+        Assert.Single(state.Events);
+        Assert.Equal(originalBytes, File.ReadAllBytes(location));
+    }
+
+    [Fact]
     public void AcceptedIdempotencyReceiptPersistsAtomicallyAndReplaysAfterRestart()
     {
         using var temp = new TempDirectory();
@@ -518,6 +551,9 @@ public sealed class DevelopmentCheckpointPersistenceTests
         var original = created.Credentials[0].Token;
         var other = created.Credentials[1].Token;
 
+        // Presence must not be cleared if the disk-backed rotation fails.
+        Assert.True(store.TryHeartbeat(created.MatchId, original, out var before));
+        Assert.True(before!.Seats[0].IsActive);
         // Force failure before the encrypted atomic rename.
         Directory.Delete(temp.PathOnDisk, recursive: true);
         File.WriteAllText(temp.PathOnDisk, "not a directory");
@@ -528,6 +564,9 @@ public sealed class DevelopmentCheckpointPersistenceTests
         Assert.Equal(0, unchanged!.Revision);
         Assert.Single(unchanged.Events);
         Assert.True(store.TryReadHand(created.MatchId, other, out _));
+        Assert.True(store.TryReadPresence(created.MatchId, original, out var stillActive));
+        Assert.True(stillActive!.Seats[0].IsActive);
+        Assert.False(stillActive.Seats[1].IsActive);
     }
 
     [Fact]

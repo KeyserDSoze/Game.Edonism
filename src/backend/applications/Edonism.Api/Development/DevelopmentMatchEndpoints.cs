@@ -66,6 +66,10 @@ public static class DevelopmentMatchEndpoints
             {
                 return Results.BadRequest(new { code = "invalid_preview_setup" });
             }
+            catch (DevelopmentMatchCapacityException)
+            {
+                return CapacityReached();
+            }
         });
 
         // Only in Development; test fixtures can supply synthetic card IDs and
@@ -82,6 +86,10 @@ public static class DevelopmentMatchEndpoints
             catch (ArgumentException)
             {
                 return Results.BadRequest(new { code = "invalid_card_setup" });
+            }
+            catch (DevelopmentMatchCapacityException)
+            {
+                return CapacityReached();
             }
         });
 
@@ -100,6 +108,10 @@ public static class DevelopmentMatchEndpoints
             {
                 return Results.BadRequest(new { code = "invalid_character_setup" });
             }
+            catch (DevelopmentMatchCapacityException)
+            {
+                return CapacityReached();
+            }
         });
 
         // Rulebook2 pp.3-4: 58 actions plus one Election Day, dealt 4 per player.
@@ -117,6 +129,10 @@ public static class DevelopmentMatchEndpoints
             catch (ArgumentException)
             {
                 return Results.BadRequest(new { code = "invalid_full_deck_setup" });
+            }
+            catch (DevelopmentMatchCapacityException)
+            {
+                return CapacityReached();
             }
         });
 
@@ -282,6 +298,12 @@ public static class DevelopmentMatchEndpoints
 
         return app;
     }
+
+    // Capacity is distinct from transient request-rate limiting (429). A
+    // process restart clears memory-only fixture slots, not encrypted files.
+    private static IResult CapacityReached() => Results.Json(
+        new { code = "dev_match_capacity_reached" },
+        statusCode: StatusCodes.Status503ServiceUnavailable);
 
     private static string Token(HttpContext context) => context.Request.Headers[TokenHeader].ToString();
 

@@ -198,6 +198,82 @@ public sealed class DevelopmentIdempotencyEndpointTests
         Assert.Equal(HttpStatusCode.NotFound, absent.StatusCode);
     }
 
+    [Theory]
+    [InlineData("end-turn")]
+    [InlineData("free-move")]
+    public async Task MalformedKeysAuthorizeBeforeValidationAndNeverMutateState(string kind)
+    {
+        using var host = Host();
+        using var creator = host.CreateClient();
+        var (id, aliceToken, bobToken) = await Create(creator);
+        using var alice = AsSeat(host, aliceToken);
+        using var bob = AsSeat(host, bobToken);
+        using var forged = AsSeat(host, new string('F', 64));
+        var path = $"/api/dev/matches/{id}/{kind}";
+        var payload = kind == "end-turn"
+            ? (object)new { expectedRevision = 0 }
+            : new { expectedRevision = 0, destinationStreetId = "planck" };
+
+        foreach (var key in new[] { "bad-key", "", Guid.Empty.ToString("D"),
+            new string('X', 200) })
+        {
+            using var missing = await Command(creator, path, payload, key);
+            using var invalid = await Command(forged, path, payload, key);
+            Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, invalid.StatusCode);
+            Assert.Equal("no-store", invalid.Headers.CacheControl?.ToString());
+            var hidden = await invalid.Content.ReadAsStringAsync();
+            Assert.Contains("match_not_found", hidden);
+            Assert.DoesNotContain(aliceToken, hidden, StringComparison.OrdinalIgnoreCase);
+
+            using var authorized = await Command(alice, path, payload, key);
+            Assert.Equal(HttpStatusCode.BadRequest, authorized.StatusCode);
+            Assert.Equal("no-store", authorized.Headers.CacheControl?.ToString());
+            using var body = await authorized.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.Equal("invalid_idempotency_key",
+                body!.RootElement.GetProperty("code").GetString());
+        }
+
+        // Several values in one header are also invalid, but authorization
+        // remains the first step. Never accept one UUID out of an array.
+        foreach (var (client, expected) in new[] {
+            (creator, HttpStatusCode.NotFound),
+            (alice, HttpStatusCode.BadRequest)
+        })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, path)
+            {
+                Content = JsonContent.Create(payload)
+            };
+            request.Headers.TryAddWithoutValidation("Idempotency-Key",
+                new[] { Guid.NewGuid().ToString("D"), Guid.NewGuid().ToString("D") });
+            using var response = await client.SendAsync(request);
+            Assert.Equal(expected, response.StatusCode);
+            Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        }
+        Assert.Equal((0L, 1), await State(bob, id));
+
+        using var rotate = await alice.PostAsync($"/api/dev/matches/{id}/rotate-token", null);
+        Assert.Equal(HttpStatusCode.OK, rotate.StatusCode);
+        using var rotation = await rotate.Content.ReadFromJsonAsync<JsonDocument>();
+        var freshToken = rotation!.RootElement.GetProperty("token").GetString()!;
+        using var rotated = AsSeat(host, freshToken);
+
+        using var revoked = await Command(alice, path, payload, "bad-key");
+        Assert.Equal(HttpStatusCode.NotFound, revoked.StatusCode);
+        Assert.Equal("no-store", revoked.Headers.CacheControl?.ToString());
+        using var replacementBad = await Command(rotated, path, payload, "bad-key");
+        Assert.Equal(HttpStatusCode.BadRequest, replacementBad.StatusCode);
+        Assert.Equal((0L, 1), await State(bob, id));
+
+        // Malformed keys did not create receipts or consume a turn/move.
+        using var good = await Command(rotated, path, payload, Guid.NewGuid().ToString("D"));
+        Assert.Equal(HttpStatusCode.OK, good.StatusCode);
+        using var goodBody = await good.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert.Equal(1, goodBody!.RootElement.GetProperty("revision").GetInt64());
+        Assert.Equal((1L, 2), await State(bob, id));
+    }
+
     [Fact]
     public async Task FreeMoveWithIdempotentReplayCannotTeleportOrConsumeSecondFreeMove()
     {

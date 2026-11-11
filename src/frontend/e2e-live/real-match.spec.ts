@@ -1425,3 +1425,90 @@ test("real .NET + two browsers: leaving a local seat hides secrets without endin
     await guestContext.close();
   }
 });
+
+test("real .NET: malformed command UUID checks bearer before key, including revoked seat", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const root = `http://127.0.0.1:5080/api/dev/matches/${id}`;
+  const guestContext = await browser.newContext();
+  try {
+    const bob = await guestContext.newPage();
+    await bob.goto("/");
+    await bob.getByTestId("dev-join-id").fill(id);
+    await bob.getByTestId("dev-join-token").fill(bobToken);
+    await bob.getByTestId("dev-join").click();
+    await expect(bob.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    const commands = [
+      { kind: "end-turn", data: { expectedRevision: 0 } },
+      { kind: "free-move", data: { expectedRevision: 0, destinationStreetId: "planck" } },
+    ] as const;
+
+    for (const command of commands) {
+      const url = `${root}/${command.kind}`;
+      const headers = { "Idempotency-Key": "not-a-uuid" };
+      const anonymous = await request.post(url, { headers, data: command.data });
+      expect(anonymous.status()).toBe(404);
+      expect(anonymous.headers()["cache-control"]).toBe("no-store");
+      expect(await anonymous.text()).not.toContain(aliceToken);
+
+      const forged = await request.post(url, {
+        headers: { ...headers, ...auth("f".repeat(64)) }, data: command.data,
+      });
+      expect(forged.status()).toBe(404);
+
+      const validSeatBadHeader = await request.post(url, {
+        headers: { ...headers, ...auth(aliceToken) }, data: command.data,
+      });
+      expect(validSeatBadHeader.status()).toBe(400);
+      expect(validSeatBadHeader.headers()["cache-control"]).toBe("no-store");
+      expect((await validSeatBadHeader.json()).code).toBe("invalid_idempotency_key");
+    }
+
+    const rotate = await request.post(root + "/rotate-token", { headers: auth(aliceToken) });
+    expect(rotate.status()).toBe(200);
+    const refreshed = await rotate.json() as { playerId: string; token: string };
+    expect(refreshed.playerId).toBe("alice");
+    for (const command of commands) {
+      const url = `${root}/${command.kind}`;
+      const stale = await request.post(url, {
+        headers: { ...auth(aliceToken), "Idempotency-Key": "" }, data: command.data,
+      });
+      expect(stale.status()).toBe(404);
+      const renewedBad = await request.post(url, {
+        headers: { ...auth(refreshed.token), "Idempotency-Key": "bad-key" },
+        data: command.data,
+      });
+      expect(renewedBad.status()).toBe(400);
+    }
+    const stillZero = await request.get(root, { headers: auth(bobToken) });
+    expect(stillZero.status()).toBe(200);
+    const before = await stillZero.json() as PublicMatch;
+    expect(before.revision).toBe(0);
+    expect(before.events).toHaveLength(1);
+    await expect(bob.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+
+    const accepted = await request.post(root + "/end-turn", {
+      headers: { ...auth(refreshed.token), "Idempotency-Key": crypto.randomUUID() },
+      data: { expectedRevision: 0 },
+    });
+    expect(accepted.status()).toBe(200);
+    const after = await accepted.json() as PublicMatch;
+    expect(after.revision).toBe(1);
+    expect(after.events).toHaveLength(2);
+    await expect(bob.getByTestId("dev-revision")).toHaveText("1", { timeout: 9000 });
+    await expect(bob.getByTestId("dev-end-turn")).toBeEnabled();
+    const storage = await bob.evaluate(() => ({
+      url: location.href, local: Object.values(localStorage),
+      session: Object.values(sessionStorage),
+    }));
+    expect(JSON.stringify(storage)).not.toContain(aliceToken);
+    expect(JSON.stringify(storage)).not.toContain(bobToken);
+    expect(JSON.stringify(storage)).not.toContain(refreshed.token);
+  } finally {
+    await guestContext.close();
+  }
+});

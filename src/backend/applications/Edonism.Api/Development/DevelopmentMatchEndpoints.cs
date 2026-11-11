@@ -219,10 +219,8 @@ public static class DevelopmentMatchEndpoints
         group.MapPost("/{matchId:guid}/free-move", (
             Guid matchId, DevelopmentFreeMoveRequest request, HttpContext context, DevelopmentMatchStore store) =>
         {
-            if (!TryCommandKey(context, out var key))
-                return Results.BadRequest(new { code = "invalid_idempotency_key" });
             if (!store.TryFreeMove(matchId, Token(context), request.DestinationStreetId,
-                    request.ExpectedRevision, out var result, key))
+                    request.ExpectedRevision, out var result, CommandKey(context)))
                 return Results.NotFound(new { code = "match_not_found" });
 
             return Result(result!);
@@ -231,10 +229,8 @@ public static class DevelopmentMatchEndpoints
         group.MapPost("/{matchId:guid}/end-turn", (
             Guid matchId, DevelopmentEndTurnRequest request, HttpContext context, DevelopmentMatchStore store) =>
         {
-            if (!TryCommandKey(context, out var key))
-                return Results.BadRequest(new { code = "invalid_idempotency_key" });
             if (!store.TryEndTurn(matchId, Token(context), request.ExpectedRevision,
-                    out var result, key))
+                    out var result, CommandKey(context)))
                 return Results.NotFound(new { code = "match_not_found" });
 
             return Result(result!);
@@ -245,19 +241,19 @@ public static class DevelopmentMatchEndpoints
 
     private static string Token(HttpContext context) => context.Request.Headers[TokenHeader].ToString();
 
-    private static bool TryCommandKey(HttpContext context, out string? key)
+    private static string? CommandKey(HttpContext context)
     {
-        // Optional opt-in: historical Development clients without a key retain
-        // their original optimistic-concurrency behavior. Never use the key
-        // as an authorization credential or allow it in the query string.
-        key = null;
+        // #40: preserve an invalid/empty/multi-valued header for the store
+        // to reject ONLY AFTER resolving the actor under the match lock.
+        // A revoked/missing bearer must never receive header-validation 400.
+        // null alone means the historical unkeyed command.
         var supplied = context.Request.Headers["Idempotency-Key"];
-        if (supplied.Count == 0) return true;
-        if (supplied.Count != 1 || !Guid.TryParseExact(supplied.ToString(), "D", out var parsed)
-            || parsed == Guid.Empty)
-            return false;
-        key = parsed.ToString("D");
-        return true;
+        return supplied.Count switch
+        {
+            0 => null,
+            1 => supplied.ToString(),
+            _ => string.Empty
+        };
     }
 
     private static int? BoundedWaitSeconds(string prefer)
@@ -275,5 +271,7 @@ public static class DevelopmentMatchEndpoints
     private static IResult Result(MatchCommandResult result) =>
         result.Accepted
             ? Results.Ok(result.State)
-            : Results.Conflict(new { code = result.Code });
+            : result.Code == "invalid_idempotency_key"
+                ? Results.BadRequest(new { code = result.Code })
+                : Results.Conflict(new { code = result.Code });
 }

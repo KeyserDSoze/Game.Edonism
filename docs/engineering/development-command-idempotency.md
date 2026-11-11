@@ -51,3 +51,9 @@ Tracking: [issue #35](https://github.com/KeyserDSoze/Game.Edonism/issues/35), [l
 ## Evidenza CI e tracking
 
 Il codice del backend, il browser e le regressioni principali sono verificati dalla [CI #42734120193](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42734120193): **203 xUnit + 41 Playwright UI + 15 Playwright live, tutti e tre i job verdi**. È stato poi aggiunto un test .NET di non-notifica per retry già accettati: nella [CI #42734308114](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/42734308114) sono già verdi **204 xUnit**, mentre il relativo gate browser è da completare. La chiusura della [#35](https://github.com/KeyserDSoze/Game.Edonism/issues/35) richiede infine la CI verde sull'ultimo commit `main`.
+
+## Fix ordine autorizzazione e header UUID (#40)
+
+L'endpoint deve **inoltrare la chiave grezza al `DevelopmentMatchStore`**, senza rispondere 400 nel routing prima dell'autenticazione. Il codice dello store verifica `ResolveActor(token)` sotto lock e soltanto dopo controlla il formato UUID. La chiave non fornita è `null`; header vuoto oppure valori multipli sono *forniti ma invalidi*, quindi 400 **solo per un bearer autorizzato**. Dopo rotazione, il token revocato deve dare 404 anche con UUID errato; il token sostitutivo può ricevere 400 per header malformato e recuperare le ricevute valide già accettate.
+
+Nessuna modifica a round, audit, checkpoint o al comportamento del browser già dotato di `crypto.randomUUID()`. Copertura aggiunta: xUnit HTTP parametrizzato su `/free-move` e `/end-turn` con token mancante/falso/revocato, UUID malformato/vuoto/zero e ripetuto, stato immutato e nuova richiesta valida; Playwright live su due browser, rotazione credenziale e aggiornamento del turno dopo un comando successivo legittimo. Tracking [#40](https://github.com/KeyserDSoze/Game.Edonism/issues/40); i tre gate CI su `main` restano obbligatori.

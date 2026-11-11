@@ -1827,3 +1827,87 @@ test("real .NET two browsers display only newly verified public opponent events"
     await guestContext.close();
   }
 });
+
+test("real .NET: malformed commands never reveal binding details before bearer authentication", async ({
+  page, browser, request,
+}) => {
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const base = `http://127.0.0.1:5080/api/dev/matches/${id}`;
+  const guestContext = await browser.newContext();
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(id);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-session")).toBeVisible();
+
+    for (const kind of ["free-move", "end-turn"]) {
+      const path = `${base}/${kind}`;
+      for (const headers of [
+        { "content-type": "application/json" },
+        { ...auth("f".repeat(64)), "content-type": "application/json" },
+      ]) {
+        const forbidden = await request.post(path, { headers, data: "{" });
+        expect(forbidden.status()).toBe(404);
+        expect(forbidden.headers()["cache-control"]).toBe("no-store");
+        expect((await forbidden.json() as { code: string }).code).toBe("match_not_found");
+      }
+      const validBadBody = await request.post(path, {
+        headers: { ...auth(bobToken), "content-type": "application/json" }, data: "{",
+      });
+      expect(validBadBody.status()).toBe(400);
+      expect(validBadBody.headers()["cache-control"]).toBe("no-store");
+    }
+
+    const rotated = await request.post(`${base}/rotate-token`,
+      { headers: auth(bobToken) });
+    expect(rotated.status()).toBe(200);
+    const newBob = (await rotated.json() as { token: string }).token;
+    for (const kind of ["free-move", "end-turn"]) {
+      const revoked = await request.post(`${base}/${kind}`, {
+        headers: { ...auth(bobToken), "content-type": "application/json" },
+        data: "{",
+      });
+      expect(revoked.status()).toBe(404);
+      expect((await revoked.json() as { code: string }).code).toBe("match_not_found");
+      const renewed = await request.post(`${base}/${kind}`, {
+        headers: { ...auth(newBob), "content-type": "application/json" },
+        data: "{",
+      });
+      expect(renewed.status()).toBe(400);
+    }
+
+    // Pre-binding authorization and rotation do not advance the game.
+    const before = await request.get(base, { headers: auth(aliceToken) });
+    const initial = await before.json() as PublicMatch;
+    expect(initial.revision).toBe(0);
+    expect(initial.events).toHaveLength(1);
+    await page.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    const bobEnd = await request.post(`${base}/end-turn`, {
+      headers: auth(newBob), data: { expectedRevision: 1 },
+    });
+    expect(bobEnd.status()).toBe(200);
+    await expect(page.getByTestId("dev-revision")).toHaveText("2", { timeout: 12000 });
+    const after = await request.get(base, { headers: auth(aliceToken) });
+    const final = await after.json() as PublicMatch;
+    expect(final.revision).toBe(2);
+    expect(final.events).toHaveLength(3);
+    expect(final.phase).toBe(1);
+    const stateText = JSON.stringify(final);
+    expect(stateText).not.toContain(aliceToken);
+    expect(stateText).not.toContain(bobToken);
+    expect(stateText).not.toContain(newBob);
+    const aliceHand = await request.get(`${base}/hand`, {
+      headers: auth(aliceToken),
+    });
+    expect(aliceHand.status()).toBe(200);
+    expect((await aliceHand.json() as { cardIds: string[] }).cardIds).toHaveLength(4);
+  } finally {
+    await guestContext.close();
+  }
+});

@@ -1188,3 +1188,97 @@ test("real .NET: full Alice long-poll quota returns 429 without starving Bob bro
     await context.close();
   }
 });
+
+test("real .NET: two browsers inspect verified first-round history without changing live moves", async ({
+  page, browser, request,
+}) => {
+  const match = await startRealMatch(page);
+  const id = match.matchId;
+  const aliceToken = tokenFor(match, "alice");
+  const bobToken = tokenFor(match, "bob");
+  const aliceStart = match.state.players.find(p => p.playerId === "alice")!.streetId;
+  const api = `http://127.0.0.1:5080/api/dev/matches/${id}`;
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    await expect(page.getByTestId("dev-history-revision"))
+      .toContainText("#0");
+    await expect(page.getByTestId("dev-history-positions")
+      .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", aliceStart);
+    const aliceMove = page.locator('[data-testid^="dev-move-"]:not([disabled])').first();
+    const destination = (await aliceMove.getAttribute("data-testid"))!.replace("dev-move-", "");
+    await aliceMove.click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
+    await expect(page.getByTestId("dev-history-positions")
+      .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", destination);
+    await page.getByTestId("dev-history-previous").click();
+    await expect(page.getByTestId("dev-history-revision")).toContainText("#0");
+    await expect(page.getByTestId("dev-history-positions")
+      .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", aliceStart);
+    await expect(page.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-street-id", destination);
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+
+    const guest = await context.newPage();
+    await guest.goto("/");
+    await guest.getByTestId("dev-join-id").fill(id);
+    await guest.getByTestId("dev-join-token").fill(bobToken);
+    await guest.getByTestId("dev-join").click();
+    await expect(guest.getByTestId("dev-seat-bob")).toBeVisible();
+    await expect(guest.getByTestId("dev-history-revision")).toContainText("#1");
+    await expect(guest.getByTestId("dev-history-positions")
+      .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", destination);
+    await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+
+    const fromApi = await request.get(api + "/history", { headers: auth(bobToken) });
+    expect(fromApi.status()).toBe(200);
+    expect(fromApi.headers()["cache-control"]).toBe("no-store");
+    const verified = await fromApi.json() as {
+      verifiedRevision: number;
+      frames: { revision: number; kind: string;
+        players: { playerId: string; streetId: string }[] }[];
+    };
+    expect(verified.verifiedRevision).toBe(1);
+    expect(verified.frames.map(f => f.revision)).toEqual([0, 1]);
+    expect(verified.frames[0].players.find(p => p.playerId === "alice")?.streetId).toBe(aliceStart);
+    expect(verified.frames[1].players.find(p => p.playerId === "alice")?.streetId).toBe(destination);
+    expect(JSON.stringify(verified)).not.toContain(aliceToken);
+    expect(JSON.stringify(verified)).not.toContain(bobToken);
+    expect(JSON.stringify(verified)).not.toContain("cardIds");
+
+    await page.getByTestId("dev-end-turn").click();
+    await expect(guest.getByTestId("dev-revision")).toHaveText("2", { timeout: 9000 });
+    await expect(guest.getByTestId("dev-history-revision")).toContainText("#2");
+    await expect(guest.getByTestId("dev-history-active")).toContainText("bob");
+    await guest.getByTestId("dev-history-previous").click();
+    await guest.getByTestId("dev-history-previous").click();
+    await expect(guest.getByTestId("dev-history-positions")
+      .locator('[data-player-id="alice"]')).toHaveAttribute("data-street-id", aliceStart);
+    await expect(guest.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-street-id", destination);
+    await expect(guest.getByTestId("dev-end-turn")).toBeEnabled();
+
+    const oldHistory = await request.get(api + "/history", { headers: auth(aliceToken) });
+    expect(oldHistory.status()).toBe(200);
+    const rotate = await request.post(api + "/rotate-token", { headers: auth(aliceToken) });
+    expect(rotate.status()).toBe(200);
+    const replacement = await rotate.json() as { playerId: string; token: string };
+    const revoked = await request.get(api + "/history", { headers: auth(aliceToken) });
+    expect(revoked.status()).toBe(404);
+    const newHistory = await request.get(api + "/history", { headers: auth(replacement.token) });
+    expect(newHistory.status()).toBe(200);
+    expect((await newHistory.json()).verifiedRevision).toBe(2);
+
+    const guestStorage = await guest.evaluate(() => ({
+      url: location.href, local: Object.values(localStorage),
+      session: Object.values(sessionStorage),
+    }));
+    expect(JSON.stringify(guestStorage)).not.toContain(bobToken);
+    expect(JSON.stringify(guestStorage)).not.toContain(aliceToken);
+    expect(await guest.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+      .toBe(false);
+  } finally {
+    await context.close();
+  }
+});

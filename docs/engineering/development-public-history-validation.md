@@ -24,3 +24,7 @@ Il fetch `/history` mantiene `cache: "no-store"`, abort e verifica match/actor/t
 Playwright mocked introduce una manomissione **del solo frame intermedio**, preservando genesis e ultimo frame: posizione valida ma falsa, flag `freeMoveUsed` errato, attore, seat attiva o fase diversi. Ogni caso nasconde la storia senza alterare lo snapshot live o la mano. Playwright parametrizza setup validi a 4/8 posti (oltre alla regressione a 2 posti); xUnit del Domain continua a verificare la sorgente reale, Playwright live su due browser mantiene il controllo del protocollo contro .NET. Chiudere [#55](https://github.com/KeyserDSoze/Game.Edonism/issues/55) soltanto dopo 3/3 job CI success sul commit HEAD finale di `main`.
 
 Restano bloccate le regole in discussione di #4/#6 e i contenuti/API di #7/#13/#19; nessuna regola o fase è stata aggiunta.
+
+## Verifica della release funzionale
+
+La [CI #43080126267](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43080126267) sul commit [`714171a`](https://github.com/KeyserDSoze/Game.Edonism/commit/714171a7fe12c35ce98913d63aa4fd9e7fafaecb) ha completato **3/3 job success**, con **309 xUnit, 95 Playwright UI e 29 Playwright con API .NET reale (433/433)**, nessuno skip xUnit. Include i cinque payload con frame intermedio falsificato e ultimo frame valido, il replay valido da 4 e 8 posti e tutte le regressioni browser e Domain preesistenti. La chiusura dopo il commit finale di documentazione è registrata in [issue #55](https://github.com/KeyserDSoze/Game.Edonism/issues/55).

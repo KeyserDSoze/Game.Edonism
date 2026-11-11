@@ -2095,9 +2095,13 @@ test("corrupt or late route plans fail closed across revision and actor changes"
 });
 
 test("late previous-seat route response cannot overwrite current actor", async ({ page }) => {
-  await mockMatchApi(page, { routePlannerWithFreeCards: true, delayFirstAliceRoutes: true });
+  const { observedHeaders } = await mockMatchApi(page, {
+    routePlannerWithFreeCards: true, delayFirstAliceRoutes: true,
+  });
   await page.goto("/");
   await page.getByTestId("dev-create").click();
+  await expect.poll(() => observedHeaders.some(({ path, token }) =>
+    path.endsWith("/uncontrolled-routes") && token === "a".repeat(64))).toBe(true);
   await page.getByTestId("dev-seat-bob").click();
   await expect(page.getByTestId("dev-route-S-02")).toHaveAttribute("data-steps", "0");
   await page.waitForTimeout(1100);

@@ -22,3 +22,7 @@ Il laboratorio React mostra `Turni conclusi: X di N` / `Turns completed: X of N`
 - Playwright live: due browser autentici, cambio turno ricevuto via polling, completamento pending, rotazione token e privacy.
 
 Tracking [#43](https://github.com/KeyserDSoze/Game.Edonism/issues/43). Parent #6 rimane aperta; per eventuali meccaniche multi-round attendere #4/R-07/R-09. La chiusura richiede tre job CI verdi sull'ultimo HEAD `main`.
+
+## Esito CI e regressioni
+
+La [CI del codice #43019931524](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43019931524) è `completed/success` sul commit `639c784`: **243 test xUnit .NET**, **61 Playwright UI** e **23 Playwright live**, totale **327/327 superati**. Il primo giro CI #43019097234 ha individuato un errore nel nuovo selettore Playwright (due righe nella lista invece di una); il test è stato corretto senza modificare la semantica del Domain, e tutta la suite è stata rieseguita fino a tre job verdi. L'esito dell'ultimo commit documentale su `main` e la chiusura finale sono tracciati nella [issue #43](https://github.com/KeyserDSoze/Game.Edonism/issues/43).

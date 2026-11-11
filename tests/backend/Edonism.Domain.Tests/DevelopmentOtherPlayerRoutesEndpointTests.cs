@@ -75,12 +75,15 @@ public sealed class DevelopmentOtherPlayerRoutesEndpointTests
         using var state = await readState.Content.ReadFromJsonAsync<JsonDocument>();
         Assert.Equal(0, state!.RootElement.GetProperty("revision").GetInt64());
 
+        using var options = await alice.GetFromJsonAsync<JsonDocument>(
+            $"/api/dev/matches/{id}/turn-options");
+        var destination = options!.RootElement.GetProperty("freeMoveStreetIds")[0].GetString();
         using var move = await alice.PostAsJsonAsync($"/api/dev/matches/{id}/free-move",
-            new { expectedRevision = 0, destinationStreetId = "main-square" });
+            new { expectedRevision = 0, destinationStreetId = destination });
         Assert.Equal(HttpStatusCode.OK, move.StatusCode);
         using var updated = await bob.GetFromJsonAsync<JsonDocument>(path);
         Assert.Equal(1, updated!.RootElement.GetProperty("verifiedRevision").GetInt64());
-        Assert.Equal("main-square",
+        Assert.Equal(destination,
             updated.RootElement.GetProperty("others")[0].GetProperty("streetId").GetString());
 
         using var rotate = await alice.PostAsync($"/api/dev/matches/{id}/rotate-token", null);

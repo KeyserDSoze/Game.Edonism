@@ -1695,6 +1695,72 @@ export function DevelopmentMatchLab({
                                 })}
                 </p>
               )}
+              {offlineComparison?.status === "compared"
+                && offlineComparison.result.status === "divergent"
+                && offlineComparison.result.firstDifference && (
+                  <section data-testid="dev-public-audit-diff"
+                    aria-label={t("dev.historyCompareDetailTitle")}
+                    className="space-y-2 rounded-lg border border-border p-2">
+                    <p data-testid="dev-public-audit-diff-revision"
+                      className="text-xs font-semibold">
+                      {t("dev.historyCompareAtRevision", {
+                        revision: offlineComparison.result.firstDifferentRevision,
+                      })}
+                    </p>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {([
+                        { id: "left", label: t("dev.historyCompareFirstFile"),
+                          step: offlineComparison.result.firstDifference.left },
+                        { id: "right", label: t("dev.historyCompareSecondFile"),
+                          step: offlineComparison.result.firstDifference.right },
+                      ] as const).map(entry => (
+                        <section key={entry.id}
+                          data-testid={`dev-public-audit-diff-${entry.id}`}
+                          className="min-w-0 space-y-1 rounded-md bg-muted/30 p-2 text-xs [overflow-wrap:anywhere]">
+                          <p className="font-semibold">{entry.label}</p>
+                          <p data-testid={`dev-public-audit-diff-${entry.id}-event`}>
+                            {t("dev.historyCompareEvent", {
+                              kind: entry.step.kind, actor: entry.step.actorId,
+                            })}
+                          </p>
+                          <p data-testid={`dev-public-audit-diff-${entry.id}-route`}>
+                            {t("dev.historyCompareRoute", {
+                              from: entry.step.fromStreetId ?? t("dev.historyCompareNone"),
+                              to: entry.step.toStreetId ?? t("dev.historyCompareNone"),
+                            })}
+                          </p>
+                          <p>{t("dev.historyComparePhase", {
+                            phase: entry.step.phase === 0
+                              ? t("dev.historyCompareTurns")
+                              : t("dev.historyComparePending"),
+                          })}</p>
+                          <p data-testid={`dev-public-audit-diff-${entry.id}-active`}>
+                            {t("dev.historyCompareActive", {
+                              actor: entry.step.activePlayerId ?? t("dev.historyCompareNone"),
+                            })}
+                          </p>
+                          <p className="font-medium">{t("dev.historyComparePlayers")}</p>
+                          <ol className="space-y-1"
+                            data-testid={`dev-public-audit-diff-${entry.id}-players`}>
+                            {entry.step.players.map((player, index) => (
+                              <li key={`${player.playerId}-${index}`}
+                                data-testid="dev-public-audit-diff-player"
+                                className="flex flex-wrap gap-x-2 gap-y-0.5">
+                                <span className="font-medium">{index + 1}. {player.playerId}</span>
+                                <span>{t("dev.historyOfflinePlayerPosition", {
+                                  street: player.streetId,
+                                })}</span>
+                                <span>{player.freeMoveUsed
+                                  ? t("dev.historyOfflineMoveUsed")
+                                  : t("dev.historyOfflineMoveAvailable")}</span>
+                              </li>
+                            ))}
+                          </ol>
+                        </section>
+                      ))}
+                    </div>
+                  </section>
+                )}
               <p className="text-[11px] leading-5 text-muted-foreground">
                 {t("dev.historyCompareUnsigned")}
               </p>

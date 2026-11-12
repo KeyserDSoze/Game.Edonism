@@ -8,7 +8,30 @@ import type { OfflinePublicAuditReview, OfflinePublicAuditTimelineStep } from ".
 export type OfflinePublicAuditComparison = Readonly<{
   status: "identical" | "left-prefix" | "right-prefix" | "divergent" | "different-match";
   firstDifferentRevision: number | null;
+  /** Explicit public-only copies from the FIRST mismatched verified revision. */
+  firstDifference?: Readonly<{
+    left: OfflinePublicAuditTimelineStep;
+    right: OfflinePublicAuditTimelineStep;
+  }>;
 }>;
+
+/** Never spread file data or retain unknown properties in comparison results. */
+function copyPublicStep(step: OfflinePublicAuditTimelineStep): OfflinePublicAuditTimelineStep {
+  return {
+    revision: step.revision,
+    kind: step.kind,
+    actorId: step.actorId,
+    fromStreetId: step.fromStreetId,
+    toStreetId: step.toStreetId,
+    phase: step.phase,
+    activePlayerId: step.activePlayerId,
+    players: step.players.map(player => ({
+      playerId: player.playerId,
+      streetId: player.streetId,
+      freeMoveUsed: player.freeMoveUsed,
+    })),
+  };
+}
 
 function sameStep(left: OfflinePublicAuditTimelineStep, right: OfflinePublicAuditTimelineStep): boolean {
   if (left.revision !== right.revision || left.kind !== right.kind
@@ -38,8 +61,16 @@ export function compareOfflinePublicAuditReviews(
 
   const common = Math.min(left.steps.length, right.steps.length);
   for (let revision = 0; revision < common; revision++) {
-    if (!sameStep(left.steps[revision], right.steps[revision]))
-      return { status: "divergent", firstDifferentRevision: revision };
+    if (!sameStep(left.steps[revision], right.steps[revision])) {
+      return {
+        status: "divergent",
+        firstDifferentRevision: revision,
+        firstDifference: {
+          left: copyPublicStep(left.steps[revision]),
+          right: copyPublicStep(right.steps[revision]),
+        },
+      };
+    }
   }
   if (left.steps.length === right.steps.length)
     return { status: "identical", firstDifferentRevision: null };

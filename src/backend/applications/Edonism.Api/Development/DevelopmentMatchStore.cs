@@ -616,6 +616,24 @@ public sealed class DevelopmentMatchStore
     }
 
     /// <summary>
+    /// Actor-authenticated, audited PUBLIC routes to other seats' lots.
+    /// No hidden hand, attack permission or turn mutation.
+    /// </summary>
+    public bool TryReadOpponentControlledLots(Guid matchId, string? token,
+        out MatchOpponentControlledLotRoutes? routes)
+    {
+        routes = null;
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            var actor = entry.ResolveActor(token);
+            if (actor is null) return false;
+            routes = entry.Match.VerifiedOpponentControlledLotsForActor(actor);
+            return routes is not null;
+        }
+    }
+
+    /// <summary>
     /// Server-verified, read-only public first-round turn progression. A
     /// forged/revoked token must never learn who already ended a turn.
     /// </summary>

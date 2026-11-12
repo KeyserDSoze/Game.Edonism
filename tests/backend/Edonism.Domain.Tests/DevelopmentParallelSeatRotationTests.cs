@@ -69,7 +69,7 @@ public sealed class DevelopmentParallelSeatRotationTests
         var initialClients = seats.Select(s => AsSeat(host, s.Token)).ToArray();
         var release = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        const string revisionTag = "W/\\"edonism-revision-0\\"";
+        const string revisionTag = "W/\"edonism-revision-0\"";
 
         try
         {

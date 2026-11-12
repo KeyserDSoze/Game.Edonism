@@ -66,3 +66,10 @@ Il confronto `compareOfflinePublicAuditReviews` confronta revisioni in ordine (i
 Test di valore: xUnit 2–8 seat conferma che la history pubblica è identica a tutti i posti e append-only da revisione 0 a 1; Playwright UI genera due export a r0/r1, li confronta su un secondo browser senza token, verifica fork falsificato ma singolarmente valido e id partita diverso, cancellazione dei risultati sui file invalidi e limite di byte; Playwright live confronta r0/r1 della reale API .NET e verifica che revisione, mano e autorizzazione restino invariati. 3/3 suite verdi sul commit finale `main` per chiudere #71.
 
 [Issue #71](https://github.com/KeyserDSoze/Game.Edonism/issues/71).
+
+
+## Regressione su import asincroni fuori ordine (#72)
+
+La CI Playwright impone intenzionalmente un ordine avverso di completamento di `File.text()` nel pannello offline Development: un secondo file vecchio viene risolto **dopo** il file più recente; oppure il primo import è sostituito (valido o invalido) mentre la lettura del secondo è pendente. In tutti i casi il contatore di generazione impedisce il ritorno di confronti o timeline precedenti. Anche un secondo upload con campi sensibili extra o di oltre 64 KiB prevale su una lettura vecchia, rimanendo `invalid`. Gli scenari usano un JSON v1 pubblico e sintetico con due posti e i validatori reali del browser, senza API, bearer, storage o mutazioni di partita; la variante mobile verifica il testo inglese e il layout. Gli altri gate .NET/xUnit e Playwright live restano obbligatori per il commit finale. Nessuna firma o prova di autenticità è introdotta.
+
+[Issue #72](https://github.com/KeyserDSoze/Game.Edonism/issues/72).

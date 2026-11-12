@@ -310,6 +310,96 @@ public sealed class DevelopmentHistoryEndpointTests
         }
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    public async Task PublicMovementFramesExposeExactlyEachActorsCurrentPosition(
+        int seatCount)
+    {
+        using var host = Host();
+        using var creator = host.CreateClient();
+        var players = Enumerable.Range(0, seatCount)
+            .Select(i => $"player-{i}").ToArray();
+        using var response = await creator.PostAsJsonAsync(
+            "/api/dev/matches/from-full-deck", new
+            {
+                playerIds = players,
+                characters = CharacterSetupFixture.Catalog(),
+                availableActivities = ActivitySetupFixture.Catalog(),
+                actionCardIds = ActionDeckFixture.ActionIds(),
+                electionDayCardId = ActionDeckFixture.ElectionDayId,
+                seed = 2026
+            });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using var created = await response.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert.NotNull(created);
+        var matchId = created.RootElement.GetProperty("matchId").GetGuid();
+        var credentials = created.RootElement.GetProperty("credentials")
+            .EnumerateArray().ToArray();
+        var initial = created.RootElement.GetProperty("state")
+            .GetProperty("players").EnumerateArray().ToArray();
+
+        using var firstActor = Actor(host,
+            credentials[0].GetProperty("token").GetString()!);
+        using var options = await firstActor.GetFromJsonAsync<JsonDocument>(
+            $"/api/dev/matches/{matchId}/turn-options");
+        Assert.NotNull(options);
+        var destination = options.RootElement
+            .GetProperty("freeMoveStreetIds")[0].GetString()!;
+        using var moved = await firstActor.PostAsJsonAsync(
+            $"/api/dev/matches/{matchId}/free-move",
+            new { destinationStreetId = destination, expectedRevision = 0 });
+        Assert.Equal(HttpStatusCode.OK, moved.StatusCode);
+
+        // Any other authorized seat must see exactly the same PUBLIC frame
+        // progression without gaining the first actor's private cards.
+        using var reader = Actor(host,
+            credentials[1].GetProperty("token").GetString()!);
+        using var historyResponse = await reader.GetAsync(
+            $"/api/dev/matches/{matchId}/history");
+        Assert.Equal(HttpStatusCode.OK, historyResponse.StatusCode);
+        var json = await historyResponse.Content.ReadAsStringAsync();
+        using var history = JsonDocument.Parse(json);
+        Assert.Equal(1,
+            history.RootElement.GetProperty("verifiedRevision").GetInt64());
+        var frames = history.RootElement.GetProperty("frames")
+            .EnumerateArray().ToArray();
+        Assert.Equal(2, frames.Length);
+        Assert.Equal("match-created",
+            frames[0].GetProperty("kind").GetString());
+        Assert.Equal("free-move",
+            frames[1].GetProperty("kind").GetString());
+        Assert.Equal(players[0],
+            frames[1].GetProperty("actorId").GetString());
+        Assert.Equal(players[0],
+            frames[1].GetProperty("activePlayerId").GetString());
+
+        for (var i = 0; i < seatCount; i++)
+        {
+            var before = frames[0].GetProperty("players")[i];
+            var after = frames[1].GetProperty("players")[i];
+            var origin = initial[i].GetProperty("streetId").GetString();
+            Assert.Equal(players[i], before.GetProperty("playerId").GetString());
+            Assert.Equal(players[i], after.GetProperty("playerId").GetString());
+            Assert.Equal(origin, before.GetProperty("streetId").GetString());
+            Assert.False(before.GetProperty("freeMoveUsed").GetBoolean());
+            Assert.Equal(i == 0 ? destination : origin,
+                after.GetProperty("streetId").GetString());
+            Assert.Equal(i == 0,
+                after.GetProperty("freeMoveUsed").GetBoolean());
+        }
+
+        foreach (var c in credentials)
+            Assert.DoesNotContain(c.GetProperty("token").GetString()!, json);
+        Assert.DoesNotContain("cardIds", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("drawPile", json, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task ProductionDoesNotExposeReplayHistory()
     {

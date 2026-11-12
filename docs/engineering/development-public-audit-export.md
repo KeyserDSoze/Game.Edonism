@@ -38,3 +38,16 @@ La funzione pura `verifyPublicAuditFile(unknown)` è indipendente dallo stato li
 La suite automatica comprende xUnit della cronologia pubblica del primo round dopo la terminazione di tutti i 2–8 posti, Playwright UI che esporta e reimporta in un browser fresco senza capability (2 e 8 posti, IT/EN/mobile, corruzioni e oversized), e Playwright live che ripete la verifica usando un export ottenuto dalla vera API .NET. La CI richiede 3/3 job verdi sullo stesso HEAD finale.
 
 [Issue #69](https://github.com/KeyserDSoze/Game.Edonism/issues/69).
+
+
+## Timeline read-only degli eventi pubblici offline (#70)
+
+Il controllo del file `edonism-public-audit-v1` (issue #69) può ora aprire un **visualizzatore consultabile delle revisioni**. Un secondo browser privo di token o partita può caricare un export da #68, iniziare dalla revisione 0, premere **Precedente/Successivo** fino all'ultima e leggere evento/attore, fase e turno, posizioni e flag `freeMoveUsed` degli altri 2–8 giocatori. A fine round il pannello mostra «saldo in attesa» senza far avanzare il gioco. Le revisioni estremali disabilitano i pulsanti, la UI è localizzata IT/EN e usa layout responsive mobile.
+
+Il visualizzatore **non** conserva il JSON grezzo: `buildOfflinePublicAuditReview(unknown)` prima chiama `verifyPublicAuditFile`, poi copia con allowlist ciascun evento/frame/giocatore già controllato in nuove strutture read-only. Cambiando file il risultato precedente sparisce immediatamente, anche se il parsing è asincrono; un nuovo file malformato o oltre 64 KiB non lascia visibili vecchi eventi. Il componente non chiama la API, non aggiorna sessione/hand/live markers, non modifica URL o storage e non può impersonare un altro posto.
+
+**Importante:** anche una sequenza di revisioni perfettamente coerente può essere costruita offline da un terzo, perché i file esportati rimangono **non firmati**. La timeline non prova la provenienza Edonism e non costituisce un replay autoritativo o una verifica delle regole future.
+
+Regressioni: xUnit 2–8 player verifica gli stessi frame pubblici prima/dopo una mossa legale, con flag freeMoveUsed e strade corrette per ogni attore, senza token; Playwright UI 2/8 player naviga 0→1→0 in un secondo browser, rifiuta il file manomesso e nasconde la timeline, ripristina indice a 0 con file valido; scenario full round 0→N prova il saldo in attesa; Playwright live con API .NET confronta le posizioni esportate e navigabili senza bearer, senza modificare il match. Il gate rimane 3/3 suite verdi sull'esatto HEAD finale di `main`.
+
+[Issue #70](https://github.com/KeyserDSoze/Game.Edonism/issues/70).

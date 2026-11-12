@@ -125,3 +125,77 @@ export function verifyPublicAuditFile(input: unknown): PublicAuditFileCheck | nu
     eventCount: input.events.length,
   };
 }
+
+
+/**
+ * The review is a fresh, explicitly projected copy of ONLY already-validated
+ * public fields. No raw JSON object, browser credential or command handler is
+ * retained. A valid unsigned file remains unauthenticated.
+ */
+export type OfflinePublicAuditTimelineStep = Readonly<{
+  revision: number;
+  kind: "match-created" | "free-move" | "turn-ended" | "round-settlement-pending";
+  actorId: string;
+  fromStreetId: string | null;
+  toStreetId: string | null;
+  phase: 0 | 1;
+  activePlayerId: string | null;
+  players: readonly Readonly<{
+    playerId: string;
+    streetId: string;
+    freeMoveUsed: boolean;
+  }>[];
+}>;
+
+export type OfflinePublicAuditReview = PublicAuditFileCheck & Readonly<{
+  steps: readonly OfflinePublicAuditTimelineStep[];
+}>;
+
+export function buildOfflinePublicAuditReview(
+  input: unknown,
+): OfflinePublicAuditReview | null {
+  const verified = verifyPublicAuditFile(input);
+  if (!verified) return null;
+
+  // The strict verifier has checked the shape, enums and every transition.
+  // Re-project ALL fields explicitly; never store input or spreads of it.
+  const record = input as {
+    events: Array<{
+      revision: number;
+      kind: OfflinePublicAuditTimelineStep["kind"];
+      actorId: string;
+      fromStreetId: string | null;
+      toStreetId: string | null;
+    }>;
+    frames: Array<{
+      revision: number;
+      phase: 0 | 1;
+      activePlayerId: string | null;
+      players: Array<{
+        playerId: string;
+        streetId: string;
+        freeMoveUsed: boolean;
+      }>;
+    }>;
+  };
+  return {
+    matchId: verified.matchId,
+    verifiedRevision: verified.verifiedRevision,
+    playerCount: verified.playerCount,
+    eventCount: verified.eventCount,
+    steps: record.events.map((event, index) => ({
+      revision: event.revision,
+      kind: event.kind,
+      actorId: event.actorId,
+      fromStreetId: event.fromStreetId,
+      toStreetId: event.toStreetId,
+      phase: record.frames[index].phase,
+      activePlayerId: record.frames[index].activePlayerId,
+      players: record.frames[index].players.map(player => ({
+        playerId: player.playerId,
+        streetId: player.streetId,
+        freeMoveUsed: player.freeMoveUsed,
+      })),
+    })),
+  };
+}

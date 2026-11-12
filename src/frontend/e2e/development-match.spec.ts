@@ -1559,6 +1559,27 @@ test("offline public replay validates completed two-seat round but rejects prema
         name: "completed-round.json", mimeType: "application/json", buffer: bytes,
       });
       await expect(status).toHaveAttribute("data-check", "valid");
+      const timeline = offline.getByTestId("dev-offline-timeline");
+      const revision = offline.getByTestId("dev-offline-timeline-revision");
+      const previous = offline.getByTestId("dev-offline-timeline-previous");
+      const next = offline.getByTestId("dev-offline-timeline-next");
+      await expect(timeline).toBeVisible();
+      await expect(revision).toHaveText("#0 / #2");
+      await expect(previous).toBeDisabled();
+      await expect(offline.getByTestId("dev-offline-timeline-players")
+        .getByTestId("dev-offline-timeline-player")).toHaveCount(2);
+      await next.click();
+      await expect(revision).toHaveText("#1 / #2");
+      await expect(offline.getByTestId("dev-offline-timeline-event"))
+        .toContainText("alice");
+      await next.click();
+      await expect(revision).toHaveText("#2 / #2");
+      await expect(next).toBeDisabled();
+      await expect(offline.getByTestId("dev-offline-timeline-turn"))
+        .toContainText("saldo in attesa");
+      await previous.click();
+      await expect(revision).toHaveText("#1 / #2");
+
       const forged = JSON.parse(bytes.toString("utf8")) as typeof data;
       forged.events[1].kind = "round-settlement-pending";
       await fileInput.setInputFiles({
@@ -1567,6 +1588,7 @@ test("offline public replay validates completed two-seat round but rejects prema
         buffer: Buffer.from(JSON.stringify(forged)),
       });
       await expect(status).toHaveAttribute("data-check", "invalid");
+      await expect(timeline).toHaveCount(0);
       await expect(offline.getByTestId("dev-session")).toHaveCount(0);
     } finally {
       await context.close();
@@ -1581,7 +1603,7 @@ for (const seatCount of [2, 8] as const) {
       // The eight-seat fixture renders a full 3D city and second browser.
       // Keep the complete tamper matrix on two seats, and the eight-seat
       // download/import plus one tamper guard within a bounded 60s budget.
-      test.setTimeout(seatCount === 8 ? 60_000 : 30_000);
+      test.setTimeout(seatCount === 8 ? 75_000 : 45_000);
       await mockMatchApi(page, { playerCount: seatCount });
       await page.goto("/");
       if (seatCount === 8)
@@ -1630,6 +1652,27 @@ for (const seatCount of [2, 8] as const) {
         await expect(status).toContainText(seatCount === 8
           ? "Internally consistent history: 8 players"
           : "Cronologia internamente coerente: 2 giocatori");
+        const timeline = offline.getByTestId("dev-offline-timeline");
+        const revision = offline.getByTestId("dev-offline-timeline-revision");
+        const previous = offline.getByTestId("dev-offline-timeline-previous");
+        const next = offline.getByTestId("dev-offline-timeline-next");
+        await expect(timeline).toBeVisible();
+        await expect(revision).toHaveText("#0 / #1");
+        await expect(previous).toBeDisabled();
+        await expect(timeline.getByTestId("dev-offline-timeline-player")).toHaveCount(seatCount);
+        await expect(timeline.getByTestId("dev-offline-timeline-player").first())
+          .toContainText("Movimento gratuito disponibile".replace(
+            "Movimento gratuito disponibile",
+            seatCount === 8 ? "Free move available" : "Movimento gratuito disponibile"));
+        await next.click();
+        await expect(revision).toHaveText("#1 / #1");
+        await expect(next).toBeDisabled();
+        await expect(timeline.getByTestId("dev-offline-timeline-event"))
+          .toContainText("planck");
+        await expect(timeline.getByTestId("dev-offline-timeline-player").first())
+          .toContainText("planck");
+        await previous.click();
+        await expect(revision).toHaveText("#0 / #1");
         await expect(offline.getByTestId("dev-session")).toHaveCount(0);
 
         const invalid = [
@@ -1644,6 +1687,7 @@ for (const seatCount of [2, 8] as const) {
           mutate(forged);
           await upload(Buffer.from(JSON.stringify(forged)));
           await expect(status).toHaveAttribute("data-check", "invalid");
+          await expect(timeline).toHaveCount(0);
         }
 
         if (seatCount === 2) {
@@ -1654,6 +1698,8 @@ for (const seatCount of [2, 8] as const) {
         }
         await upload(jsonBytes);
         await expect(status).toHaveAttribute("data-check", "valid");
+        await expect(revision).toHaveText("#0 / #1");
+        await expect(timeline).toBeVisible();
         await expect(offline.getByTestId("dev-session")).toHaveCount(0);
         expect(apiCalls).toBe(0);
         const browserState = await offline.evaluate(() => ({

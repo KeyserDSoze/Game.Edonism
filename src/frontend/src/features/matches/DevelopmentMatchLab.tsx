@@ -11,8 +11,8 @@ import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivi
 import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
 import { buildVerifiedPublicAuditExport } from "./publicAuditExport";
 import {
-  MaxPublicAuditImportBytes, verifyPublicAuditFile,
-  type PublicAuditFileCheck,
+  MaxPublicAuditImportBytes, buildOfflinePublicAuditReview,
+  type OfflinePublicAuditReview,
 } from "./verifyPublicAuditFile";
 import { verifiedPublicHistory, type PublicHistory } from "./verifiedPublicHistory";
 
@@ -250,7 +250,7 @@ export function DevelopmentMatchLab({
   // Purely local consistency check of an UNSIGNED public JSON. This state is
   // intentionally independent of session, seat, private hand and commands.
   const [offlineAudit, setOfflineAudit] = useState<
-    { status: "valid"; data: PublicAuditFileCheck }
+    { status: "valid"; data: OfflinePublicAuditReview; revision: number }
     | { status: "invalid" } | { status: "checking" } | null
   >(null);
   const offlineAuditRequest = useRef(0);
@@ -387,14 +387,30 @@ export function DevelopmentMatchLab({
     try {
       const raw = await file.text();
       if (request !== offlineAuditRequest.current) return;
-      const checked = verifyPublicAuditFile(JSON.parse(raw) as unknown);
+      const checked = buildOfflinePublicAuditReview(JSON.parse(raw) as unknown);
       setOfflineAudit(checked
-        ? { status: "valid", data: checked }
+        ? { status: "valid", data: checked, revision: 0 }
         : { status: "invalid" });
     } catch {
       if (request === offlineAuditRequest.current)
         setOfflineAudit({ status: "invalid" });
     }
+  }
+
+  // An offline review is derived only from the fully verified public file.
+  // It never updates the live map, game revision, seat token or HTTP state.
+  const offlineFrame = offlineAudit?.status === "valid"
+    ? offlineAudit.data.steps[offlineAudit.revision]
+    : null;
+
+  function navigateOfflineRevision(delta: number) {
+    setOfflineAudit(current => current?.status === "valid"
+      ? {
+          ...current,
+          revision: Math.max(0, Math.min(
+            current.data.verifiedRevision, current.revision + delta)),
+        }
+      : current);
   }
 
   // Download ONLY the currently authenticated, fully verified public replay.
@@ -1597,6 +1613,75 @@ export function DevelopmentMatchLab({
                       revision: offlineAudit.data.verifiedRevision,
                     })}
             </p>
+          )}
+          {offlineAudit?.status === "valid" && offlineFrame && (
+            <section data-testid="dev-offline-timeline"
+              className="space-y-2 rounded-lg border border-border bg-background p-3"
+              aria-label={t("dev.historyOfflineTimelineTitle")}>
+              <p className="text-xs font-semibold">
+                {t("dev.historyOfflineTimelineTitle")}
+              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2"
+                role="group" aria-label={t("dev.historyOfflineTimelineNav")}>
+                <Button type="button" variant="outline" size="sm"
+                  data-testid="dev-offline-timeline-previous"
+                  disabled={offlineAudit.revision === 0}
+                  onClick={() => navigateOfflineRevision(-1)}>
+                  {t("dev.historyPrevious")}
+                </Button>
+                <output data-testid="dev-offline-timeline-revision"
+                  className="text-xs font-medium" aria-live="polite">
+                  #{offlineFrame.revision} / #{offlineAudit.data.verifiedRevision}
+                </output>
+                <Button type="button" variant="outline" size="sm"
+                  data-testid="dev-offline-timeline-next"
+                  disabled={offlineAudit.revision >= offlineAudit.data.verifiedRevision}
+                  onClick={() => navigateOfflineRevision(1)}>
+                  {t("dev.historyNext")}
+                </Button>
+              </div>
+              <p data-testid="dev-offline-timeline-event"
+                className="text-xs leading-5">
+                {offlineFrame.kind === "match-created"
+                  ? t("dev.auditCreated")
+                  : offlineFrame.kind === "free-move"
+                    ? t("dev.auditMove", {
+                        actor: offlineFrame.actorId,
+                        from: offlineFrame.fromStreetId,
+                        to: offlineFrame.toStreetId,
+                      })
+                    : offlineFrame.kind === "turn-ended"
+                      ? t("dev.auditEnd", { actor: offlineFrame.actorId })
+                      : t("dev.auditPending", { actor: offlineFrame.actorId })}
+              </p>
+              <p data-testid="dev-offline-timeline-turn"
+                className="text-xs text-muted-foreground">
+                {offlineFrame.phase === 1
+                  ? t("dev.historySettlement")
+                  : t("dev.historyActor", { actor: offlineFrame.activePlayerId })}
+              </p>
+              <p className="text-[11px] font-semibold">
+                {t("dev.historyOfflinePositionsTitle")}
+              </p>
+              <ul data-testid="dev-offline-timeline-players"
+                className="space-y-1 text-xs">
+                {offlineFrame.players.map(player => (
+                  <li key={player.playerId} data-testid="dev-offline-timeline-player"
+                    className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <span className="font-medium">{player.playerId}</span>
+                    <span>{t("dev.historyOfflinePlayerPosition", {
+                      street: player.streetId,
+                    })}</span>
+                    <span>{player.freeMoveUsed
+                      ? t("dev.historyOfflineMoveUsed")
+                      : t("dev.historyOfflineMoveAvailable")}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[11px] leading-5 text-muted-foreground">
+                {t("dev.historyOfflineUnsigned")}
+              </p>
+            </section>
           )}
         </section>
 

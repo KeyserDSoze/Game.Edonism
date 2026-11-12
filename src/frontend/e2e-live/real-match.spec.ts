@@ -1365,6 +1365,30 @@ test("real .NET public replay download is internally consistent offline without 
       await expect(result).toHaveAttribute("data-check", "valid");
       await expect(result).toContainText("2 giocatori");
       await expect(result).toContainText("Origine non verificata");
+      const timeline = offline.getByTestId("dev-offline-timeline");
+      const revision = offline.getByTestId("dev-offline-timeline-revision");
+      const previous = offline.getByTestId("dev-offline-timeline-previous");
+      const next = offline.getByTestId("dev-offline-timeline-next");
+      await expect(timeline).toBeVisible();
+      await expect(revision).toHaveText("#0 / #1");
+      await expect(previous).toBeDisabled();
+      const initialStreet = (payload.frames[0] as {
+        players: Array<{ streetId: string }>;
+      }).players[0].streetId;
+      const afterStreet = (payload.frames[1] as {
+        players: Array<{ streetId: string }>;
+      }).players[0].streetId;
+      await expect(timeline.getByTestId("dev-offline-timeline-player").first())
+        .toContainText(initialStreet);
+      await next.click();
+      await expect(revision).toHaveText("#1 / #1");
+      await expect(next).toBeDisabled();
+      await expect(timeline.getByTestId("dev-offline-timeline-event"))
+        .toContainText(afterStreet);
+      await expect(timeline.getByTestId("dev-offline-timeline-player").first())
+        .toContainText(afterStreet);
+      await previous.click();
+      await expect(revision).toHaveText("#0 / #1");
       expect(apiCalls).toBe(0);
       await expect(offline.getByTestId("dev-session")).toHaveCount(0);
       expect(await offline.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))

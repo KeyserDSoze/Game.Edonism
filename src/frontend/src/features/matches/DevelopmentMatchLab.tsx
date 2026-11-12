@@ -1007,6 +1007,10 @@ export function DevelopmentMatchLab({
           || result.fromStreetId !== origin || !Array.isArray(result.routes)
           || result.routes.length !== expected.length) return;
 
+        const otherPlayerIds = new Set(state.players.filter(p =>
+          p.playerId !== seatId).map(p => p.playerId));
+        if (expected.some(lot => !otherPlayerIds.has(lot.ownerPlayerId)))
+          return;
         const bySlot = new Map(expected.map(lot => [lot.slotId, lot] as const));
         const seen = new Set<string>();
         let previousSteps = -1;

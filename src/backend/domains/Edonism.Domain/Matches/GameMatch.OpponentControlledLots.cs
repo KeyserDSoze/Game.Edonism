@@ -29,9 +29,15 @@ public sealed partial class GameMatch
 
         var streetBySlot = _board.Slots.ToDictionary(s => s.Id, s => s.StreetId,
             StringComparer.Ordinal);
+        var knownPlayers = state.Players.Select(p => p.PlayerId)
+            .ToHashSet(StringComparer.Ordinal);
         var routes = new List<MatchOpponentControlledLotRoute>();
         foreach (var control in state.ControlledActivities)
         {
+            if (!knownPlayers.Contains(control.OwnerPlayerId)
+                || !Enum.IsDefined(control.Posture))
+                throw new InvalidOperationException(
+                    "Controlled lot has invalid public owner or posture.");
             if (control.OwnerPlayerId == actorId) continue;
             if (!streetBySlot.TryGetValue(control.SlotId, out var street)
                 || _board.ShortestStreetPath(player.StreetId, street) is not { } path)

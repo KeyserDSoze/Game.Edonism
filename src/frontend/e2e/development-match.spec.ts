@@ -3233,3 +3233,15 @@ test("tampered opponent-controlled lot routes are hidden, never focusable", asyn
   await page.getByTestId("dev-end-turn").click();
   await expect(page.getByTestId("dev-revision")).toHaveText("1");
 });
+
+
+test("unknown public owner never becomes an opponent-lot map target", async ({ page }) => {
+  await mockMatchApi(page, { unknownOwner: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-opponent-lots-unavailable")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lots-list")).toHaveCount(0);
+  await expect(page.getByTestId("dev-focus-opponent-lot-S-01")).toHaveCount(0);
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+});

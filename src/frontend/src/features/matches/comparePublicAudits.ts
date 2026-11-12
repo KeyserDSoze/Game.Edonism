@@ -31,7 +31,9 @@ export function compareOfflinePublicAuditReviews(
   left: OfflinePublicAuditReview,
   right: OfflinePublicAuditReview,
 ): OfflinePublicAuditComparison {
-  if (left.matchId !== right.matchId)
+  // GUID strings are case-insensitive identifiers. Both validated inputs
+  // may use mixed casing even though exports normally use lowercase.
+  if (left.matchId.toLowerCase() !== right.matchId.toLowerCase())
     return { status: "different-match", firstDifferentRevision: null };
 
   const common = Math.min(left.steps.length, right.steps.length);

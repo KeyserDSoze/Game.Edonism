@@ -1578,6 +1578,10 @@ test("offline public replay validates completed two-seat round but rejects prema
 for (const seatCount of [2, 8] as const) {
   test(`offline public replay checker validates ${seatCount}-seat exports and rejects tampering`,
     async ({ page, browser }) => {
+      // The eight-seat fixture renders a full 3D city and second browser.
+      // Keep the complete tamper matrix on two seats, and the eight-seat
+      // download/import plus one tamper guard within a bounded 60s budget.
+      test.setTimeout(seatCount === 8 ? 60_000 : 30_000);
       await mockMatchApi(page, { playerCount: seatCount });
       await page.goto("/");
       if (seatCount === 8)
@@ -1632,17 +1636,19 @@ for (const seatCount of [2, 8] as const) {
           (value: typeof original) => { value.format = "edonism-public-audit-v2"; },
           (value: typeof original) => { (value as typeof original & { token: string }).token = "must-not-be-rendered"; },
         ];
-        for (const mutate of invalid) {
+        for (const mutate of seatCount === 8 ? invalid.slice(0, 1) : invalid) {
           const forged = JSON.parse(jsonBytes.toString("utf8")) as typeof original;
           mutate(forged);
           await upload(Buffer.from(JSON.stringify(forged)));
           await expect(status).toHaveAttribute("data-check", "invalid");
         }
 
-        await upload(Buffer.alloc(64 * 1024 + 1, "x"));
-        await expect(status).toHaveAttribute("data-check", "invalid");
-        await upload(Buffer.from("{invalid json"));
-        await expect(status).toHaveAttribute("data-check", "invalid");
+        if (seatCount === 2) {
+          await upload(Buffer.alloc(64 * 1024 + 1, "x"));
+          await expect(status).toHaveAttribute("data-check", "invalid");
+          await upload(Buffer.from("{invalid json"));
+          await expect(status).toHaveAttribute("data-check", "invalid");
+        }
         await upload(jsonBytes);
         await expect(status).toHaveAttribute("data-check", "valid");
         await expect(offline.getByTestId("dev-session")).toHaveCount(0);

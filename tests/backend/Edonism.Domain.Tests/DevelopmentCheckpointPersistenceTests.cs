@@ -347,11 +347,12 @@ public sealed class DevelopmentCheckpointPersistenceTests
         }
         var saved = temp.Files().Load(id);
         Assert.NotNull(saved);
+        var committedReceipts = saved.CommandReceipts!;
         Assert.Equal(new long[] { 1, seats + 1L },
-            saved.CommandReceipts!.Select(r => r.AcceptedRevision).ToArray());
-        Assert.Equal(key, saved.CommandReceipts[0].Key);
-        Assert.Equal(key, saved.CommandReceipts[1].Key);
-        Assert.NotEqual(saved.CommandReceipts[0].ActorId, saved.CommandReceipts[1].ActorId);
+            committedReceipts.Select(r => r.AcceptedRevision).ToArray());
+        Assert.Equal(key, committedReceipts[0].Key);
+        Assert.Equal(key, committedReceipts[1].Key);
+        Assert.NotEqual(committedReceipts[0].ActorId, committedReceipts[1].ActorId);
 
         var restored = new DevelopmentMatchStore(temp.Files());
         foreach (var bearer in tokens)

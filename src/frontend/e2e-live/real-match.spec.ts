@@ -2566,3 +2566,57 @@ test("real .NET: public opponent dossier follows a move in two browsers without 
     await guestContext.close();
   }
 });
+
+
+test("real .NET: opponent-controlled lot routes are bearer-bound and focusable without mutation",
+  async ({ page, request }) => {
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const endpoint = `http://127.0.0.1:5080/api/dev/matches/${id}/opponent-controlled-routes`;
+  const missing = await request.get(endpoint);
+  expect(missing.status()).toBe(404);
+  expect(missing.headers()["cache-control"]).toBe("no-store");
+
+  const response = await request.get(endpoint, { headers: auth(aliceToken) });
+  expect(response.status()).toBe(200);
+  expect(response.headers()["cache-control"]).toBe("no-store");
+  const result = await response.json() as {
+    matchId: string; playerId: string; verifiedRevision: number; fromStreetId: string;
+    routes: { slotId: string; ownerPlayerId: string; posture: number;
+      streetId: string; streetSteps: number; streetPath: string[] }[];
+  };
+  expect(result.matchId).toBe(id);
+  expect(result.playerId).toBe("alice");
+  expect(result.verifiedRevision).toBe(0);
+  expect(result.fromStreetId).toBe(created.state.players[0].streetId);
+  expect(result.routes).toHaveLength(1);
+  const bobLot = created.state.controlledActivities.find(c => c.ownerPlayerId === "bob")!;
+  const route = result.routes[0];
+  expect(route.ownerPlayerId).toBe("bob");
+  expect(route.slotId).toBe(bobLot.slotId);
+  expect(route.posture).toBe(bobLot.posture);
+  expect(route.streetPath).toHaveLength(route.streetSteps + 1);
+  const serialized = JSON.stringify(result);
+  for (const secret of [aliceToken, bobToken, "cardIds", "faction"])
+    expect(serialized).not.toContain(secret);
+
+  const row = page.getByTestId(`dev-opponent-lot-${route.slotId}`);
+  await expect(row).toHaveAttribute("data-owner", "bob");
+  await expect(row).toHaveAttribute("data-path", route.streetPath.join(">"));
+  await page.getByTestId(`dev-focus-opponent-lot-${route.slotId}`).click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await expect(page.getByTestId("city-tactical-target")).toContainText(route.slotId);
+  await expect(page.getByTestId("city-renderer"))
+    .toHaveAttribute("data-focus-path", route.streetPath.join(">"));
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+
+  const unchanged = await request.get(
+    `http://127.0.0.1:5080/api/dev/matches/${id}`,
+    { headers: auth(aliceToken) });
+  expect(unchanged.status()).toBe(200);
+  const state = await unchanged.json() as PublicMatch;
+  expect(state.revision).toBe(0);
+  expect(state.events).toHaveLength(1);
+});

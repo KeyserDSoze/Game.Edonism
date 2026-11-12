@@ -70,6 +70,8 @@ type MockOptions = {
   invalidRouteSteps?: boolean;
   invalidOtherSeatRoutes?: "revision" | "path" | "steps" | "count" | "identity";
   delayFirstAliceOtherSeatRoutes?: boolean;
+  invalidOpponentLots?: "revision" | "owner" | "path" | "posture" | "count" | "steps";
+  delayFirstAliceOpponentLots?: boolean;
   delayRotationAcknowledgement?: boolean;
 };
 
@@ -101,6 +103,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayedAliceTurnProgress = false;
   let delayedAliceRoutes = false;
   let delayedAliceOtherSeats = false;
+  let delayedAliceOpponentLots = false;
   const presentSeats = new Set<Seat>();
   const acceptedKeys = new Map<string, {
     kind: string; expectedRevision: number; destinationStreetId?: string;
@@ -328,6 +331,46 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           playerId: options.invalidPresence && id === "bob" ? "intruder" : id,
           isActive: presentSeats.has(id),
         })),
+      } });
+    }
+
+    if (path.endsWith("/opponent-controlled-routes")) {
+      const state = snapshot();
+      const origin = streets[seat];
+      const routes = state.controlledActivities
+        .filter(lot => lot.ownerPlayerId !== seat)
+        .map(lot => {
+          const streetId = lot.slotId.startsWith("N-") ? "gauss" : "einstein";
+          const streetPath = shortestStreetPath(origin, streetId) ?? [];
+          return {
+            slotId: lot.slotId,
+            ownerPlayerId: lot.ownerPlayerId,
+            posture: lot.posture,
+            streetId,
+            streetSteps: streetPath.length - 1,
+            streetPath,
+          };
+        }).sort((a, b) => a.streetSteps - b.streetSteps
+          || a.ownerPlayerId.localeCompare(b.ownerPlayerId)
+          || a.slotId.localeCompare(b.slotId));
+      if (routes.length && options.invalidOpponentLots) {
+        const first = routes[0];
+        if (options.invalidOpponentLots === "owner") first.ownerPlayerId = seat;
+        if (options.invalidOpponentLots === "path") first.streetPath = [origin, "main-square"];
+        if (options.invalidOpponentLots === "posture") first.posture = 99;
+        if (options.invalidOpponentLots === "steps") first.streetSteps++;
+        if (options.invalidOpponentLots === "count") routes.pop();
+      }
+      if (options.delayFirstAliceOpponentLots && seat === "alice"
+        && !delayedAliceOpponentLots) {
+        delayedAliceOpponentLots = true;
+        await new Promise(resolve => setTimeout(resolve, 900));
+      }
+      return reply({ status: 200, json: {
+        matchId: state.matchId, playerId: seat, round: state.round,
+        verifiedRevision: options.invalidOpponentLots === "revision"
+          ? revision + 99 : revision,
+        fromStreetId: origin, routes,
       } });
     }
 
@@ -3143,4 +3186,50 @@ test("tactical focus is cleared on seat token rotation and remote revocation", a
   await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
   await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
   await expect(page.getByTestId("city-renderer")).toHaveAttribute("data-focus-target", "");
+});
+
+
+// #84: public opponent-controlled lots are not permissions or game commands.
+test("verified opponent-controlled lots focus on the public map and switch seats", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-opponent-lots-count"))
+    .toContainText("1 attività pubbliche");
+  const bobLot = page.getByTestId("dev-opponent-lot-S-01");
+  await expect(bobLot).toHaveAttribute("data-owner", "bob");
+  await expect(bobLot).toHaveAttribute("data-posture", "0");
+  await expect(bobLot).toHaveAttribute("data-steps", "2");
+  await expect(bobLot).toHaveAttribute("data-path", "gauss>main-square>einstein");
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toHaveCount(0);
+  await page.getByTestId("dev-focus-opponent-lot-S-01").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await expect(page.getByTestId("city-tactical-target")).toContainText("S-01");
+  await expect(page.getByTestId("city-renderer"))
+    .toHaveAttribute("data-focus-path", "gauss>main-square>einstein");
+  await page.getByTestId("city-tactical-waypoint-2").click();
+  await expect(page.getByTestId("selected-street")).toHaveText("Viale Einstein");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+
+  await page.getByTestId("dev-seat-bob").click();
+  const aliceLot = page.getByTestId("dev-opponent-lot-N-01");
+  await expect(aliceLot).toHaveAttribute("data-owner", "alice");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toHaveCount(0);
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await page.getByTestId("dev-focus-opponent-lot-N-01").click();
+  await expect(page.getByTestId("city-tactical-target")).toContainText("N-01");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+});
+
+test("tampered opponent-controlled lot routes are hidden, never focusable", async ({ page }) => {
+  await mockMatchApi(page, { invalidOpponentLots: "path" });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-opponent-lots-unavailable")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lots-list")).toHaveCount(0);
+  await expect(page.getByTestId("dev-focus-opponent-lot-S-01")).toHaveCount(0);
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
 });

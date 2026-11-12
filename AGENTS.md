@@ -200,3 +200,6 @@ npm run test:e2e:live
 
 
 - **Encrypted HTTP rotation-vs-command recovery (#83):** combine the #79 Development command/rotation race with opt-in AES-GCM persistence and two cold ASP.NET Core host restarts. Both legitimate 200-before-revoke or 404-after-revoke schedules must preserve exactly the right durable revision/UUID receipt, new bearer and all 2–8 private hands. Old credentials remain 404; the new credential can retry the same UUID exactly once and later replay it after another cold host. Test both free-move/end-turn, public audit, wallets and peer snapshots. This is *not* Production distributed identity, and no further printed rules are implied. Require 3/3 CI on final main HEAD before closing #83.
+
+
+- **PvP public opponent-controlled lot scouting (#84):** the .NET Domain derives bearer-bound, audit-verified shortest street paths to every OTHER seat's controlled PUBLIC lot. Include public owner and henchman posture only, never hand/faction/capability, and never treat paths as combat, buying or move permission. React must compare every route to public owner/posture/board graph and require same actor, token and revision before read-only `opponent-lot` map focus. Cover 2–8 seats in xUnit, real HTTP 404/no-store, Playwright mocked tampering and real .NET browser; close only after three green CI gates on final `main` HEAD.

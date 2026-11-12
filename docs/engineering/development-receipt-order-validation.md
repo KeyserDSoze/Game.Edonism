@@ -20,3 +20,10 @@ xUnit: due UUID differenti per la revisione 1 e receipt autentici in ordine inve
 Questo è un controllo di **coerenza semantica** del checkpoint Development; non certifica la chiave AES-GCM contro un attaccante che può riscrivere l'intero stato, non realizza storage multiistanza o login Production (#13) e non determina nessun effetto di carte, elezione o economia (#4/#6).
 
 [Issue #61](https://github.com/KeyserDSoze/Game.Edonism/issues/61) · [Ledger](development-ledger.md). La feature si chiude soltanto dopo xUnit, Playwright UI mocked e Playwright live .NET verdi sul medesimo HEAD finale di `main`.
+
+
+## Risultato della prima CI completa
+
+La [CI #43178125562](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43178125562) sul commit [`a00cc85`](https://github.com/KeyserDSoze/Game.Edonism/commit/a00cc8538caad9cc35b3fa6c84b56cc2101673f0) è risultata **3/3 success**: **422/422 xUnit (0 skipped), 97/97 Playwright UI e 30/30 Playwright live .NET, totale 549/549 test**. Sono coperti i file AES-GCM re-encrypted impossibili (receipt duplicate o invertite), i 2–8 attori con receipts lecite distanziate, UUID uguali fra posti diversi, retry dopo riavvio e retry browser dopo ACK persa senza doppio evento.
+
+Durante la CI sono stati corretti **tre errori dei soli nuovi test**: annotazione nullable delle receipt, hardcode della strada iniziale non garantita nel fixture full deck e confronto diretto tra il comando `end-turn` e l'evento `turn-ended`. Le correzioni sono tracciate in #61 e non cambiano il contratto applicativo. La CI sul commit finale della documentazione e la chiusura vengono registrate nella stessa issue.

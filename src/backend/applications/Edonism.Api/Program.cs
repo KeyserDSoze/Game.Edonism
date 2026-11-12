@@ -113,25 +113,58 @@ if (app.Environment.IsDevelopment())
 // ASP.NET Core's endpoint router may return 415 for an invalid Content-Type
 // BEFORE a Minimal API endpoint filter or endpoint-metadata middleware runs.
 // For the TWO known Development mutation routes, authorize the bearer BEFORE
-// routing as well as again in the store before committing the command (#45).
-// This early gate does not inspect the command body, playerId or query string.
+// routing/model binding (#45), then bound the authenticated JSON body (#78).
+// The store authenticates again under the match lock before any mutation.
 if (app.Environment.IsDevelopment())
 {
     app.Use(async (context, next) =>
     {
-        if (HttpMethods.IsPost(context.Request.Method)
-            && DevelopmentCommandPreauthorization.TryMatchPath(
-                context.Request.Path, out var matchId)
-            && !context.RequestServices.GetRequiredService<DevelopmentMatchStore>()
-                .HasSeatAccess(matchId,
-                    context.Request.Headers["X-Edonism-Dev-Token"].ToString()))
+        if (!HttpMethods.IsPost(context.Request.Method)
+            || !DevelopmentCommandPreauthorization.TryMatchPath(
+                context.Request.Path, out var matchId))
         {
+            await next();
+            return;
+        }
+
+        var store = context.RequestServices.GetRequiredService<DevelopmentMatchStore>();
+        if (!store.HasSeatAccess(matchId,
+                context.Request.Headers["X-Edonism-Dev-Token"].ToString()))
+        {
+            // Authorization intentionally precedes Content-Length, body and
+            // Content-Type inspection so revoked/forged callers learn nothing
+            // about the command parser or its resource limits.
             await Results.NotFound(new { code = "match_not_found" })
                 .ExecuteAsync(context);
             return;
         }
 
-        await next();
+        if (context.Request.ContentLength
+            is > DevelopmentCommandPreauthorization.MaxJsonBytes)
+        {
+            await Results.Json(new { code = "dev_command_payload_too_large" },
+                statusCode: StatusCodes.Status413PayloadTooLarge)
+                .ExecuteAsync(context);
+            return;
+        }
+
+        // Content-Length can be absent (chunked) or dishonest. Buffer only
+        // max + 1 bytes, then replay a valid body unchanged to normal Minimal
+        // API JSON binding. No custom command parsing or gameplay occurs here.
+        await using var bounded = new MemoryStream();
+        if (!await DevelopmentBoundedRequestBody.TryBufferAsync(
+                context, bounded, DevelopmentCommandPreauthorization.MaxJsonBytes))
+        {
+            await Results.Json(new { code = "dev_command_payload_too_large" },
+                statusCode: StatusCodes.Status413PayloadTooLarge)
+                .ExecuteAsync(context);
+            return;
+        }
+
+        var original = context.Request.Body;
+        context.Request.Body = bounded;
+        try { await next(); }
+        finally { context.Request.Body = original; }
     });
 }
 // Explicit routing here prevents implicit routing from executing BEFORE

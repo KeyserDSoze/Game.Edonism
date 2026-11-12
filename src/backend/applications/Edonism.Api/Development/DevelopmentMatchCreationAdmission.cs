@@ -66,25 +66,7 @@ public sealed class DevelopmentMatchCreationAdmission
     /// has no Content-Length (chunked). On success, replay the same bytes to
     /// normal ASP.NET Core JSON binding; no creator body is parsed twice.
     /// </summary>
-    public static async Task<bool> TryBufferBodyAsync(
-        HttpContext context, MemoryStream buffer)
-    {
-        var block = new byte[8192];
-        long total = 0;
-        while (true)
-        {
-            var remaining = MaxJsonBytes - total + 1;
-            var read = await context.Request.Body.ReadAsync(
-                block.AsMemory(0, (int)Math.Min(block.Length, remaining)),
-                context.RequestAborted);
-            if (read == 0)
-            {
-                buffer.Position = 0;
-                return true;
-            }
-            total += read;
-            if (total > MaxJsonBytes) return false;
-            buffer.Write(block, 0, read);
-        }
-    }
+    public static Task<bool> TryBufferBodyAsync(
+        HttpContext context, MemoryStream buffer) =>
+        DevelopmentBoundedRequestBody.TryBufferAsync(context, buffer, MaxJsonBytes);
 }

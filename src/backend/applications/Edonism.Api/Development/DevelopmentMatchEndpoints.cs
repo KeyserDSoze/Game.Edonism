@@ -28,6 +28,11 @@ public sealed record CreateFullDevelopmentMatchRequest(
 /// </summary>
 internal static class DevelopmentCommandPreauthorization
 {
+    // Current Development command DTOs are tiny. Keep a strict transport
+    // ceiling before Minimal API model binding; future command contracts may
+    // deliberately revise this value with their own tests and documentation.
+    public const long MaxJsonBytes = 4 * 1024;
+
     public static bool TryMatchPath(PathString path, out Guid matchId)
     {
         matchId = Guid.Empty;

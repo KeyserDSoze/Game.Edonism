@@ -1523,6 +1523,123 @@ test("saturated conditional polling recovers without revoking private hand or re
   expect(JSON.stringify(data)).not.toContain("b".repeat(64));
 });
 
+// #71: compare independently verified unsigned exports in a new browser,
+// with NO bearer or API access. A coherent forgery can still be detected as a
+// fork against another history, but neither version is authenticated.
+for (const playerCount of [2, 8] as const) {
+  test(`two public replay exports compare as same/prefix/fork for ${playerCount} seats`,
+    async ({ page, browser }) => {
+      test.setTimeout(playerCount === 8 ? 90_000 : 60_000);
+      await mockMatchApi(page, { playerCount });
+      await page.goto("/");
+      if (playerCount === 8)
+        await page.getByTestId("dev-player-count").selectOption("8");
+      await page.getByTestId("dev-create").click();
+      const exportButton = page.getByTestId("dev-public-audit-export");
+      await expect(exportButton).toBeEnabled();
+
+      const firstDownload = page.waitForEvent("download");
+      await exportButton.click();
+      const revisionZero = await firstDownload;
+      const r0 = await readFile(await revisionZero.path());
+      await page.getByTestId("dev-move-planck").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("1");
+      await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
+      await expect(exportButton).toBeEnabled();
+      const secondDownload = page.waitForEvent("download");
+      await exportButton.click();
+      const revisionOne = await secondDownload;
+      const r1 = await readFile(await revisionOne.path());
+      await page.close(); // Free the 3D renderer before offline comparison.
+
+      const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
+      try {
+        const offline = await context.newPage();
+        let apiCalls = 0;
+        await offline.route("**/api/**", async route => {
+          apiCalls++;
+          await route.abort();
+        });
+        await offline.goto("/");
+        if (playerCount === 8)
+          await offline.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+        const firstInput = offline.getByTestId("dev-public-audit-import-file");
+        const secondInput = offline.getByTestId("dev-public-audit-compare-file");
+        const compare = offline.getByTestId("dev-public-audit-compare-status");
+        const upload = async (input: typeof firstInput, bytes: Buffer) =>
+          input.setInputFiles({
+            name: "received-public-audit.json", mimeType: "application/json",
+            buffer: bytes,
+          });
+        await upload(firstInput, r0);
+        await expect(offline.getByTestId("dev-public-audit-import-status"))
+          .toHaveAttribute("data-check", "valid");
+        await expect(offline.getByTestId("dev-offline-timeline-revision"))
+          .toHaveText("#0 / #0");
+        await upload(secondInput, r0);
+        await expect(compare).toHaveAttribute("data-compare", "identical");
+        await upload(secondInput, r1);
+        await expect(compare).toHaveAttribute("data-compare", "left-prefix");
+
+        // Replacing the base file discards the previous comparison.
+        await upload(firstInput, r1);
+        await expect(compare).toHaveCount(0);
+        await expect(offline.getByTestId("dev-public-audit-import-status"))
+          .toHaveAttribute("data-check", "valid");
+        await expect(offline.getByTestId("dev-offline-timeline-revision"))
+          .toHaveText("#0 / #1");
+        await upload(secondInput, r0);
+        await expect(compare).toHaveAttribute("data-compare", "right-prefix");
+        await upload(secondInput, r1);
+        await expect(compare).toHaveAttribute("data-compare", "identical");
+
+        const divergent = JSON.parse(r1.toString("utf8")) as {
+          matchId: string;
+          events: Array<{ kind: string; fromStreetId: string | null; toStreetId: string | null }>;
+          frames: Array<{
+            kind: string; activePlayerId: string | null;
+            players: Array<{ playerId: string; streetId: string; freeMoveUsed: boolean }>
+          }>;
+        };
+        divergent.events[1].kind = "turn-ended";
+        divergent.events[1].fromStreetId = null;
+        divergent.events[1].toStreetId = null;
+        divergent.frames[1].kind = "turn-ended";
+        divergent.frames[1].activePlayerId = divergent.frames[0].players[1].playerId;
+        divergent.frames[1].players = divergent.frames[0].players;
+        await upload(secondInput, Buffer.from(JSON.stringify(divergent)));
+        await expect(compare).toHaveAttribute("data-compare", "divergent");
+        await expect(compare).toContainText("#1");
+
+        const differentMatch = JSON.parse(r1.toString("utf8")) as { matchId: string };
+        differentMatch.matchId = "00000000-0000-0000-0000-000000000099";
+        await upload(secondInput, Buffer.from(JSON.stringify(differentMatch)));
+        await expect(compare).toHaveAttribute("data-compare", "different-match");
+
+        const unsafe = JSON.parse(r1.toString("utf8")) as { token?: string };
+        unsafe.token = "private-token-must-never-be-displayed";
+        await upload(secondInput, Buffer.from(JSON.stringify(unsafe)));
+        await expect(compare).toHaveAttribute("data-compare", "invalid");
+        await expect(compare).not.toContainText(unsafe.token);
+        if (playerCount === 2) {
+          await upload(secondInput, Buffer.alloc(64 * 1024 + 1, "x"));
+          await expect(compare).toHaveAttribute("data-compare", "invalid");
+        }
+        await upload(firstInput, Buffer.from("{not json"));
+        await expect(compare).toHaveCount(0);
+        await expect(offline.getByTestId("dev-offline-timeline")).toHaveCount(0);
+        await expect(offline.getByTestId("dev-public-audit-import-status"))
+          .toHaveAttribute("data-check", "invalid");
+        await expect(offline.getByTestId("dev-session")).toHaveCount(0);
+        expect(apiCalls).toBe(0);
+        expect(await offline.evaluate(() =>
+          document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+      } finally {
+        await context.close();
+      }
+    });
+}
+
 test("offline public replay validates completed two-seat round but rejects premature settlement",
   async ({ page, browser }) => {
     await mockMatchApi(page);

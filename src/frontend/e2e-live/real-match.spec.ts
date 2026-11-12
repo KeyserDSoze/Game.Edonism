@@ -1318,6 +1318,85 @@ test("real .NET: full Alice long-poll quota returns 429 without starving Bob bro
   }
 });
 
+test("real .NET public audits compare as append-only across an authorized move",
+  async ({ page, browser, request }) => {
+    const match = await startRealMatch(page);
+    const matchId = match.matchId;
+    const alice = tokenFor(match, "alice");
+    const bob = tokenFor(match, "bob");
+    const url = `http://127.0.0.1:5080/api/dev/matches/${matchId}`;
+    const exportButton = page.getByTestId("dev-public-audit-export");
+    await expect(exportButton).toBeEnabled();
+
+    const initialDownload = page.waitForEvent("download");
+    await exportButton.click();
+    const r0 = await initialDownload;
+    const zero = await readFile(await r0.path());
+    const move = page.locator('[data-testid^="dev-move-"]:not([disabled])').first();
+    await move.click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
+    await expect(exportButton).toBeEnabled();
+    const laterDownload = page.waitForEvent("download");
+    await exportButton.click();
+    const r1 = await laterDownload;
+    const one = await readFile(await r1.path());
+
+    const stateBefore = await request.get(url, { headers: auth(bob) });
+    expect(stateBefore.status()).toBe(200);
+    const before = await stateBefore.json() as { revision: number; activePlayerId: string };
+    expect(before.revision).toBe(1);
+    await page.close();
+
+    const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
+    try {
+      const offline = await context.newPage();
+      let apiCalls = 0;
+      await offline.route("**/api/**", async route => {
+        apiCalls++;
+        await route.abort();
+      });
+      await offline.goto("/");
+      await expect(offline.getByTestId("dev-session")).toHaveCount(0);
+      const upload = async (testId: string, buffer: Buffer) =>
+        offline.getByTestId(testId).setInputFiles({
+          name: "public-evidence.json", mimeType: "application/json", buffer,
+        });
+      await upload("dev-public-audit-import-file", zero);
+      await expect(offline.getByTestId("dev-public-audit-import-status"))
+        .toHaveAttribute("data-check", "valid");
+      await upload("dev-public-audit-compare-file", one);
+      const comparison = offline.getByTestId("dev-public-audit-compare-status");
+      await expect(comparison).toHaveAttribute("data-compare", "left-prefix");
+      await expect(comparison).toContainText("versione precedente");
+      await upload("dev-public-audit-compare-file", zero);
+      await expect(comparison).toHaveAttribute("data-compare", "identical");
+      await upload("dev-public-audit-import-file", one);
+      await expect(comparison).toHaveCount(0);
+      await expect(offline.getByTestId("dev-public-audit-import-status"))
+        .toHaveAttribute("data-check", "valid");
+      await upload("dev-public-audit-compare-file", zero);
+      await expect(comparison).toHaveAttribute("data-compare", "right-prefix");
+      expect(apiCalls).toBe(0);
+      await expect(offline.getByTestId("dev-session")).toHaveCount(0);
+    } finally {
+      await context.close();
+    }
+    const stateAfter = await request.get(url, { headers: auth(bob) });
+    expect(stateAfter.status()).toBe(200);
+    const after = await stateAfter.json() as { revision: number; activePlayerId: string };
+    expect(after).toEqual(before);
+    const hand = await request.get(url + "/hand", { headers: auth(alice) });
+    expect(hand.status()).toBe(200);
+    const privateHand = await hand.json() as Hand;
+    for (const card of privateHand.cardIds) {
+      expect(zero.toString("utf8")).not.toContain(card);
+      expect(one.toString("utf8")).not.toContain(card);
+    }
+    expect(one.toString("utf8")).not.toContain(alice);
+    expect(one.toString("utf8")).not.toContain(bob);
+  });
+
 test("real .NET public replay download is internally consistent offline without a bearer",
   async ({ page, browser, request }) => {
     const match = await startRealMatch(page);

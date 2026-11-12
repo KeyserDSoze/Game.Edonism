@@ -14,6 +14,10 @@ import {
   MaxPublicAuditImportBytes, buildOfflinePublicAuditReview,
   type OfflinePublicAuditReview,
 } from "./verifyPublicAuditFile";
+import {
+  compareOfflinePublicAuditReviews,
+  type OfflinePublicAuditComparison,
+} from "./comparePublicAudits";
 import { verifiedPublicHistory, type PublicHistory } from "./verifiedPublicHistory";
 
 type DemoCredential = Readonly<{ playerId: string; token: string }>;
@@ -254,6 +258,11 @@ export function DevelopmentMatchLab({
     | { status: "invalid" } | { status: "checking" } | null
   >(null);
   const offlineAuditRequest = useRef(0);
+  const [offlineComparison, setOfflineComparison] = useState<
+    { status: "checking" } | { status: "invalid" }
+    | { status: "compared"; result: OfflinePublicAuditComparison } | null
+  >(null);
+  const offlineComparisonRequest = useRef(0);
   // Monotonic authority guards: HTTP polling/commands may resolve out of order.
   const currentMatchId = useRef<string | null>(null);
   const currentRevision = useRef(-1);
@@ -374,6 +383,10 @@ export function DevelopmentMatchLab({
 
   async function checkOfflinePublicAudit(file: File | null) {
     const request = ++offlineAuditRequest.current;
+    // A new primary file immediately invalidates any comparison. A late
+    // secondary File.text() cannot resurrect an older result.
+    ++offlineComparisonRequest.current;
+    setOfflineComparison(null);
     if (!file) {
       setOfflineAudit(null);
       return;
@@ -394,6 +407,35 @@ export function DevelopmentMatchLab({
     } catch {
       if (request === offlineAuditRequest.current)
         setOfflineAudit({ status: "invalid" });
+    }
+  }
+
+  async function checkOfflineComparison(file: File | null) {
+    const request = ++offlineComparisonRequest.current;
+    const primaryRequest = offlineAuditRequest.current;
+    const primary = offlineAudit?.status === "valid" ? offlineAudit.data : null;
+    if (!file || !primary) {
+      setOfflineComparison(null);
+      return;
+    }
+    setOfflineComparison({ status: "checking" });
+    if (file.size === 0 || file.size > MaxPublicAuditImportBytes) {
+      setOfflineComparison({ status: "invalid" });
+      return;
+    }
+    try {
+      const raw = await file.text();
+      if (request !== offlineComparisonRequest.current
+        || primaryRequest !== offlineAuditRequest.current) return;
+      const candidate = buildOfflinePublicAuditReview(JSON.parse(raw) as unknown);
+      setOfflineComparison(candidate
+        ? { status: "compared",
+            result: compareOfflinePublicAuditReviews(primary, candidate) }
+        : { status: "invalid" });
+    } catch {
+      if (request === offlineComparisonRequest.current
+        && primaryRequest === offlineAuditRequest.current)
+        setOfflineComparison({ status: "invalid" });
     }
   }
 
@@ -1613,6 +1655,50 @@ export function DevelopmentMatchLab({
                       revision: offlineAudit.data.verifiedRevision,
                     })}
             </p>
+          )}
+          {offlineAudit?.status === "valid" && (
+            <section data-testid="dev-public-audit-compare"
+              className="space-y-2 rounded-lg border border-border bg-background p-3"
+              aria-label={t("dev.historyCompareTitle")}>
+              <p className="text-xs font-semibold">{t("dev.historyCompareTitle")}</p>
+              <label className="block space-y-1 text-xs">
+                <span>{t("dev.historyCompareChoose")}</span>
+                <input type="file" accept=".json,application/json"
+                  data-testid="dev-public-audit-compare-file"
+                  className="block w-full min-w-0 rounded-md border border-input bg-background p-2 text-xs"
+                  onChange={event => {
+                    const file = event.currentTarget.files?.[0] ?? null;
+                    event.currentTarget.value = "";
+                    void checkOfflineComparison(file);
+                  }} />
+              </label>
+              {offlineComparison && (
+                <p role="status" aria-live="polite"
+                  data-testid="dev-public-audit-compare-status"
+                  data-compare={offlineComparison.status === "compared"
+                    ? offlineComparison.result.status : offlineComparison.status}
+                  className="text-xs font-medium">
+                  {offlineComparison.status === "checking"
+                    ? t("dev.historyCompareChecking")
+                    : offlineComparison.status === "invalid"
+                      ? t("dev.historyCompareInvalid")
+                      : offlineComparison.result.status === "identical"
+                        ? t("dev.historyCompareIdentical")
+                        : offlineComparison.result.status === "left-prefix"
+                          ? t("dev.historyCompareLeftPrefix")
+                          : offlineComparison.result.status === "right-prefix"
+                            ? t("dev.historyCompareRightPrefix")
+                            : offlineComparison.result.status === "different-match"
+                              ? t("dev.historyCompareDifferentMatch")
+                              : t("dev.historyCompareDivergent", {
+                                  revision: offlineComparison.result.firstDifferentRevision,
+                                })}
+                </p>
+              )}
+              <p className="text-[11px] leading-5 text-muted-foreground">
+                {t("dev.historyCompareUnsigned")}
+              </p>
+            </section>
           )}
           {offlineAudit?.status === "valid" && offlineFrame && (
             <section data-testid="dev-offline-timeline"

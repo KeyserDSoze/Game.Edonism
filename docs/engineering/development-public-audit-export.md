@@ -51,3 +51,16 @@ Il visualizzatore **non** conserva il JSON grezzo: `buildOfflinePublicAuditRevie
 Regressioni: xUnit 2–8 player verifica gli stessi frame pubblici prima/dopo una mossa legale, con flag freeMoveUsed e strade corrette per ogni attore, senza token; Playwright UI 2/8 player naviga 0→1→0 in un secondo browser, rifiuta il file manomesso e nasconde la timeline, ripristina indice a 0 con file valido; scenario full round 0→N prova il saldo in attesa; Playwright live con API .NET confronta le posizioni esportate e navigabili senza bearer, senza modificare il match. Il gate rimane 3/3 suite verdi sull'esatto HEAD finale di `main`.
 
 [Issue #70](https://github.com/KeyserDSoze/Game.Edonism/issues/70).
+
+
+## Confronto di due export pubblici non firmati (#71)
+
+Quando due giocatori condividono esportazioni `edonism-public-audit-v1` del medesimo match, il primo browser può verificare il JSON di ciascuna e compararne gli eventi/frame **alla medesima revisione pubblica**, senza token, login né rete. Dopo un primo import valido appare **Confronta due replay pubblici offline** / **Compare two offline public replays**: il secondo file è sempre trattato come non attendibile, con limite prelettura di **64 KiB** e verifica strutturale completa. Il programma conserva solo proiezioni whitelist degli eventi e delle posizioni, non dati sorgente con chiavi future.
+
+Il confronto `compareOfflinePublicAuditReviews` confronta revisioni in ordine (inclusi attore, genere di evento, origine/destinazione, fase, turno, lista ordinata dei 2–8 giocatori, posizione e flag movimento). Gli esiti sono `identical` se tutte le revisioni coincidono, `left-prefix` se il primo è un prefisso esatto del secondo, `right-prefix` per l'inverso, `divergent` con la **prima** revisione discordante, e `different-match` per GUID differenti. Un file invalido, con dati privati extra o oltre il limite **non viene confrontato**. Sostituendo il primo file il confronto precedente sparisce immediatamente e viene invalidata qualsiasi vecchia lettura asincrona del secondo.
+
+**Attenzione:** i due JSON sono **non firmati**. Possono essere entrambi coerenti e diversi perché almeno uno è falsificato, ma il software non può dimostrarne l'origine né attribuire responsabilità. Anche due file identici non provano un evento di server. Questa è una funzione Development di sola lettura; non autentica, non ripristina partite e non esegue comandi.
+
+Test di valore: xUnit 2–8 seat conferma che la history pubblica è identica a tutti i posti e append-only da revisione 0 a 1; Playwright UI genera due export a r0/r1, li confronta su un secondo browser senza token, verifica fork falsificato ma singolarmente valido e id partita diverso, cancellazione dei risultati sui file invalidi e limite di byte; Playwright live confronta r0/r1 della reale API .NET e verifica che revisione, mano e autorizzazione restino invariati. 3/3 suite verdi sul commit finale `main` per chiudere #71.
+
+[Issue #71](https://github.com/KeyserDSoze/Game.Edonism/issues/71).

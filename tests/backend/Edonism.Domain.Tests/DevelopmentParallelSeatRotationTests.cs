@@ -30,14 +30,18 @@ public sealed class DevelopmentParallelSeatRotationTests
 
     private static async Task<(Guid Id, Seat[] Seats)> Create(HttpClient creator, int count)
     {
-        var players = BoardCatalog.LoadDefault().Slots.Take(count)
-            .Select((slot, i) => new
-            {
-                playerId = $"seat-{i}",
-                startingSlotId = slot.Id
-            }).ToArray();
+        var players = Enumerable.Range(0, count)
+            .Select(i => $"seat-{i}").ToArray();
         using var response = await creator.PostAsJsonAsync(
-            "/api/dev/matches/", new { players });
+            "/api/dev/matches/from-full-deck", new
+            {
+                playerIds = players,
+                characters = CharacterSetupFixture.Catalog(),
+                availableActivities = ActivitySetupFixture.Catalog(),
+                actionCardIds = ActionDeckFixture.ActionIds(),
+                electionDayCardId = ActionDeckFixture.ElectionDayId,
+                seed = 2026
+            });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         using var json = await response.Content.ReadFromJsonAsync<JsonDocument>();
         Assert.NotNull(json);

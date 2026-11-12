@@ -1611,6 +1611,12 @@ for (const playerCount of [2, 8] as const) {
         await expect(compare).toHaveAttribute("data-compare", "divergent");
         await expect(compare).toContainText("#1");
 
+        // The same GUID with different hex casing still identifies ONE match.
+        const uppercase = JSON.parse(r1.toString("utf8")) as { matchId: string };
+        uppercase.matchId = uppercase.matchId.toUpperCase();
+        await upload(secondInput, Buffer.from(JSON.stringify(uppercase)));
+        await expect(compare).toHaveAttribute("data-compare", "identical");
+
         const differentMatch = JSON.parse(r1.toString("utf8")) as { matchId: string };
         differentMatch.matchId = "00000000-0000-0000-0000-000000000099";
         await upload(secondInput, Buffer.from(JSON.stringify(differentMatch)));

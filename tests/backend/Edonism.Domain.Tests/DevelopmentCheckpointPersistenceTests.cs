@@ -297,7 +297,10 @@ public sealed class DevelopmentCheckpointPersistenceTests
             Assert.Contains(saved.Checkpoint.State.Events,
                 e => e.Revision == receipt.AcceptedRevision
                     && e.ActorId == receipt.ActorId
-                    && e.Kind == receipt.Kind));
+                    && (receipt.Kind == "end-turn"
+                        ? e.Kind is "turn-ended" or "round-settlement-pending"
+                        : e.Kind == "free-move"
+                            && e.ToStreetId == receipt.DestinationStreetId)));
         var digests = saved.TokenDigests.ToDictionary(kv => kv.Key,
             kv => Convert.FromHexString(kv.Value), StringComparer.Ordinal);
         temp.Files().Save(saved.Checkpoint, digests, altered);

@@ -73,3 +73,14 @@ Test di valore: xUnit 2–8 seat conferma che la history pubblica è identica a 
 La CI Playwright impone intenzionalmente un ordine avverso di completamento di `File.text()` nel pannello offline Development: un secondo file vecchio viene risolto **dopo** il file più recente; oppure il primo import è sostituito (valido o invalido) mentre la lettura del secondo è pendente. In tutti i casi il contatore di generazione impedisce il ritorno di confronti o timeline precedenti. Anche un secondo upload con campi sensibili extra o di oltre 64 KiB prevale su una lettura vecchia, rimanendo `invalid`. Gli scenari usano un JSON v1 pubblico e sintetico con due posti e i validatori reali del browser, senza API, bearer, storage o mutazioni di partita; la variante mobile verifica il testo inglese e il layout. Gli altri gate .NET/xUnit e Playwright live restano obbligatori per il commit finale. Nessuna firma o prova di autenticità è introdotta.
 
 [Issue #72](https://github.com/KeyserDSoze/Game.Edonism/issues/72).
+
+
+## Dettaglio della prima divergenza fra due replay pubblici (#73)
+
+Nel laboratorio Development, quando **due export v1 individualmente validi dello stesso match** presentano revisioni pubbliche discordanti, una scheda in due colonne (impilate su mobile) mostra il **primo frame differente** dei due file: evento e attore, strade origine/destinazione, fase, turno attivo e tutti i giocatori con ID, strada e flag di movimento, preservando l'ordine originale dei posti. La differenza può derivare da due eventi alternativi entrambi coerenti con il proprio file, da posizioni iniziali discordanti o da un ordinamento differente. Nessuna delle due versioni è dichiarata autentica.
+
+La funzione pura `compareOfflinePublicAuditReviews` **copia esplicitamente soltanto i campi pubblici** dei due frame discordanti **dopo** che ciascun JSON è stato verificato da `buildOfflinePublicAuditReview`. Non trattiene i payload di input né intere nuove cronologie; campi aggiuntivi e file oltre 64 KiB sono respinti. Il dettaglio compare solo nello stato `divergent`: non per cronologie identiche, prefissi, partite differenti o file invalidi. Il caricamento di un nuovo primo o secondo file cancella il dettaglio precedente e rimangono attive le protezioni contro letture asincrone tardive (#72). Il pannello è IT/EN, mobile, senza WebGL e non chiama API né modifica il gioco.
+
+**Gli export restano non firmati e falsificabili:** il confronto non certifica alcuna provenienza, non attribuisce colpe e non autorizza comandi. I test Playwright sintetici per 2 e 8 giocatori coprono due eventi diversi a r1, divergenze di posizione e ordine alla genesi r0, reset, dati sensibili extra, mismatch del match ID, prefissi e viewport mobile EN; le suite xUnit e Playwright contro .NET reale rimangono gate obbligatori su main.
+
+[Issue #73](https://github.com/KeyserDSoze/Game.Edonism/issues/73).

@@ -1149,6 +1149,7 @@ test("real .NET: lost command ACK is retried with same UUID and commits exactly 
 }) => {
   const match = await startRealMatch(page);
   const aliceToken = tokenFor(match, "alice");
+  const bobToken = tokenFor(match, "bob");
   const id = match.matchId;
   const api = `http://127.0.0.1:5080/api/dev/matches/${id}`;
   const commandPath = `/api/dev/matches/${id}/end-turn`;
@@ -1204,6 +1205,33 @@ test("real .NET: lost command ACK is retried with same UUID and commits exactly 
   const last = await repeated.json() as PublicMatch;
   expect(last.revision).toBe(1);
   expect(last.events).toHaveLength(2);
+
+  // #61: two different seats may legally submit the SAME UUID, but must
+  // still produce distinct increasing accepted revisions. An Alice retry
+  // after Bob commits must never append another event or access Bob's hand.
+  const bobBefore = await request.get(`${api}/hand`, { headers: auth(bobToken) });
+  expect(bobBefore.status()).toBe(200);
+  const bobCards = (await bobBefore.json() as Hand).cardIds;
+  const bobEnd = await request.post(`${api}/end-turn`, {
+    headers: { ...auth(bobToken), "Idempotency-Key": attemptedKeys[0] },
+    data: { expectedRevision: 1 },
+  });
+  expect(bobEnd.status()).toBe(200);
+  expect((await bobEnd.json() as PublicMatch).revision).toBe(2);
+  const aliceAfterBob = await request.post(`${api}/end-turn`, {
+    headers: { ...auth(aliceToken), "Idempotency-Key": attemptedKeys[0] },
+    data: { expectedRevision: 0 },
+  });
+  expect(aliceAfterBob.status()).toBe(200);
+  const final = await aliceAfterBob.json() as PublicMatch;
+  expect(final.revision).toBe(2);
+  expect(final.events).toHaveLength(3);
+  expect(final.events[2].kind).toBe("round-settlement-pending");
+  const bobAfter = await request.get(`${api}/hand?playerId=alice`, {
+    headers: auth(bobToken),
+  });
+  expect(bobAfter.status()).toBe(200);
+  expect((await bobAfter.json() as Hand).cardIds).toEqual(bobCards);
 
   const storage = await page.evaluate(() => ({
     url: location.href, local: Object.values(localStorage),

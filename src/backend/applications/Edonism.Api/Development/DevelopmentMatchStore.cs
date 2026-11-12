@@ -268,7 +268,14 @@ public sealed class DevelopmentMatchStore
                             r.Kind == "free-move"
                                 ? e.Kind == "free-move" && e.ToStreetId == r.DestinationStreetId
                                 : e.Kind is "turn-ended" or "round-settlement-pending")))
-                || receipts.Select(r => (r.ActorId, r.Key)).Distinct().Count() != receipts.Length)
+                || receipts.Select(r => (r.ActorId, r.Key)).Distinct().Count() != receipts.Length
+                // The store appends at most ONE receipt per successfully
+                // committed revision. Omitted receipts are legal (no UUID,
+                // capped retention), but two UUIDs for the same event or a
+                // reordered receipt list can never be emitted by TryExecute.
+                // Reject an ambiguous restart before any seat is published.
+                || receipts.Zip(receipts.Skip(1), (previous, current) =>
+                    previous.AcceptedRevision >= current.AcceptedRevision).Any(invalid => invalid))
                 return false;
 
             entry = _matches.GetOrAdd(matchId, _ => new Entry(match, hashes, receipts));

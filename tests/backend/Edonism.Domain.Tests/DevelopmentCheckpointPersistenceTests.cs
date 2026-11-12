@@ -255,6 +255,129 @@ public sealed class DevelopmentCheckpointPersistenceTests
         Assert.Equal(3, lateReplay.State.Events.Count);
     }
 
+    [Theory]
+    [InlineData("same-revision-different-uuids")]
+    [InlineData("reversed-order")]
+    public void ForgedDuplicateOrUnorderedAcceptedRevisionsDenyEverySeatAfterRestart(string tamper)
+    {
+        using var temp = new TempDirectory();
+        var original = new DevelopmentMatchStore(temp.Files());
+        var created = Create(original);
+        var alice = created.Credentials.Single(x => x.PlayerId == "alice").Token;
+        var bob = created.Credentials.Single(x => x.PlayerId == "bob").Token;
+        var id = created.MatchId;
+
+        Assert.True(original.TryFreeMove(id, alice, "planck", 0,
+            out var moved, Guid.NewGuid().ToString("D")));
+        Assert.True(moved!.Accepted);
+        Assert.True(original.TryEndTurn(id, alice, 1,
+            out var ended, Guid.NewGuid().ToString("D")));
+        Assert.True(ended!.Accepted);
+        var saved = temp.Files().Load(id);
+        Assert.NotNull(saved);
+        var validReceipts = saved.CommandReceipts!.ToArray();
+        Assert.Equal(new long[] { 1, 2 },
+            validReceipts.Select(x => x.AcceptedRevision).ToArray());
+
+        // Both entries have individually valid keys, actor, event kind and
+        // revisions. Previous validation allowed this impossible event/receipt
+        // mapping because UUIDs were distinct.
+        var altered = tamper switch
+        {
+            "same-revision-different-uuids" =>
+                new[] { validReceipts[0],
+                    validReceipts[0] with { Key = Guid.NewGuid().ToString("D") } },
+            "reversed-order" => validReceipts.Reverse().ToArray(),
+            _ => throw new ArgumentOutOfRangeException(nameof(tamper))
+        };
+        Assert.All(altered, receipt =>
+            Assert.Contains(saved.Checkpoint.State.Events,
+                e => e.Revision == receipt.AcceptedRevision
+                    && e.ActorId == receipt.ActorId
+                    && e.Kind == receipt.Kind));
+        var digests = saved.TokenDigests.ToDictionary(kv => kv.Key,
+            kv => Convert.FromHexString(kv.Value), StringComparer.Ordinal);
+        temp.Files().Save(saved.Checkpoint, digests, altered);
+
+        var restarted = new DevelopmentMatchStore(temp.Files());
+        foreach (var bearer in new[] { alice, bob })
+        {
+            Assert.False(restarted.TryRead(id, bearer, out _));
+            Assert.False(restarted.TryReadHand(id, bearer, out _));
+            Assert.False(restarted.TryReadHistory(id, bearer, out _));
+            Assert.False(restarted.TryBootstrapSeat(id, bearer, out _));
+            Assert.False(restarted.HasSeatAccess(id, bearer));
+        }
+
+        Assert.True(original.TryRead(id, alice, out var live));
+        Assert.Equal(2, live!.Revision);
+        Assert.True(original.TryReadHand(id, bob, out var privateHand));
+        Assert.Equal(4, privateHand!.CardIds.Count);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    public void ValidStrictReceiptOrderingSupportsGapsAndSameUuidForSeparateActors(int seats)
+    {
+        using var temp = new TempDirectory();
+        var store = new DevelopmentMatchStore(temp.Files());
+        var board = BoardCatalog.LoadDefault();
+        var slots = board.Slots.Take(seats).ToArray();
+        var created = store.Create(slots.Select((slot, i) =>
+            new Edonism.Domain.Matches.MatchParticipantSeed($"seat-{i}", slot.Id)).ToArray());
+        var tokens = created.Credentials.Select(c => c.Token).ToArray();
+        var id = created.MatchId;
+        var key = Guid.NewGuid().ToString("D");
+        var origin = slots[0].StreetId;
+        var destination = board.Streets.Single(x => x.Id == origin).Neighbors[0];
+
+        Assert.True(store.TryFreeMove(id, tokens[0], destination, 0, out var move, key));
+        Assert.True(move!.Accepted);
+        for (var i = 0; i < seats; i++)
+        {
+            Assert.True(store.TryEndTurn(id, tokens[i], i + 1, out var end,
+                i == seats - 1 ? key : null));
+            Assert.True(end!.Accepted);
+        }
+        var saved = temp.Files().Load(id);
+        Assert.NotNull(saved);
+        Assert.Equal(new long[] { 1, seats + 1L },
+            saved.CommandReceipts!.Select(r => r.AcceptedRevision).ToArray());
+        Assert.Equal(key, saved.CommandReceipts[0].Key);
+        Assert.Equal(key, saved.CommandReceipts[1].Key);
+        Assert.NotEqual(saved.CommandReceipts[0].ActorId, saved.CommandReceipts[1].ActorId);
+
+        var restored = new DevelopmentMatchStore(temp.Files());
+        foreach (var bearer in tokens)
+        {
+            Assert.True(restored.TryRead(id, bearer, out var state));
+            Assert.Equal(seats + 1, state!.Revision);
+            Assert.True(restored.TryReadHistory(id, bearer, out var history));
+            Assert.Equal(seats + 2, history!.Frames.Count);
+        }
+        Assert.True(restored.TryFreeMove(id, tokens[0], destination, 0,
+            out var repeatedFirst, key));
+        Assert.True(repeatedFirst!.Accepted);
+        Assert.Equal("idempotent_replay", repeatedFirst.Code);
+        Assert.Equal(seats + 1, repeatedFirst.State.Revision);
+
+        Assert.True(restored.TryEndTurn(id, tokens[^1], seats,
+            out var repeatedLast, key));
+        Assert.True(repeatedLast!.Accepted);
+        Assert.Equal("idempotent_replay", repeatedLast.Code);
+        Assert.Equal(seats + 1, repeatedLast.State.Revision);
+
+        var again = temp.Files().Load(id);
+        Assert.NotNull(again);
+        Assert.Equal(2, again.CommandReceipts!.Count);
+    }
+
     [Fact]
     public async Task IdempotentReplayDoesNotWakeSubscribersOrAdvanceAnyRevision()
     {

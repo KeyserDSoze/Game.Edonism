@@ -49,7 +49,7 @@ public sealed class DevelopmentParallelRotationCheckpointTests
         var created = initialStore.CreateWithFullDeck(
             players, CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(),
             ActionDeckFixture.ActionIds(), ActionDeckFixture.ElectionDayId,
-            2026 + seatCount);
+            2026);
         var id = created.MatchId;
         Assert.Equal(seatCount, created.Credentials.Count);
 

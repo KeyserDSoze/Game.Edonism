@@ -266,8 +266,11 @@ public sealed class DevelopmentCheckpointPersistenceTests
         var alice = created.Credentials.Single(x => x.PlayerId == "alice").Token;
         var bob = created.Credentials.Single(x => x.PlayerId == "bob").Token;
         var id = created.MatchId;
+        var aliceStreet = created.State.Players.Single(p => p.PlayerId == "alice").StreetId;
+        var destination = BoardCatalog.LoadDefault().Streets
+            .Single(street => street.Id == aliceStreet).Neighbors[0];
 
-        Assert.True(original.TryFreeMove(id, alice, "planck", 0,
+        Assert.True(original.TryFreeMove(id, alice, destination, 0,
             out var moved, Guid.NewGuid().ToString("D")));
         Assert.True(moved!.Accepted);
         Assert.True(original.TryEndTurn(id, alice, 1,

@@ -245,7 +245,8 @@ test("mobile English public field diff distinguishes genesis position and seat o
       "activePlayerId",
       ...Array.from({ length: 8 }, (_, i) => `players[${i}].playerId`),
     ]);
-    await expect(changed.first()).toContainText("Seat 1: Seat identity");
+    await expect(changed.first()).toHaveText("Active player");
+    await expect(changed.nth(1)).toContainText("Seat 1: Seat identity");
     await expect(changed.last()).toContainText("Seat 8: Seat identity");
 
     await upload(page, FIRST, Buffer.from("{bad json"));

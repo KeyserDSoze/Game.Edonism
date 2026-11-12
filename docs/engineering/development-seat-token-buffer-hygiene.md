@@ -57,6 +57,6 @@ Quando più browser Development tentano il primo reconnect allo stesso match, la
 
 Il lock copre esclusivamente il primo restore; non copre HTTP, long-poll o l'accesso a match già caricati. Due match freddi con la stessa stripe possono aspettarsi durante il restore, senza mutare i loro checkpoint. Il vincolo single-flight è per processo Development: Production richiede un piano DB/cluster distinto (#13).
 
-La nuova theory xUnit `ParallelReconnectAcrossMatchesPreservesSeatsAndRejectsBadCheckpoint` valida 2–8 posti, due match cifrati reali con mani da quattro carte, un terzo checkpoint AES-GCM manomesso e GUID inesistenti. Esegue 128 richieste parallele, verifica nessun cross-seat/cross-match leak, esegue rotazioni del token su entrambi i match e prova il nuovo restart. Il numero fisso di stripe e il double-check vengono verificati strutturalmente, non con benchmark temporali flakey.
+La nuova theory xUnit `ParallelReconnectAcrossMatchesPreservesSeatsAndRejectsBadCheckpoint` valida 2–8 posti, due match cifrati reali con mani da quattro carte, un terzo checkpoint AES-GCM autenticato ma con digest duplicati e GUID inesistenti. Esegue 128 richieste parallele, verifica nessun cross-seat/cross-match leak, esegue rotazioni del token su entrambi i match e prova il nuovo restart. Il numero fisso di stripe e il double-check vengono verificati strutturalmente, non con benchmark temporali flakey.
 
 [Issue #67](https://github.com/KeyserDSo/Game.Edonism/issues/67).

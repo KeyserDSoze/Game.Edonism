@@ -38,3 +38,14 @@ Il chiamante assume la proprietà del digest solo al commit. `Register` azzera t
 Regressioni xUnit: per ognuno dei 2–8 posti con mazzo completo, due rotazioni successive, revoca di tutti i token storici, corrispondenza tra hash dell'ultimo bearer e checkpoint cifrato, carte private invariate e restart. Un test forza l'errore al primo checkpoint prima del commit, ripara lo storage e dimostra che una nuova creazione resta ammessa con quota 1; rimangono validi gli scenari già presenti di errore I/O in rotazione e le suite Playwright UI/live. La cancellazione in heap è verificata tramite gli `try/finally` nel sorgente, non con misure temporali flakey. Le stringhe .NET contenenti token consegnati o candidati non sono cancellabili in modo garantito; questa rimane una funzione Development, non login Production (#13).
 
 [Issue #65](https://github.com/KeyserDSoze/Game.Edonism/issues/65).
+
+
+## Ownership dei digest decodificati in un restore cifrato (#66)
+
+Durante `DevelopmentMatchStore.TryGetEntry`, il JSON del checkpoint viene decifrato e validato, poi i digest esadecimali dei posti sono decodificati in `byte[32]` indipendenti. Il JSON plaintext viene già azzerato dal file store (#62), ma questi nuovi buffer restavano nella memoria gestita se i receipt successivi erano falsificati o una seconda richiesta vinceva il ripristino concorrente.
+
+La nuova logica assegna il dizionario di digest temporanei a un solo proprietario: `unpublished hashes` fino a quando il proprio `candidateEntry` non risulta **esattamente** la `Entry` restituita da `ConcurrentDictionary.GetOrAdd`. Un `finally` azzera tutti i digest se il candidato non è stato pubblicato, mentre il `finally` per singolo digest azzera quello già decodificato ma rifiutato prima di essere inserito. I digest di un altro Entry che ha vinto la corsa non vengono mai azzerati. Le verifiche sui receipt (#61), la deduplica di hash decodificati (#60), i vecchi file v1/v2 e i lock per partita sono invariati.
+
+La nuova theory xUnit `ConcurrentFirstEncryptedRestoreNeverClearsWinningSeatDigests` esegue 64 richieste parallele con massimo 8 worker su un primo ripristino di 2–8 giocatori, verifica ciascuna mano privata e il bootstrap del relativo posto, quindi la rotazione di un token e un ulteriore restore dal checkpoint cifrato. Non è un test della cancellazione fisica della memoria abbandonata, verificata strutturalmente nel sorgente, e non equivale a autenticazione di produzione (#13).
+
+[Issue #66](https://github.com/KeyserDSoze/Game.Edonism/issues/66).

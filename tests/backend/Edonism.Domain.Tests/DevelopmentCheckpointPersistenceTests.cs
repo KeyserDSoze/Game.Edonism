@@ -121,6 +121,85 @@ public sealed class DevelopmentCheckpointPersistenceTests
         }
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    public void ConcurrentFirstEncryptedRestoreNeverClearsWinningSeatDigests(
+        int seatCount)
+    {
+        using var temp = new TempDirectory();
+        var creator = new DevelopmentMatchStore(temp.Files());
+        var players = Enumerable.Range(0, seatCount)
+            .Select(index => $"player-{index}").ToArray();
+        var created = creator.CreateWithFullDeck(
+            players, CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(),
+            ActionDeckFixture.ActionIds(), ActionDeckFixture.ElectionDayId, 2026);
+        var seats = created.Credentials.ToArray();
+        var expectedHands = seats.ToDictionary(c => c.PlayerId, c =>
+        {
+            Assert.True(creator.TryReadHand(created.MatchId, c.Token, out var hand));
+            Assert.NotNull(hand);
+            return hand.CardIds.ToArray();
+        }, StringComparer.Ordinal);
+        Assert.Equal(seatCount * 4, expectedHands.Values
+            .SelectMany(cards => cards).Distinct(StringComparer.Ordinal).Count());
+
+        // Multiple simultaneous first reads can each decrypt and validate
+        // their own candidate Entry. Only one candidate wins GetOrAdd.
+        // Disposing a losing candidate must never zero the winner's digests.
+        var resumed = new DevelopmentMatchStore(temp.Files());
+        Parallel.For(0, 64, new ParallelOptions { MaxDegreeOfParallelism = 8 },
+            index =>
+            {
+                var seat = seats[index % seats.Length];
+                Assert.True(resumed.TryReadHand(created.MatchId, seat.Token,
+                    out var hand));
+                Assert.NotNull(hand);
+                Assert.Equal(seat.PlayerId, hand.PlayerId);
+                Assert.Equal(expectedHands[seat.PlayerId], hand.CardIds.ToArray());
+                Assert.True(resumed.HasSeatAccess(created.MatchId, seat.Token));
+            });
+
+        foreach (var seat in seats)
+        {
+            Assert.True(resumed.TryBootstrapSeat(created.MatchId, seat.Token,
+                out var bootstrap));
+            Assert.NotNull(bootstrap);
+            Assert.Equal(seat.PlayerId, bootstrap.PlayerId);
+            Assert.Equal(expectedHands[seat.PlayerId],
+                bootstrap.Hand.CardIds.ToArray());
+        }
+        Assert.False(resumed.TryReadHand(created.MatchId, new string('0', 64), out _));
+
+        // A durable rotation after concurrent restore also proves the
+        // winning Entry kept its original digest map usable for mutation.
+        var rotatedSeat = seats[seatCount / 2];
+        Assert.True(resumed.TryRotateSeatToken(created.MatchId, rotatedSeat.Token,
+            out var replacement));
+        Assert.NotNull(replacement);
+        Assert.False(resumed.TryReadHand(created.MatchId, rotatedSeat.Token, out _));
+        Assert.True(resumed.TryReadHand(created.MatchId, replacement.Token,
+            out var rotatedHand));
+        Assert.Equal(expectedHands[rotatedSeat.PlayerId],
+            rotatedHand!.CardIds.ToArray());
+
+        var afterRestart = new DevelopmentMatchStore(temp.Files());
+        foreach (var seat in seats)
+        {
+            var token = seat.PlayerId == rotatedSeat.PlayerId
+                ? replacement.Token : seat.Token;
+            Assert.True(afterRestart.TryReadHand(created.MatchId, token, out var hand));
+            Assert.Equal(expectedHands[seat.PlayerId], hand!.CardIds.ToArray());
+        }
+        Assert.False(afterRestart.TryReadHand(created.MatchId,
+            rotatedSeat.Token, out _));
+    }
+
     [Fact]
     public void RepeatedBearerAuthorizationClearsOnlyTemporaryBuffersAndRetainsSeatIsolation()
     {

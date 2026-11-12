@@ -298,6 +298,11 @@ public sealed class DevelopmentMatchStore
         }
         if (data is null) return false;
 
+        // A reload may be rejected after several secret seat digests were
+        // decoded. Another request may also win GetOrAdd concurrently. Only
+        // the dictionary owned by the winning Entry may remain in memory.
+        var hashes = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        var published = false;
         try
         {
             var match = GameMatch.RestoreFromCheckpoint(BoardCatalog.LoadDefault(), data.Checkpoint);
@@ -306,20 +311,28 @@ public sealed class DevelopmentMatchStore
             if (data.TokenDigests.Count != playerIds.Count
                 || data.TokenDigests.Keys.Any(id => !playerIds.Contains(id)))
                 return false;
-            var hashes = new Dictionary<string, byte[]>(StringComparer.Ordinal);
             var uniqueDigests = new HashSet<string>(StringComparer.Ordinal);
             foreach (var (id, hex) in data.TokenDigests)
             {
                 if (hex is null || hex.Length != 64) return false;
                 var digest = Convert.FromHexString(hex);
-                // Decoding before deduplication prevents a lowercase/uppercase
-                // hex alias from assigning the SAME bearer to two seats.
-                // ResolveActor would otherwise return the first actor, which
-                // can reveal the wrong seat's private hand on restart.
-                if (digest.Length != 32
-                    || !uniqueDigests.Add(Convert.ToHexString(digest)))
-                    return false;
-                hashes.Add(id, digest);
+                var transferred = false;
+                try
+                {
+                    // Compare decoded bytes, not case-sensitive hex spellings.
+                    // A duplicate/invalid candidate must be zeroed even when
+                    // it never enters the temporary dictionary.
+                    if (digest.Length != 32
+                        || !uniqueDigests.Add(Convert.ToHexString(digest)))
+                        return false;
+                    hashes.Add(id, digest);
+                    transferred = true;
+                }
+                finally
+                {
+                    if (!transferred)
+                        CryptographicOperations.ZeroMemory(digest);
+                }
             }
             // The encrypted v2 metadata is a trust boundary. Every receipt
             // must point to a real committed public event, for the same actor
@@ -351,13 +364,26 @@ public sealed class DevelopmentMatchStore
                     previous.AcceptedRevision >= current.AcceptedRevision).Any(invalid => invalid))
                 return false;
 
-            entry = _matches.GetOrAdd(matchId, _ => new Entry(match, hashes, receipts));
+            var candidateEntry = new Entry(match, hashes, receipts);
+            entry = _matches.GetOrAdd(matchId, candidateEntry);
+            // GetOrAdd may return an Entry published by ANOTHER thread.
+            // Never zero its digests: only transfer ownership if ours won.
+            published = ReferenceEquals(entry, candidateEntry);
             return true;
         }
         catch (Exception ex) when (ex is InvalidDataException or ArgumentException
             or InvalidOperationException or FormatException)
         {
             return false;
+        }
+        finally
+        {
+            // Authentication failure, forged receipts, a partial digest map
+            // or losing a concurrent reload must not retain these secrets.
+            // Winning Entry digests remain live for later seat authorization.
+            if (!published)
+                foreach (var digest in hashes.Values)
+                    CryptographicOperations.ZeroMemory(digest);
         }
     }
 

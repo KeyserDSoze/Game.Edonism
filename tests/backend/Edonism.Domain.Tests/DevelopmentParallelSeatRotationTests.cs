@@ -102,10 +102,10 @@ public sealed class DevelopmentParallelSeatRotationTests
                     foreach (var group in outcomes.GroupBy(o => o.ActorIndex))
                     {
                         Assert.Equal(2, group.Count());
-                        var winner = Assert.Single(group.Where(r =>
-                            r.Response.StatusCode == HttpStatusCode.OK));
-                        var loser = Assert.Single(group.Where(r =>
-                            r.Response.StatusCode == HttpStatusCode.NotFound));
+                        var winner = Assert.Single(group, r =>
+                            r.Response.StatusCode == HttpStatusCode.OK);
+                        var loser = Assert.Single(group, r =>
+                            r.Response.StatusCode == HttpStatusCode.NotFound);
                         NoStore(winner.Response);
                         NoStore(loser.Response);
 

@@ -191,3 +191,6 @@ npm run test:e2e:live
 
 
 - **Concurrent Development seat rotations (#80):** when 2–8 actors each submit two concurrent `rotate-token` HTTP requests with the old bearer, exactly one successor credential per actor may be issued, exactly one of the two requests must fail as generic 404. Check every old bearer loses all access; new tokens are unique, can view only their own private bootstrap, and rotation never advances match revision, event log, audit or wallet. Cover the real single-process Development HTTP layer with xUnit and all three green CI gates on final main HEAD. This is NOT Production authentication.
+
+
+- **Encrypted concurrent Development rotation restore (#81):** cross-seat simultaneous capability rotations must publish only one durable successor per actor under the match lock. For 2–8 full-deck seats, validate the real AES-GCM checkpoint digests, cold `DevelopmentMatchStore` reload, old-bearer denial, exact private-hand continuity, unchanged public state/audit, and superseding a winning token after another restart. No Production claims; run xUnit, mocked Playwright and live Playwright all green on final `main` HEAD before closing.

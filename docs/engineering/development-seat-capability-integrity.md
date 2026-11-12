@@ -22,3 +22,7 @@ Un checkpoint AES-GCM autenticato ma con mapping ambiguo/non valido **fallisce c
 - Tutte le suite precedenti xUnit, Playwright UI mocked e Playwright live rimangono nel gate della CI di `main`.
 
 La protezione è un invariante delle capability **Development** e non implementa autenticazione, database multiistanza o identità Production, rimasti in [#13](https://github.com/KeyserDSoze/Game.Edonism/issues/13). [Issue #60](https://github.com/KeyserDSoze/Game.Edonism/issues/60) registra la CI conclusiva e la checklist, [ledger](development-ledger.md) segue lo sviluppo. Non modifica il regolamento PvP né risolve le scelte aperte #4/#6.
+
+## CI dell'implementazione
+
+[CI #43131999851](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43131999851) ha verificato il commit funzionale [`42e8b98`](https://github.com/KeyserDSoze/Game.Edonism/commit/42e8b98b4fa4cd8b4160cd260a7bc4ae923d7946) con **413/413 xUnit (0 skip), 97/97 Playwright UI e 30/30 Playwright live API .NET, totale 540/540**, 3/3 job verdi sullo SHA. Il gate successivo verifica anche il commit conclusivo della documentazione, con report e closure nella [issue #60](https://github.com/KeyserDSoze/Game.Edonism/issues/60).

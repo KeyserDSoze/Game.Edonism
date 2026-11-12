@@ -77,40 +77,49 @@ public sealed class DevelopmentMatchCheckpointFiles
             kv => Convert.ToHexString(kv.Value), StringComparer.Ordinal);
         var payload = JsonSerializer.SerializeToUtf8Bytes(new PersistedDevelopmentMatch(
             FileVersion, id, checkpoint, digests, commandReceipts ?? []));
-        if (payload.Length > MaxPayloadBytes)
-            throw new InvalidDataException("Checkpoint payload too large.");
-
-        var nonce = RandomNumberGenerator.GetBytes(NonceBytes);
-        var ciphertext = new byte[payload.Length];
-        var tag = new byte[TagBytes];
-        using (var aes = new AesGcm(_key, TagBytes))
-            aes.Encrypt(nonce, payload, ciphertext, tag, id.ToByteArray());
-
-        var encrypted = new byte[Magic.Length + NonceBytes + TagBytes + ciphertext.Length];
-        Magic.CopyTo(encrypted, 0);
-        nonce.CopyTo(encrypted, Magic.Length);
-        tag.CopyTo(encrypted, Magic.Length + NonceBytes);
-        ciphertext.CopyTo(encrypted, Magic.Length + NonceBytes + TagBytes);
-
-        var target = PathFor(id);
-        var temp = Path.Combine(_directory, $"{id:N}.{Guid.NewGuid():N}.tmp");
+        // This buffer includes the PRIVATE hands, hidden draw pile and bearer
+        // digests. Scope the zeroization around EVERY path after serialization,
+        // including the size guard and encryption failures before any file I/O.
         try
         {
-            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write,
-                FileShare.None, 4096, FileOptions.WriteThrough))
-            {
-                stream.Write(encrypted);
-                stream.Flush(flushToDisk: true);
-            }
+            if (payload.Length > MaxPayloadBytes)
+                throw new InvalidDataException("Checkpoint payload too large.");
 
-            if (!OperatingSystem.IsWindows())
-                File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            // Same-directory atomic rename on local Linux filesystems. No plaintext temp.
-            File.Move(temp, target, overwrite: true);
+            var nonce = RandomNumberGenerator.GetBytes(NonceBytes);
+            var ciphertext = new byte[payload.Length];
+            var tag = new byte[TagBytes];
+            using (var aes = new AesGcm(_key, TagBytes))
+                aes.Encrypt(nonce, payload, ciphertext, tag, id.ToByteArray());
+
+            var encrypted = new byte[Magic.Length + NonceBytes + TagBytes + ciphertext.Length];
+            Magic.CopyTo(encrypted, 0);
+            nonce.CopyTo(encrypted, Magic.Length);
+            tag.CopyTo(encrypted, Magic.Length + NonceBytes);
+            ciphertext.CopyTo(encrypted, Magic.Length + NonceBytes + TagBytes);
+
+            var target = PathFor(id);
+            var temp = Path.Combine(_directory, $"{id:N}.{Guid.NewGuid():N}.tmp");
+            try
+            {
+                using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write,
+                    FileShare.None, 4096, FileOptions.WriteThrough))
+                {
+                    stream.Write(encrypted);
+                    stream.Flush(flushToDisk: true);
+                }
+
+                if (!OperatingSystem.IsWindows())
+                    File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                // Same-directory atomic rename on local Linux filesystems. No plaintext temp.
+                File.Move(temp, target, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(temp)) File.Delete(temp);
+            }
         }
         finally
         {
-            if (File.Exists(temp)) File.Delete(temp);
             CryptographicOperations.ZeroMemory(payload);
         }
     }

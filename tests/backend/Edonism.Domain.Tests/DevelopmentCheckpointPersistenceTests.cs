@@ -855,6 +855,62 @@ public sealed class DevelopmentCheckpointPersistenceTests
     }
 
     [Fact]
+    public void OversizedSerializedSecretCheckpointDoesNotOverwritePreviousCiphertextOrLeaveTemp()
+    {
+        using var temp = new TempDirectory();
+        var store = new DevelopmentMatchStore(temp.Files());
+        var created = Create(store);
+        var id = created.MatchId;
+        var path = Path.Combine(temp.PathOnDisk, id.ToString("N") + ".edonism");
+        var originalCiphertext = File.ReadAllBytes(path);
+        var sealedData = temp.Files().Load(id);
+        Assert.NotNull(sealedData);
+        var keys = sealedData.TokenDigests.ToDictionary(
+            kv => kv.Key, kv => Convert.FromHexString(kv.Value), StringComparer.Ordinal);
+
+        // Intentionally synthetic >1 MiB public field to exercise the size
+        // guard AFTER private hands and bearer hashes have been serialized.
+        // No caller or test is allowed to assume this large checkpoint valid.
+        var tooBig = sealedData.Checkpoint with
+        {
+            State = sealedData.Checkpoint.State with
+            {
+                BoardVersion = new string('x', 1024 * 1024)
+            }
+        };
+        var exception = Assert.Throws<InvalidDataException>(() =>
+            temp.Files().Save(tooBig, keys, sealedData.CommandReceipts));
+        Assert.Equal("Checkpoint payload too large.", exception.Message);
+        Assert.DoesNotContain("test:action:", exception.Message);
+        Assert.Equal(originalCiphertext, File.ReadAllBytes(path));
+        Assert.Empty(Directory.GetFiles(temp.PathOnDisk, "*.tmp"));
+
+        var resumed = new DevelopmentMatchStore(temp.Files());
+        foreach (var credential in created.Credentials)
+        {
+            Assert.True(resumed.TryRead(id, credential.Token, out var state));
+            Assert.Equal(0, state!.Revision);
+            Assert.True(resumed.TryReadHand(id, credential.Token, out var hand));
+            Assert.Equal(credential.PlayerId, hand!.PlayerId);
+            Assert.Equal(4, hand.CardIds.Count);
+        }
+
+        // A failed oversized checkpoint for a brand new ID must not create
+        // an encrypted file either. Existing sealed data remains immutable.
+        var neverCreated = Guid.NewGuid();
+        var other = tooBig with
+        {
+            State = tooBig.State with { MatchId = neverCreated }
+        };
+        Assert.Throws<InvalidDataException>(() =>
+            temp.Files().Save(other, keys, sealedData.CommandReceipts));
+        Assert.False(File.Exists(Path.Combine(temp.PathOnDisk,
+            neverCreated.ToString("N") + ".edonism")));
+        Assert.Empty(Directory.GetFiles(temp.PathOnDisk, "*.tmp"));
+        Assert.Equal(originalCiphertext, File.ReadAllBytes(path));
+    }
+
+    [Fact]
     public void FailedWriteCannotPublishAnAcceptedCommandInMemory()
     {
         using var dir = new TempDirectory();

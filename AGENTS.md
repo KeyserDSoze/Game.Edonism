@@ -197,3 +197,6 @@ npm run test:e2e:live
 
 
 - **Development bodyless mutation guard (#82):** `POST /api/dev/matches/{guid}/rotate-token` and `/presence` accept zero payload bytes, with bearer preauthorization before inspecting any Content-Length or body bytes. For authenticated callers reject even one unexpected byte (including unknown-length/chunked) with 413 `dev_bodyless_payload_not_allowed` and no-store, without rotation/heartbeat/audit/revision changes. Reauthorize under the match lock. Do not extend this to JSON command or creator routes; test real HTTP with xUnit plus both Playwright gates on final HEAD before closure. Production sessions are still #13.
+
+
+- **Encrypted HTTP rotation-vs-command recovery (#83):** combine the #79 Development command/rotation race with opt-in AES-GCM persistence and two cold ASP.NET Core host restarts. Both legitimate 200-before-revoke or 404-after-revoke schedules must preserve exactly the right durable revision/UUID receipt, new bearer and all 2–8 private hands. Old credentials remain 404; the new credential can retry the same UUID exactly once and later replay it after another cold host. Test both free-move/end-turn, public audit, wallets and peer snapshots. This is *not* Production distributed identity, and no further printed rules are implied. Require 3/3 CI on final main HEAD before closing #83.

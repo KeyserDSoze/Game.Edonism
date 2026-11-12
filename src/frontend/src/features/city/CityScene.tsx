@@ -266,7 +266,7 @@ function World({ selectedStreetId, selectedSlotId, tacticalFocus, historicalFocu
       ))}
       {slots.map((slot) => (
         <Building key={slot.id} slot={slot} selected={slot.id === selectedSlotId}
-          focused={tacticalFocus?.kind === "activity" && tacticalFocus.targetId === slot.id}
+          focused={(tacticalFocus?.kind === "activity" || tacticalFocus?.kind === "opponent-lot") && tacticalFocus.targetId === slot.id}
           onSelect={onSlotSelect} control={controlMarkers.find((marker) => marker.slotId === slot.id)} />
       ))}
       <CityHall />

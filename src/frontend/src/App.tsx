@@ -68,7 +68,7 @@ export default function App() {
     const streetId = valid?.streetPath[index];
     if (!valid || !streetId) return;
     setSelectedStreetId(streetId);
-    setSelectedSlotId(valid.kind === "activity" && index === valid.streetPath.length - 1
+    setSelectedSlotId((valid.kind === "activity" || valid.kind === "opponent-lot") && index === valid.streetPath.length - 1
       ? valid.targetId : slotsOnStreet(streetId)[0]?.id ?? null);
   };
 

@@ -116,6 +116,23 @@ type OtherSeatRoutes = Readonly<{
   others: readonly OtherSeatRoute[];
 }>;
 
+type OpponentControlledLotRoute = Readonly<{
+  slotId: string;
+  ownerPlayerId: string;
+  posture: number;
+  streetId: string;
+  streetSteps: number;
+  streetPath: readonly string[];
+}>;
+type OpponentControlledLotRoutes = Readonly<{
+  matchId: string;
+  playerId: string;
+  round: number;
+  verifiedRevision: number;
+  fromStreetId: string;
+  routes: readonly OpponentControlledLotRoute[];
+}>;
+
 type FirstRoundTurnProgress = Readonly<{
   matchId: string;
   round: number;
@@ -233,6 +250,9 @@ export function DevelopmentMatchLab({
   } | null>(null);
   const [otherSeatLease, setOtherSeatLease] = useState<{
     token: string; data: OtherSeatRoutes;
+  } | null>(null);
+  const [opponentLotLease, setOpponentLotLease] = useState<{
+    token: string; data: OpponentControlledLotRoutes;
   } | null>(null);
   const [turnProgressLease, setTurnProgressLease] = useState<{
     token: string; data: FirstRoundTurnProgress;
@@ -514,6 +534,13 @@ export function DevelopmentMatchLab({
     && otherSeatLease.data.verifiedRevision === session?.state.revision
     && otherSeatLease.data.fromStreetId === player?.streetId
     ? otherSeatLease.data : null;
+  const opponentLots = opponentLotLease && token
+    && opponentLotLease.token === token
+    && opponentLotLease.data.matchId === session?.matchId
+    && opponentLotLease.data.playerId === actorId
+    && opponentLotLease.data.verifiedRevision === session?.state.revision
+    && opponentLotLease.data.fromStreetId === player?.streetId
+    ? opponentLotLease.data : null;
   const turnProgress = turnProgressLease && token
     && turnProgressLease.token === token
     && turnProgressLease.data.matchId === session?.matchId
@@ -940,6 +967,79 @@ export function DevelopmentMatchLab({
       .catch(() => {
         // A temporary failure or forged/stale route never asserts a rival's
         // location and never enables an attack or a player command.
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.matchId, session?.state.revision, actorId, token]);
+
+  // #84: actor-bound public routes to OTHER controlled lots; every returned
+  // owner, posture and path must match this revision's public snapshot.
+  useEffect(() => {
+    const matchId = session?.matchId;
+    const state = session?.state;
+    const revision = state?.revision;
+    const seatId = actorId;
+    const actorToken = token;
+    setOpponentLotLease(null);
+    if (!matchId || !state || revision === undefined || !seatId || !actorToken) return;
+    const controller = new AbortController();
+    void fetch(`/api/dev/matches/${matchId}/opponent-controlled-routes`, {
+      headers: { "X-Edonism-Dev-Token": actorToken },
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(response => {
+        if (response.status === 404 && !controller.signal.aborted)
+          reconcileRevokedSeat(matchId, seatId, actorToken);
+        return responseJson<OpponentControlledLotRoutes>(response);
+      })
+      .then(result => {
+        const scope = currentActorScope.current;
+        if (controller.signal.aborted || scope?.matchId !== matchId
+          || scope.seatId !== seatId || scope.token !== actorToken
+          || currentRevision.current !== revision) return;
+        const origin = state.players.find(p => p.playerId === seatId)?.streetId;
+        const expected = state.controlledActivities.filter(c =>
+          c.ownerPlayerId !== seatId);
+        if (!origin || !result || result.matchId !== matchId
+          || result.playerId !== seatId || result.round !== state.round
+          || result.verifiedRevision !== revision
+          || result.fromStreetId !== origin || !Array.isArray(result.routes)
+          || result.routes.length !== expected.length) return;
+
+        const bySlot = new Map(expected.map(lot => [lot.slotId, lot] as const));
+        const seen = new Set<string>();
+        let previousSteps = -1;
+        let previousOwner = "";
+        let previousSlot = "";
+        for (const route of result.routes) {
+          if (!route || typeof route.slotId !== "string"
+            || seen.has(route.slotId) || route.ownerPlayerId === seatId
+            || !Number.isInteger(route.posture)
+            || !Number.isInteger(route.streetSteps)) return;
+          const lot = bySlot.get(route.slotId);
+          const canonical = shortestStreetPath(origin, route.streetId);
+          if (!lot || route.ownerPlayerId !== lot.ownerPlayerId
+            || route.posture !== lot.posture
+            || slotById(route.slotId)?.streetId !== route.streetId
+            || !canonical || !Array.isArray(route.streetPath)
+            || route.streetPath.length !== canonical.length
+            || route.streetPath.some((id: string, i: number) => id !== canonical[i])
+            || route.streetSteps !== canonical.length - 1
+            || route.streetSteps < previousSteps
+            || (route.streetSteps === previousSteps
+              && (route.ownerPlayerId < previousOwner
+                || (route.ownerPlayerId === previousOwner
+                  && route.slotId <= previousSlot)))) return;
+          seen.add(route.slotId);
+          previousSteps = route.streetSteps;
+          previousOwner = route.ownerPlayerId;
+          previousSlot = route.slotId;
+        }
+        setOpponentLotLease({ token: actorToken, data: result });
+      })
+      .catch(() => {
+        // A stale or forged response cannot manufacture tactical focus.
       });
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2163,6 +2263,62 @@ export function DevelopmentMatchLab({
                   <p data-testid="dev-other-seats-note"
                     className="text-[11px] leading-5 text-muted-foreground">
                     {t("dev.otherSeatsNote")}
+                  </p>
+                </section>
+                <section aria-label={t("dev.opponentLotsTitle")}
+                  data-testid="dev-opponent-lots"
+                  className="space-y-2 rounded-xl border border-border p-3 text-xs">
+                  <p className="font-semibold">{t("dev.opponentLotsTitle")}</p>
+                  {!opponentLots ? (
+                    <p data-testid="dev-opponent-lots-unavailable"
+                      className="text-muted-foreground">{t("dev.opponentLotsUnavailable")}</p>
+                  ) : (
+                    <>
+                      <p data-testid="dev-opponent-lots-count" aria-live="polite">
+                        {t("dev.opponentLotsCount", { count: opponentLots.routes.length })}
+                      </p>
+                      <ol data-testid="dev-opponent-lots-list" className="grid gap-2 sm:grid-cols-2">
+                        {opponentLots.routes.map(route => (
+                          <li key={route.slotId}
+                            data-testid={`dev-opponent-lot-${route.slotId}`}
+                            data-owner={route.ownerPlayerId}
+                            data-posture={route.posture}
+                            data-steps={route.streetSteps}
+                            data-path={route.streetPath.join(">")}
+                            className="rounded-md bg-muted p-2">
+                            <span className="block font-semibold">
+                              {route.slotId} · {route.ownerPlayerId}
+                            </span>
+                            <span className="block text-muted-foreground">
+                              {streetById(route.streetId)?.name ?? route.streetId} · {
+                                t("dev.routeSteps", { count: route.streetSteps })}
+                            </span>
+                            <span className="block break-words text-muted-foreground">
+                              {t("dev.routePath")}: {route.streetPath.map(id =>
+                                streetById(id)?.name ?? id).join(" → ")}
+                            </span>
+                            <Button type="button" size="sm" variant="outline"
+                              data-testid={`dev-focus-opponent-lot-${route.slotId}`}
+                              aria-label={t("dev.focusOpponentLot", { slot: route.slotId })}
+                              className="mt-2 h-8 w-full"
+                              onClick={() => onTacticalFocus({
+                                kind: "opponent-lot",
+                                matchId: session.matchId,
+                                revision: session.state.revision,
+                                actorId,
+                                targetId: route.slotId,
+                                streetPath: [...route.streetPath],
+                              })}>
+                              {t("dev.focusOnMap")}
+                            </Button>
+                          </li>
+                        ))}
+                      </ol>
+                    </>
+                  )}
+                  <p data-testid="dev-opponent-lots-note"
+                    className="text-[11px] leading-5 text-muted-foreground">
+                    {t("dev.opponentLotsNote")}
                   </p>
                 </section>
                 <section aria-label={t("dev.routesTitle")}

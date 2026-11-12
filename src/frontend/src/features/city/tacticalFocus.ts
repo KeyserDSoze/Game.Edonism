@@ -7,7 +7,7 @@ import type { PublicMatchSceneState } from "./activityMarkers";
  * Scope is revision-bound so a remote movement invalidates the old route.
  */
 export type TacticalFocus = Readonly<{
-  kind: "player" | "activity";
+  kind: "player" | "activity" | "opponent-lot";
   matchId: string;
   revision: number;
   actorId: string;
@@ -33,6 +33,11 @@ export function verifiedTacticalFocus(
     const other = state.players.filter(p => p.playerId === focus.targetId);
     if (other.length !== 1) return null;
     targetStreet = other[0].streetId;
+  } else if (focus.kind === "opponent-lot") {
+    const owned = state.controlledActivities.filter(lot =>
+      lot.slotId === focus.targetId && lot.ownerPlayerId !== focus.actorId);
+    if (owned.length !== 1) return null;
+    targetStreet = slotById(focus.targetId)?.streetId;
   } else if (focus.kind === "activity") {
     const card = state.boardActivities.filter(a => a.slotId === focus.targetId);
     if (card.length !== 1 || state.controlledActivities.some(

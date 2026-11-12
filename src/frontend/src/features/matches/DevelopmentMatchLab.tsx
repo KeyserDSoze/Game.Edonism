@@ -254,6 +254,8 @@ export function DevelopmentMatchLab({
   const [opponentLotLease, setOpponentLotLease] = useState<{
     token: string; data: OpponentControlledLotRoutes;
   } | null>(null);
+  // #85: local display preference, never permission or a server command.
+  const [nearbyOpponentLotsOnly, setNearbyOpponentLotsOnly] = useState(false);
   const [turnProgressLease, setTurnProgressLease] = useState<{
     token: string; data: FirstRoundTurnProgress;
   } | null>(null);
@@ -541,6 +543,10 @@ export function DevelopmentMatchLab({
     && opponentLotLease.data.verifiedRevision === session?.state.revision
     && opponentLotLease.data.fromStreetId === player?.streetId
     ? opponentLotLease.data : null;
+  // Filter only the fully validated, actor/revision/token-scoped #84 result.
+  // Zero or one canonical street edge is not a combat or travel-time rule.
+  const visibleOpponentLots = opponentLots?.routes.filter(route =>
+    !nearbyOpponentLotsOnly || route.streetSteps <= 1) ?? [];
   const turnProgress = turnProgressLease && token
     && turnProgressLease.token === token
     && turnProgressLease.data.matchId === session?.matchId
@@ -971,6 +977,12 @@ export function DevelopmentMatchLab({
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.matchId, session?.state.revision, actorId, token]);
+
+  // #85: a previous seat's tactical display choice never follows a new
+  // match, actor or capability. No extra HTTP fetch is tied to the toggle.
+  useEffect(() => {
+    setNearbyOpponentLotsOnly(false);
+  }, [session?.matchId, actorId, token]);
 
   // #84: actor-bound public routes to OTHER controlled lots; every returned
   // owner, posture and path must match this revision's public snapshot.
@@ -2281,8 +2293,23 @@ export function DevelopmentMatchLab({
                       <p data-testid="dev-opponent-lots-count" aria-live="polite">
                         {t("dev.opponentLotsCount", { count: opponentLots.routes.length })}
                       </p>
+                      <Button type="button" size="sm" variant="outline"
+                        data-testid="dev-opponent-lots-nearby-toggle"
+                        aria-pressed={nearbyOpponentLotsOnly}
+                        onClick={() => setNearbyOpponentLotsOnly(previous => !previous)}>
+                        {t("dev.opponentLotsNearbyToggle")}
+                      </Button>
+                      {nearbyOpponentLotsOnly && (
+                        <p data-testid="dev-opponent-lots-filtered-count" aria-live="polite">
+                          {t("dev.opponentLotsFilteredCount", { count: visibleOpponentLots.length })}
+                        </p>
+                      )}
+                      {nearbyOpponentLotsOnly && visibleOpponentLots.length === 0 && (
+                        <p data-testid="dev-opponent-lots-no-nearby"
+                          className="text-muted-foreground">{t("dev.opponentLotsNoNearby")}</p>
+                      )}
                       <ol data-testid="dev-opponent-lots-list" className="grid gap-2 sm:grid-cols-2">
-                        {opponentLots.routes.map(route => (
+                        {visibleOpponentLots.map(route => (
                           <li key={route.slotId}
                             data-testid={`dev-opponent-lot-${route.slotId}`}
                             data-owner={route.ownerPlayerId}

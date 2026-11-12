@@ -2620,3 +2620,40 @@ test("real .NET: opponent-controlled lot routes are bearer-bound and focusable w
   expect(state.revision).toBe(0);
   expect(state.events).toHaveLength(1);
 });
+
+
+test("real .NET: nearby rival-lot filter leaves authorized state and audit unchanged",
+  async ({ page, request }) => {
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const endpoint = `http://127.0.0.1:5080/api/dev/matches/${id}`;
+  const aliceToken = tokenFor(created, "alice");
+  const baseline = await request.get(endpoint, { headers: auth(aliceToken) });
+  expect(baseline.status()).toBe(200);
+  const before = await baseline.json() as PublicMatch;
+  const reply = await request.get(`${endpoint}/opponent-controlled-routes`, {
+    headers: auth(aliceToken),
+  });
+  expect(reply.status()).toBe(200);
+  const result = await reply.json() as { routes: {
+    slotId: string; streetSteps: number; ownerPlayerId: string;
+  }[] };
+  const nearby = result.routes.filter(route => route.streetSteps <= 1);
+  const toggle = page.getByTestId("dev-opponent-lots-nearby-toggle");
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li"))
+    .toHaveCount(result.routes.length);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li"))
+    .toHaveCount(nearby.length);
+  for (const lot of nearby)
+    await expect(page.getByTestId(`dev-opponent-lot-${lot.slotId}`)).toBeVisible();
+  if (nearby.length === 0)
+    await expect(page.getByTestId("dev-opponent-lots-no-nearby")).toBeVisible();
+  await toggle.click();
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li"))
+    .toHaveCount(result.routes.length);
+  const unchanged = await request.get(endpoint, { headers: auth(aliceToken) });
+  expect(unchanged.status()).toBe(200);
+  expect(await unchanged.json()).toEqual(before);
+});

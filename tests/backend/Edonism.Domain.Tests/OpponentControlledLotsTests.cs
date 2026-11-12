@@ -104,4 +104,37 @@ public sealed class OpponentControlledLotsTests
         Assert.Equal(3, restored.Revision);
         Assert.True(restored.VerifyPublicAudit().IsValid);
     }
+
+    [Fact]
+    public void NearbyPublicLotEdgesRemainReadOnlyAndFollowCanonicalFreeMovement()
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = GameMatch.CreateFromTrustedSetup(Guid.NewGuid(), board,
+        [
+            new MatchParticipantSeed("alice", "N-01"),
+            new MatchParticipantSeed("bob", "N-02"),
+            new MatchParticipantSeed("carol", "W-01"),
+            new MatchParticipantSeed("dave", "S-01")
+        ]);
+        var initialCheckpoint = JsonSerializer.Serialize(match.CaptureCheckpoint());
+        var before = match.VerifiedOpponentControlledLotsForActor("alice")!;
+        Assert.Equal(new[] { "N-02", "W-01" },
+            before.Routes.Where(route => route.StreetSteps <= 1)
+                .Select(route => route.SlotId).ToArray());
+        Assert.Equal(0, before.Routes.Single(route => route.SlotId == "N-02").StreetSteps);
+        Assert.Equal(1, before.Routes.Single(route => route.SlotId == "W-01").StreetSteps);
+        Assert.Equal(2, before.Routes.Single(route => route.SlotId == "S-01").StreetSteps);
+        Assert.Equal(initialCheckpoint, JsonSerializer.Serialize(match.CaptureCheckpoint()));
+
+        Assert.True(match.TryFreeMove("alice", "main-square", 0).Accepted);
+        var movedCheckpoint = JsonSerializer.Serialize(match.CaptureCheckpoint());
+        var moved = match.VerifiedOpponentControlledLotsForActor("alice")!;
+        Assert.Equal(1, moved.VerifiedRevision);
+        Assert.Equal(new[] { "N-02", "S-01" },
+            moved.Routes.Where(route => route.StreetSteps <= 1)
+                .Select(route => route.SlotId).ToArray());
+        Assert.Equal(2, moved.Routes.Single(route => route.SlotId == "W-01").StreetSteps);
+        Assert.Equal(movedCheckpoint, JsonSerializer.Serialize(match.CaptureCheckpoint()));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
 }

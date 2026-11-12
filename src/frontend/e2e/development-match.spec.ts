@@ -3245,3 +3245,28 @@ test("unknown public owner never becomes an opponent-lot map target", async ({ p
   await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
 });
+
+
+test("nearby opponent-lot filter is public-only and resets when switching seats", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const toggle = page.getByTestId("dev-opponent-lots-nearby-toggle");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("dev-opponent-lots-filtered-count")).toContainText("0");
+  await expect(page.getByTestId("dev-opponent-lots-no-nearby")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+});

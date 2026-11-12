@@ -162,11 +162,16 @@ public sealed class DevelopmentCheckpointPersistenceTests
             expected.Add(match.MatchId, hands);
         }
 
-        var badPath = Path.Combine(temp.PathOnDisk,
-            invalid.MatchId.ToString("N") + ".edonism");
-        var ciphertext = File.ReadAllBytes(badPath);
-        ciphertext[^1] ^= 0x80; // Break AES-GCM authentication, not other matches.
-        File.WriteAllBytes(badPath, ciphertext);
+        // Forge an AES-GCM-authenticated file whose seat map is SEMANTICALLY
+        // invalid, instead of merely corrupting the GCM tag. A bad private
+        // checkpoint cannot prevent other matches from being reconnected.
+        var savedInvalid = temp.Files().Load(invalid.MatchId);
+        Assert.NotNull(savedInvalid);
+        var invalidDigests = savedInvalid.TokenDigests.ToDictionary(
+            kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+        invalidDigests[invalid.Credentials[1].PlayerId] =
+            invalidDigests[invalid.Credentials[0].PlayerId];
+        RewriteCheckpointWithDigests(temp, savedInvalid, invalidDigests);
 
         var restored = new DevelopmentMatchStore(temp.Files());
         var active = new[] { first, second };

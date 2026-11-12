@@ -1595,6 +1595,9 @@ for (const seatCount of [2, 8] as const) {
       await page.getByTestId("dev-public-audit-export").click();
       const downloaded = await pending;
       const jsonBytes = await readFile(await downloaded.path());
+      // Release the live 3D renderer before validating the public file in an
+      // independent browser; the offline verifier must work with zero seats.
+      await page.close();
       const original = JSON.parse(jsonBytes.toString("utf8")) as {
         format: string; verifiedRevision: number;
         events: Array<{ kind: string; toStreetId: string | null }>;

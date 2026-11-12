@@ -222,7 +222,7 @@ public sealed class DevelopmentMixedCommandContentionTests
                     Assert.Equal(expectedRevision + 1,
                         state.GetProperty("events").GetArrayLength());
 
-                    var lastEvent = state.GetProperty("events")[^1];
+                    var lastEvent = state.GetProperty("events").EnumerateArray().Last();
                     Assert.Equal(seats[current].PlayerId,
                         lastEvent.GetProperty("actorId").GetString());
 
@@ -283,7 +283,7 @@ public sealed class DevelopmentMixedCommandContentionTests
                     Assert.Equal(expectedRevision + 1,
                         state.GetProperty("events").GetArrayLength());
 
-                    var lastEvent = state.GetProperty("events")[^1];
+                    var lastEvent = state.GetProperty("events").EnumerateArray().Last();
                     Assert.Equal(seats[current].PlayerId,
                         lastEvent.GetProperty("actorId").GetString());
                     Assert.Equal(current == count - 1

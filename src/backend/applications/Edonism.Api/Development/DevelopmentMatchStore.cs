@@ -189,6 +189,46 @@ public sealed class DevelopmentMatchStore
             Guid.NewGuid(), BoardCatalog.LoadDefault(), playerIds,
             characters, activities, actionCardIds, electionDayCardId, seed));
 
+    /// <summary>
+    /// One capability issuer for match creation and token rotation.
+    /// Owns the raw random buffer on EVERY path, including hashing failure,
+    /// formatting failure and collisions. Only a unique digest is transferred
+    /// to the caller; the caller must wipe it if durable publication fails.
+    /// </summary>
+    private static (string Token, byte[] Digest) CreateUniqueSeatCapability(
+        IEnumerable<byte[]> existingDigests)
+    {
+        while (true)
+        {
+            var raw = RandomNumberGenerator.GetBytes(32);
+            try
+            {
+                var digest = SHA256.HashData(raw);
+                var transferred = false;
+                try
+                {
+                    if (existingDigests.Any(candidate =>
+                        CryptographicOperations.FixedTimeEquals(candidate, digest)))
+                        continue;
+
+                    var token = Convert.ToHexString(raw);
+                    transferred = true;
+                    return (token, digest);
+                }
+                finally
+                {
+                    // Collided or failed candidate: it must not survive until GC.
+                    if (!transferred)
+                        CryptographicOperations.ZeroMemory(digest);
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(raw);
+            }
+        }
+    }
+
     private DevMatchCreated Register(GameMatch match)
     {
         // Serialize only creation admission, independent of per-match command
@@ -201,35 +241,44 @@ public sealed class DevelopmentMatchStore
 
             var secrets = new Dictionary<string, byte[]>(StringComparer.Ordinal);
             var credentials = new List<DevSeatCredential>();
-            foreach (var player in match.Snapshot().Players)
+            var published = false;
+            try
             {
-                // Every seat needs its OWN cryptographic capability. Rotation
-                // already retries digest collisions; initial admission must
-                // maintain the same invariant instead of relying solely on
-                // their overwhelming statistical improbability.
-                byte[] digest;
-                string newToken;
-                do
+                foreach (var player in match.Snapshot().Players)
                 {
-                    var bytes = RandomNumberGenerator.GetBytes(32);
-                    digest = SHA256.HashData(bytes);
-                    newToken = Convert.ToHexString(bytes);
-                    CryptographicOperations.ZeroMemory(bytes);
+                    var (newToken, digest) = CreateUniqueSeatCapability(secrets.Values);
+                    var added = false;
+                    try
+                    {
+                        secrets.Add(player.PlayerId, digest);
+                        added = true;
+                    }
+                    finally
+                    {
+                        if (!added)
+                            CryptographicOperations.ZeroMemory(digest);
+                    }
+                    credentials.Add(new DevSeatCredential(player.PlayerId, newToken));
                 }
-                while (secrets.Values.Any(existing =>
-                    CryptographicOperations.FixedTimeEquals(existing, digest)));
 
-                secrets.Add(player.PlayerId, digest);
-                credentials.Add(new DevSeatCredential(player.PlayerId, newToken));
+                // Disk commit precedes in-memory publication and quota increment.
+                // A failed encrypted save must not consume a slot or issue tokens.
+                _checkpointFiles?.Save(match.CaptureCheckpoint(), secrets);
+                if (!_matches.TryAdd(match.MatchId, new Entry(match, secrets)))
+                    throw new InvalidOperationException("Unexpected match ID collision.");
+                // After publication the live Entry owns these digests.
+                published = true;
+                _newMatches++;
+                return new DevMatchCreated(match.MatchId, match.Snapshot(), credentials.AsReadOnly());
             }
-
-            // Disk commit precedes in-memory publication and quota increment.
-            // A failed encrypted save must not consume a slot or issue tokens.
-            _checkpointFiles?.Save(match.CaptureCheckpoint(), secrets);
-            if (!_matches.TryAdd(match.MatchId, new Entry(match, secrets)))
-                throw new InvalidOperationException("Unexpected match ID collision.");
-            _newMatches++;
-            return new DevMatchCreated(match.MatchId, match.Snapshot(), credentials.AsReadOnly());
+            finally
+            {
+                // On any pre-publication exception no unissued seat digest
+                // should survive until the garbage collector runs.
+                if (!published)
+                    foreach (var digest in secrets.Values)
+                        CryptographicOperations.ZeroMemory(digest);
+            }
         }
     }
 
@@ -328,36 +377,43 @@ public sealed class DevelopmentMatchStore
             var actor = entry.ResolveActor(token);
             if (actor is null) return false;
 
-            byte[] secret;
-            byte[] digest;
-            do
+            var (newToken, digest) =
+                CreateUniqueSeatCapability(entry.TokenDigests.Values);
+            var published = false;
+            try
             {
-                secret = RandomNumberGenerator.GetBytes(32);
-                digest = SHA256.HashData(secret);
-            }
-            while (entry.TokenDigests.Values.Any(candidate =>
-                CryptographicOperations.FixedTimeEquals(candidate, digest)));
+                var oldDigest = entry.TokenDigests[actor];
+                var nextDigests = new Dictionary<string, byte[]>(entry.TokenDigests,
+                    StringComparer.Ordinal)
+                {
+                    [actor] = digest
+                };
+                // Never change the live actor digest on failed encryption or I/O.
+                _checkpointFiles?.Save(entry.Match.CaptureCheckpoint(), nextDigests,
+                    entry.CommandReceipts);
+                entry.TokenDigests[actor] = digest;
+                published = true;
 
-            var newToken = Convert.ToHexString(secret);
-            CryptographicOperations.ZeroMemory(secret);
-            var nextDigests = new Dictionary<string, byte[]>(entry.TokenDigests,
-                StringComparer.Ordinal)
+                // The replaced digest is now revoked and unreferenced by
+                // active seat mappings. Clear it only AFTER durable commit.
+                CryptographicOperations.ZeroMemory(oldDigest);
+                // Rotation is a capability change, not a gameplay event.
+                // The seat is inactive until the new bearer pings again; other
+                // seats retain their independent presence.
+                entry.LastPresenceByActor.Remove(actor);
+                // A revocation changes no public revision, but old subscribers
+                // must wake and reauthenticate instead of waiting for gameplay.
+                entry.NotifySubscribers();
+                replacement = new DevSeatCredential(actor, newToken);
+                return true;
+            }
+            finally
             {
-                [actor] = digest
-            };
-            // Never change the live actor digest on failed encryption or I/O.
-            _checkpointFiles?.Save(entry.Match.CaptureCheckpoint(), nextDigests,
-                entry.CommandReceipts);
-            entry.TokenDigests[actor] = digest;
-            // Rotation is a capability change, not a gameplay event.
-            // The seat is inactive until the new bearer pings again; other
-            // seats retain their independent presence.
-            entry.LastPresenceByActor.Remove(actor);
-            // A revocation changes no public revision, but old subscribers
-            // must wake and reauthenticate instead of waiting for gameplay.
-            entry.NotifySubscribers();
-            replacement = new DevSeatCredential(actor, newToken);
-            return true;
+                // Never leave a rejected candidate in managed memory or
+                // corrupt the original digest on a failed save.
+                if (!published)
+                    CryptographicOperations.ZeroMemory(digest);
+            }
         }
     }
 

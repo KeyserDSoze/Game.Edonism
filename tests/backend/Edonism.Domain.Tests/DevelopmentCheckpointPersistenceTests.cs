@@ -1104,6 +1104,139 @@ public sealed class DevelopmentCheckpointPersistenceTests
         Assert.Equal("bob", bobHand!.PlayerId);
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    public void EachSeatCanRotateTwiceWithoutLosingAnyPrivateHandOrEncryptedAccess(
+        int seatCount)
+    {
+        using var temp = new TempDirectory();
+        var store = new DevelopmentMatchStore(temp.Files());
+        var players = Enumerable.Range(0, seatCount)
+            .Select(index => $"player-{index}").ToArray();
+        var created = store.CreateWithFullDeck(
+            players, CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(),
+            ActionDeckFixture.ActionIds(), ActionDeckFixture.ElectionDayId, 2026);
+
+        var credentials = created.Credentials.ToDictionary(
+            c => c.PlayerId, c => c.Token, StringComparer.Ordinal);
+        var originalHands = created.Credentials.ToDictionary(
+            c => c.PlayerId, c =>
+            {
+                Assert.True(store.TryReadHand(created.MatchId, c.Token, out var hand));
+                Assert.NotNull(hand);
+                return hand.CardIds.ToArray();
+            }, StringComparer.Ordinal);
+        Assert.Equal(seatCount * 4, originalHands.Values.SelectMany(cards => cards)
+            .Distinct(StringComparer.Ordinal).Count());
+
+        var revoked = new List<string>();
+        for (var round = 0; round < 2; round++)
+        {
+            foreach (var playerId in players)
+            {
+                var old = credentials[playerId];
+                Assert.True(store.TryRotateSeatToken(created.MatchId, old,
+                    out var replacement));
+                Assert.NotNull(replacement);
+                Assert.Equal(playerId, replacement.PlayerId);
+                Assert.NotEqual(old, replacement.Token);
+                revoked.Add(old);
+                credentials[playerId] = replacement.Token;
+
+                Assert.False(store.HasSeatAccess(created.MatchId, old));
+                Assert.False(store.TryReadHand(created.MatchId, old, out _));
+                Assert.True(store.TryReadHand(created.MatchId,
+                    replacement.Token, out var hand));
+                Assert.NotNull(hand);
+                Assert.Equal(playerId, hand.PlayerId);
+                Assert.Equal(originalHands[playerId], hand.CardIds.ToArray());
+            }
+        }
+
+        var checkpoint = temp.Files().Load(created.MatchId);
+        Assert.NotNull(checkpoint);
+        Assert.Equal(seatCount, checkpoint.TokenDigests.Count);
+        foreach (var playerId in players)
+        {
+            var raw = Convert.FromHexString(credentials[playerId]);
+            try
+            {
+                var expectedDigest = SHA256.HashData(raw);
+                try
+                {
+                    Assert.Equal(Convert.ToHexString(expectedDigest),
+                        checkpoint.TokenDigests[playerId]);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(expectedDigest);
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(raw);
+            }
+        }
+
+        var restarted = new DevelopmentMatchStore(temp.Files());
+        foreach (var old in revoked)
+        {
+            Assert.False(restarted.HasSeatAccess(created.MatchId, old));
+            Assert.False(restarted.TryReadHand(created.MatchId, old, out _));
+        }
+        foreach (var playerId in players)
+        {
+            Assert.True(restarted.TryReadHand(created.MatchId,
+                credentials[playerId], out var hand));
+            Assert.NotNull(hand);
+            Assert.Equal(playerId, hand.PlayerId);
+            Assert.Equal(originalHands[playerId], hand.CardIds.ToArray());
+        }
+        Assert.True(restarted.TryRead(created.MatchId, credentials[players[0]],
+            out var publicState));
+        Assert.Equal(0, publicState!.Revision);
+    }
+
+    [Fact]
+    public void FailedInitialCheckpointSaveDoesNotConsumeCreationQuotaOrPublishSeats()
+    {
+        using var temp = new TempDirectory();
+        var files = temp.Files();
+        var store = new DevelopmentMatchStore(files, maxNewMatches: 1);
+        // Force the first encrypted save to fail AFTER issuing all the
+        // candidate seat secrets; the failed match must not become visible.
+        Directory.Delete(temp.PathOnDisk, recursive: true);
+        File.WriteAllText(temp.PathOnDisk, "not a directory");
+        Assert.ThrowsAny<IOException>(() => Create(store));
+
+        File.Delete(temp.PathOnDisk);
+        Directory.CreateDirectory(temp.PathOnDisk);
+        var created = Create(store);
+        Assert.Equal(2, created.Credentials.Count);
+        Assert.All(created.Credentials, credential =>
+        {
+            Assert.True(store.HasSeatAccess(created.MatchId, credential.Token));
+            Assert.True(store.TryReadHand(created.MatchId,
+                credential.Token, out var hand));
+            Assert.Equal(credential.PlayerId, hand!.PlayerId);
+        });
+        Assert.Throws<DevelopmentMatchCapacityException>(() => Create(store));
+
+        var restored = new DevelopmentMatchStore(temp.Files());
+        foreach (var credential in created.Credentials)
+        {
+            Assert.True(restored.TryReadHand(created.MatchId,
+                credential.Token, out var hand));
+            Assert.Equal(credential.PlayerId, hand!.PlayerId);
+        }
+    }
+
     [Fact]
     public void FailedTokenRotationDoesNotPublishRevocationOrChangeMatch()
     {

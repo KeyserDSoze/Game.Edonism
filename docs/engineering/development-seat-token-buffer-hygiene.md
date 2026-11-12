@@ -27,3 +27,14 @@ La cancellazione dei buffer della #63 non impediva una differenza di lavoro tra 
 Il test parametrizzato `FirstMiddleAndLastSeatBearerResolveToOwnHandAfterFullScanAndRestart` verifica da 2 a 8 posti con carte private reali, lettura del primo/centrale/ultimo bearer, versioni minuscole della stringa esadecimale, token inesistenti e malformati, rotazione/revoca e restart da file AES-GCM. L'ispezione strutturale del ciclo verifica l'assenza di `return` anticipati: i test di durata sarebbero flakey e non attesterebbero l'assenza di tutte le differenze microarchitetturali. Il numero di posti e la durata complessiva della richiesta HTTP restano fuori dal contratto. Questa rimane esclusivamente un'API Development, non identità Production #13.
 
 [Issue #64](https://github.com/KeyserDSoze/Game.Edonism/issues/64).
+
+
+## Emissione token e pulizia dei digest mai pubblicati (#65)
+
+La generazione di capability non avviene durante la lettura dell'header ma **quando viene creato un match o ruotato il token di un singolo posto**. Prima queste due operazioni avevano loop distinti: il nuovo `byte[32]` raw e il digest SHA-256 calcolato potevano essere abbandonati al GC in caso di collisione, eccezione di conversione o salvataggio cifrato fallito. Ora entrambe usano `CreateUniqueSeatCapability`, che restituisce il nuovo digest solo dopo averne verificato l'unicità tramite `CryptographicOperations.FixedTimeEquals`, azzera il raw in ogni `finally` e azzera il digest del candidato scartato.
+
+Il chiamante assume la proprietà del digest solo al commit. `Register` azzera tutti i digest dei posti creati se il salvataggio cifrato o la registrazione falliscono; non consuma la quota e non pubblica il match. `TryRotateSeatToken` azzera il nuovo digest se non arriva al commit, lascia intatti il digest precedente, la mano, la revisione e la presenza; dopo il commit cifrato e l'aggiornamento in memoria, azzera **il vecchio digest revocato**. I digest residenti di altri attori non vengono mai puliti durante la rotazione.
+
+Regressioni xUnit: per ognuno dei 2–8 posti con mazzo completo, due rotazioni successive, revoca di tutti i token storici, corrispondenza tra hash dell'ultimo bearer e checkpoint cifrato, carte private invariate e restart. Un test forza l'errore al primo checkpoint prima del commit, ripara lo storage e dimostra che una nuova creazione resta ammessa con quota 1; rimangono validi gli scenari già presenti di errore I/O in rotazione e le suite Playwright UI/live. La cancellazione in heap è verificata tramite gli `try/finally` nel sorgente, non con misure temporali flakey. Le stringhe .NET contenenti token consegnati o candidati non sono cancellabili in modo garantito; questa rimane una funzione Development, non login Production (#13).
+
+[Issue #65](https://github.com/KeyserDSoze/Game.Edonism/issues/65).

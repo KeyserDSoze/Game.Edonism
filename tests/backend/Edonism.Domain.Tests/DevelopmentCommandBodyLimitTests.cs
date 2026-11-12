@@ -109,14 +109,20 @@ public sealed class DevelopmentCommandBodyLimitTests
         HttpClient client, string path, string json, string key, bool unknownLength)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, path);
-        request.Content = unknownLength
-            ? new UnknownLengthJsonContent(json)
-            : new StringContent(json, Encoding.UTF8, "application/json");
         if (unknownLength)
+        {
+            request.Content = new UnknownLengthJsonContent(json);
             Assert.Null(request.Content.Headers.ContentLength);
+        }
         else
-            Assert.Equal(Encoding.UTF8.GetByteCount(json),
+        {
+            request.Content = new StringContent(
+                json, Encoding.UTF8, "application/json");
+            request.Content.Headers.ContentLength =
+                Encoding.UTF8.GetByteCount(json);
+            Assert.Equal((long)Encoding.UTF8.GetByteCount(json),
                 request.Content.Headers.ContentLength);
+        }
         request.Headers.TryAddWithoutValidation("Idempotency-Key", key);
         return await client.SendAsync(request);
     }

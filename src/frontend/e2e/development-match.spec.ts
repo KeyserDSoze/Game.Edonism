@@ -3208,7 +3208,7 @@ test("verified opponent-controlled lots focus on the public map and switch seats
   await expect(page.getByTestId("city-renderer"))
     .toHaveAttribute("data-focus-path", "gauss>main-square>einstein");
   await page.getByTestId("city-tactical-waypoint-2").click();
-  await expect(page.getByTestId("selected-street")).toHaveText("Viale Einstein");
+  await expect(page.getByTestId("selected-street")).toHaveText("Einstein Avenue");
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
 
   await page.getByTestId("dev-seat-bob").click();

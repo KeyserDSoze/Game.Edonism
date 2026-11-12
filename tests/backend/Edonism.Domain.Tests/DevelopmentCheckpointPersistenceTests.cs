@@ -121,6 +121,62 @@ public sealed class DevelopmentCheckpointPersistenceTests
         }
     }
 
+    [Fact]
+    public void RepeatedBearerAuthorizationClearsOnlyTemporaryBuffersAndRetainsSeatIsolation()
+    {
+        using var temp = new TempDirectory();
+        var store = new DevelopmentMatchStore(temp.Files());
+        var created = Create(store);
+        var alice = created.Credentials.Single(c => c.PlayerId == "alice");
+        var bob = created.Credentials.Single(c => c.PlayerId == "bob");
+        var id = created.MatchId;
+
+        Assert.True(store.TryReadHand(id, alice.Token, out var firstAliceHand));
+        Assert.True(store.TryReadHand(id, bob.Token, out var firstBobHand));
+        var aliceCards = firstAliceHand!.CardIds.ToArray();
+        var bobCards = firstBobHand!.CardIds.ToArray();
+        Assert.Equal(4, aliceCards.Length);
+        Assert.Equal(4, bobCards.Length);
+        Assert.False(aliceCards.SequenceEqual(bobCards));
+        var before = temp.Files().Load(id);
+        Assert.NotNull(before);
+
+        // Authorization repeats on both successful and failed paths. The
+        // persistent digests must never be zeroed with the request buffers.
+        for (var i = 0; i < 32; i++)
+        {
+            Assert.True(store.TryReadHand(id, alice.Token.ToLowerInvariant(), out var aliceHand));
+            Assert.Equal("alice", aliceHand!.PlayerId);
+            Assert.Equal(aliceCards, aliceHand.CardIds.ToArray());
+            Assert.True(store.TryReadHand(id, bob.Token, out var bobHand));
+            Assert.Equal("bob", bobHand!.PlayerId);
+            Assert.Equal(bobCards, bobHand.CardIds.ToArray());
+            Assert.False(store.TryReadHand(id, new string('F', 64), out _));
+            Assert.False(store.TryReadHand(id, new string('X', 64), out _));
+            Assert.False(store.TryReadHand(id, "invalid", out _));
+        }
+
+        var afterReads = temp.Files().Load(id);
+        Assert.NotNull(afterReads);
+        Assert.Equal(before.TokenDigests["alice"], afterReads.TokenDigests["alice"]);
+        Assert.Equal(before.TokenDigests["bob"], afterReads.TokenDigests["bob"]);
+
+        Assert.True(store.TryRotateSeatToken(id, alice.Token, out var rotated));
+        Assert.NotNull(rotated);
+        Assert.False(store.TryReadHand(id, alice.Token, out _));
+        Assert.True(store.TryReadHand(id, rotated.Token, out var newAliceHand));
+        Assert.Equal(aliceCards, newAliceHand!.CardIds.ToArray());
+        Assert.True(store.TryReadHand(id, bob.Token, out var newBobHand));
+        Assert.Equal(bobCards, newBobHand!.CardIds.ToArray());
+
+        var restored = new DevelopmentMatchStore(temp.Files());
+        Assert.False(restored.TryReadHand(id, alice.Token, out _));
+        Assert.True(restored.TryReadHand(id, rotated.Token, out var restoredAlice));
+        Assert.Equal(aliceCards, restoredAlice!.CardIds.ToArray());
+        Assert.True(restored.TryReadHand(id, bob.Token, out var restoredBob));
+        Assert.Equal(bobCards, restoredBob!.CardIds.ToArray());
+    }
+
     [Theory]
     [InlineData(2)]
     [InlineData(3)]

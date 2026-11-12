@@ -119,13 +119,31 @@ public sealed class DevelopmentMatchStore
             try { supplied = Convert.FromHexString(token); }
             catch (FormatException) { return null; }
 
-            var suppliedDigest = SHA256.HashData(supplied);
-            foreach (var (playerId, candidate) in TokenDigests)
+            // Do not retain additional raw bearer/digest buffers in managed
+            // memory after resolving this Development-only seat capability.
+            // The original HTTP token string cannot be zeroed here.
+            try
             {
-                if (CryptographicOperations.FixedTimeEquals(candidate, suppliedDigest)) return playerId;
-            }
+                var suppliedDigest = SHA256.HashData(supplied);
+                try
+                {
+                    foreach (var (playerId, candidate) in TokenDigests)
+                    {
+                        if (CryptographicOperations.FixedTimeEquals(candidate, suppliedDigest))
+                            return playerId;
+                    }
 
-            return null;
+                    return null;
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(suppliedDigest);
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(supplied);
+            }
         }
     }
 

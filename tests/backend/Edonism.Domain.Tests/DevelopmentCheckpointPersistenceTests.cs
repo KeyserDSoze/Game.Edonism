@@ -231,6 +231,68 @@ public sealed class DevelopmentCheckpointPersistenceTests
     }
 
     [Theory]
+    [InlineData("printed-quota")]
+    [InlineData("unknown-category")]
+    [InlineData("duplicate-character")]
+    [InlineData("invalid-hearts")]
+    public void AuthenticatedButInvalidPublicSetupCannotRestoreOrExposePrivateHands(
+        string tamper)
+    {
+        using var temp = new TempDirectory();
+        var original = new DevelopmentMatchStore(temp.Files());
+        var created = Create(original);
+        var persisted = temp.Files().Load(created.MatchId);
+        Assert.NotNull(persisted);
+
+        var state = persisted.Checkpoint.State;
+        var activities = state.BoardActivities.ToArray();
+        var characters = state.AssignedCharacters.ToArray();
+        var players = state.Players.ToArray();
+        switch (tamper)
+        {
+            case "printed-quota":
+                activities[0] = activities[0] with
+                {
+                    Category = activities.First(c => c.Category != activities[0].Category).Category
+                };
+                break;
+            case "unknown-category":
+                activities[0] = activities[0] with { Category = "fake-printed-category" };
+                break;
+            case "duplicate-character":
+                characters[1] = characters[1] with { CharacterId = characters[0].CharacterId };
+                break;
+            case "invalid-hearts":
+                characters[0] = characters[0] with { PrintedInitialHearts = 6 };
+                players[0] = players[0] with { Hearts = 6 };
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(tamper));
+        }
+        var altered = state with
+        {
+            BoardActivities = activities, AssignedCharacters = characters, Players = players
+        };
+        var digest = persisted.TokenDigests.ToDictionary(
+            kv => kv.Key, kv => Convert.FromHexString(kv.Value), StringComparer.Ordinal);
+
+        // Correct AES-GCM authentication does not establish that PUBLIC
+        // board/category/character state was produced by trusted composers.
+        temp.Files().Save(persisted.Checkpoint with { State = altered },
+            digest, persisted.CommandReceipts);
+
+        var restarted = new DevelopmentMatchStore(temp.Files());
+        var alice = created.Credentials.Single(c => c.PlayerId == "alice").Token;
+        Assert.False(restarted.TryRead(created.MatchId, alice, out _));
+        Assert.False(restarted.TryReadHand(created.MatchId, alice, out _));
+        Assert.False(restarted.TryReadHistory(created.MatchId, alice, out _));
+
+        // A different, valid in-memory match is unaffected by the disk forgery.
+        Assert.True(original.TryReadHand(created.MatchId, alice, out var hand));
+        Assert.Equal(4, hand!.CardIds.Count);
+    }
+
+    [Theory]
     [InlineData("swap-private-hand")]
     [InlineData("reorder-draw-pile")]
     public void AuthenticatedButNonCanonicalPrivateDealIsRejectedOnEncryptedRestart(

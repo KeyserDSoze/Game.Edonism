@@ -20,7 +20,9 @@ type PublicMatch = Readonly<{
   grossSalaryQuotes: readonly {
     playerId: Seat; baseAtoms: number; standingActivityAtoms: number; grossAtoms: number
   }[];
-  assignedCharacters: readonly { playerId: Seat; characterId: string }[];
+  assignedCharacters: readonly {
+    playerId: Seat; characterId: string; printedInitialHearts: number
+  }[];
   turnOrder: readonly Seat[];
   proposedNextRoundOrder: readonly Seat[];
   events: readonly {
@@ -106,6 +108,27 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   const { matchId } = created;
   expect(created.state.boardActivities).toHaveLength(30);
   expect(created.state.assignedCharacters).toHaveLength(2);
+  // #59: the live Domain setup must expose only the canonical 30 public
+  // face-up activities with printed per-category quotas and unique character
+  // cards/hearts. Nothing here permits a client to rewrite those values.
+  const printedQuotas: Record<string, number> = {
+    "public-financing": 5, "private-financing": 5,
+    "black-market": 4, corruption: 4, culture: 4,
+    sport: 2, transport: 3, bishopric: 3,
+  };
+  expect(created.state.boardActivities).toHaveLength(30);
+  expect(new Set(created.state.boardActivities.map(x => x.slotId)).size).toBe(30);
+  expect(new Set(created.state.boardActivities.map(x => x.cardId)).size).toBe(30);
+  for (const [category, expected] of Object.entries(printedQuotas))
+    expect(created.state.boardActivities.filter(x => x.category === category)).toHaveLength(expected);
+  expect(created.state.boardActivities.every(x => x.category in printedQuotas)).toBe(true);
+  expect(new Set(created.state.assignedCharacters.map(x => x.characterId)).size).toBe(2);
+  for (const assigned of created.state.assignedCharacters) {
+    expect(assigned.printedInitialHearts).toBeGreaterThanOrEqual(1);
+    expect(assigned.printedInitialHearts).toBeLessThanOrEqual(5);
+    expect(created.state.players.find(x => x.playerId === assigned.playerId)?.hearts)
+      .toBe(assigned.printedInitialHearts);
+  }
   expect(created.state.players.map((p) => p.playerId)).toEqual(["alice", "bob"]);
   expect(created.state.revision).toBe(0);
 

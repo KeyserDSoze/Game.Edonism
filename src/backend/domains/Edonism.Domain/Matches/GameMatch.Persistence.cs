@@ -74,13 +74,31 @@ public sealed partial class GameMatch
             || s.BoardActivities.Select(c => c.SlotId).Distinct(StringComparer.Ordinal).Count() != s.BoardActivities.Count
             || s.BoardActivities.Select(c => c.CardId).Distinct(StringComparer.Ordinal).Count() != s.BoardActivities.Count)
             throw new InvalidDataException("Checkpoint public activity placement invalid.");
+
+        // The trusted v1 composers already enforce the eight printed category
+        // quotas. Restore must not accept an otherwise complete 30-slot board
+        // with invented categories or shifted counts. A 0-card legacy fixture
+        // is a separate Development-only setup and remains supported.
+        if (s.BoardActivities.Count != 0
+            && (s.BoardActivities.Any(c =>
+                    !ActivityPlacement.PrintedCategoryQuotas.ContainsKey(c.Category))
+                || ActivityPlacement.PrintedCategoryQuotas.Any(quota =>
+                    s.BoardActivities.Count(c => c.Category == quota.Key) != quota.Value)))
+            throw new InvalidDataException("Checkpoint activity category quotas invalid.");
         if (s.AssignedCharacters.Count != 0 && s.AssignedCharacters.Count != participants.Count)
             throw new InvalidDataException("Checkpoint character assignments incomplete.");
+        // Legacy slot/card-only Development fixtures have no character hearts.
+        // Each drawn character is one physical card, with 1-5 printed hearts.
+        if ((s.AssignedCharacters.Count == 0 && participants.Any(p => p.Hearts is not null))
+            || s.AssignedCharacters.Any(a => a is null)
+            || s.AssignedCharacters.Select(a => a.CharacterId)
+                .Distinct(StringComparer.Ordinal).Count() != s.AssignedCharacters.Count)
+            throw new InvalidDataException("Checkpoint character assignment mismatch.");
         if (s.AssignedCharacters.Any(a => a is null
             || !playerIds.Contains(a.PlayerId)
             || string.IsNullOrWhiteSpace(a.CharacterId)
             || string.IsNullOrWhiteSpace(a.StartingActivityCardId)
-            || a.PrintedInitialHearts < 1
+            || a.PrintedInitialHearts is < 1 or > 5
             || !s.BoardActivities.Any(c => c.CardId == a.StartingActivityCardId
                 && participants.Any(p => p.PlayerId == a.PlayerId && p.StartingSlotId == c.SlotId))
             || participants.All(p => p.PlayerId != a.PlayerId || p.Hearts != a.PrintedInitialHearts))

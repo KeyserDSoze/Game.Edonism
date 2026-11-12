@@ -239,8 +239,12 @@ test("mobile English public field diff distinguishes genesis position and seat o
     await upload(page, SECOND, publicAudit({ seats: 8, reverseOrder: true }));
     await expect(page.getByTestId("dev-public-audit-compare-status"))
       .toHaveAttribute("data-compare", "divergent");
-    expect(await paths()).toEqual(
-      Array.from({ length: 8 }, (_, i) => `players[${i}].playerId`));
+    // Reordering the seats also changes who is the active first player.
+    // This is a genuine, public turn difference, not only an ID permutation.
+    expect(await paths()).toEqual([
+      "activePlayerId",
+      ...Array.from({ length: 8 }, (_, i) => `players[${i}].playerId`),
+    ]);
     await expect(changed.first()).toContainText("Seat 1: Seat identity");
     await expect(changed.last()).toContainText("Seat 8: Seat identity");
 

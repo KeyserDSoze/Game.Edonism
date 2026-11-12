@@ -84,3 +84,12 @@ La funzione pura `compareOfflinePublicAuditReviews` **copia esplicitamente solta
 **Gli export restano non firmati e falsificabili:** il confronto non certifica alcuna provenienza, non attribuisce colpe e non autorizza comandi. I test Playwright sintetici per 2 e 8 giocatori coprono due eventi diversi a r1, divergenze di posizione e ordine alla genesi r0, reset, dati sensibili extra, mismatch del match ID, prefissi e viewport mobile EN; le suite xUnit e Playwright contro .NET reale rimangono gate obbligatori su main.
 
 [Issue #73](https://github.com/KeyserDSoze/Game.Edonism/issues/73).
+
+
+## Riepilogo dei soli campi pubblici cambiati (#74)
+
+Il confronto a due colonne introdotto in #73 ora mostra anche una **lista deterministica dei campi diversi** della prima revisione discordante. La funzione pura `changedPublicFields` controlla nell'ordine v1 `kind`, `actorId`, `fromStreetId`, `toStreetId`, `phase`, `activePlayerId` e per ciascuna posizione ordinata `players[i].playerId/streetId/freeMoveUsed`. La lista contiene soltanto identificatori di campo approvati e indici di posto verificati (0–7), **mai valori grezzi né stringhe arbitrarie dei file**. Se i due export hanno diverso numero di posti, ogni posto mancante è indicato tramite il solo campo identità. Il confronto resta limitato alla prima revisione discordante.
+
+La UI Development mostra nomi dei campi localizzati IT/EN e numeri di posto 1..N, oltre alle due schede con i soli dati pubblici. Identici, prefissi, partite differenti, file invalidi e selezioni successive di file non mantengono alcun riepilogo; le protezioni asincrone #72 sono riutilizzate. I due file v1 rimangono non firmati, coerenti non significa autentici, e nessun diff attribuisce colpe né modifica il match. Regressioni Playwright per 2 giocatori r1 con elenco esatto, 8 giocatori r0 (strada e ordine posti) su mobile EN, privacy/reset/nessuna API; gate xUnit e Playwright live .NET rimangono obbligatori per la chiusura.
+
+[Issue #74](https://github.com/KeyserDSoze/Game.Edonism/issues/74).

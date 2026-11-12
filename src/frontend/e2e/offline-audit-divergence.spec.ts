@@ -173,3 +173,83 @@ for (const seats of [2, 8] as const) {
       await expect(page.getByTestId("dev-offline-timeline")).toHaveCount(0);
     });
 }
+
+test("public first-divergence changed field paths are canonical and localized (#74)",
+  async ({ page }) => {
+    let apiCalls = 0;
+    await page.route("**/api/**", route => { apiCalls++; return route.abort(); });
+    await page.goto("/");
+    const input = page.getByTestId("dev-public-audit-changes");
+    const paths = async () => input.getByTestId("dev-public-audit-changed-field")
+      .evaluateAll(nodes => nodes.map(node => node.getAttribute("data-field-path")));
+
+    const left = publicAudit({ seats: 2, revision: 1, action: "free-move" });
+    const right = publicAudit({ seats: 2, revision: 1, action: "turn-ended" });
+    await upload(page, FIRST, left);
+    await expect(page.getByTestId("dev-public-audit-import-status"))
+      .toHaveAttribute("data-check", "valid");
+    await upload(page, SECOND, right);
+    await expect(page.getByTestId("dev-public-audit-compare-status"))
+      .toHaveAttribute("data-compare", "divergent");
+    await expect(input).toBeVisible();
+    expect(await paths()).toEqual([
+      "kind", "fromStreetId", "toStreetId", "activePlayerId",
+      "players[0].streetId", "players[0].freeMoveUsed",
+    ]);
+    await expect(input).toContainText("Tipo evento");
+    await expect(input).toContainText("Posto 1: Strada del giocatore");
+
+    await upload(page, SECOND, left);
+    await expect(input).toHaveCount(0);
+    await upload(page, SECOND, publicAudit({ seats: 2, revision: 0 }));
+    await expect(input).toHaveCount(0);
+    await upload(page, SECOND, publicAudit({ seats: 2, matchId: OTHER }));
+    await expect(input).toHaveCount(0);
+    const unsafe = JSON.parse(right.toString("utf8")) as { privateHand?: string };
+    unsafe.privateHand = "secret-action-card";
+    await upload(page, SECOND, Buffer.from(JSON.stringify(unsafe)));
+    await expect(page.getByTestId("dev-public-audit-compare-status"))
+      .toHaveAttribute("data-compare", "invalid");
+    await expect(input).toHaveCount(0);
+    await expect(page.locator("body")).not.toContainText(unsafe.privateHand);
+    expect(apiCalls).toBe(0);
+    await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  });
+
+test("mobile English public field diff distinguishes genesis position and seat order (#74)",
+  async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    let apiCalls = 0;
+    await page.route("**/api/**", route => { apiCalls++; return route.abort(); });
+    await page.goto("/");
+    await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+    const changed = page.getByTestId("dev-public-audit-changed-field");
+    const paths = async () => changed.evaluateAll(
+      nodes => nodes.map(node => node.getAttribute("data-field-path")));
+
+    await upload(page, FIRST, publicAudit({ seats: 8 }));
+    await expect(page.getByTestId("dev-public-audit-import-status"))
+      .toHaveAttribute("data-check", "valid");
+    await upload(page, SECOND, publicAudit({ seats: 8, initialStreet: "boson" }));
+    await expect(page.getByTestId("dev-public-audit-compare-status"))
+      .toHaveAttribute("data-compare", "divergent");
+    expect(await paths()).toEqual(["players[0].streetId"]);
+    await expect(changed.first()).toContainText("Seat 1: Player street");
+
+    await upload(page, SECOND, publicAudit({ seats: 8, reverseOrder: true }));
+    await expect(page.getByTestId("dev-public-audit-compare-status"))
+      .toHaveAttribute("data-compare", "divergent");
+    expect(await paths()).toEqual(
+      Array.from({ length: 8 }, (_, i) => `players[${i}].playerId`));
+    await expect(changed.first()).toContainText("Seat 1: Seat identity");
+    await expect(changed.last()).toContainText("Seat 8: Seat identity");
+
+    await upload(page, FIRST, Buffer.from("{bad json"));
+    await expect(page.getByTestId("dev-public-audit-import-status"))
+      .toHaveAttribute("data-check", "invalid");
+    await expect(page.getByTestId("dev-public-audit-changes")).toHaveCount(0);
+    await expect(page.getByTestId("dev-public-audit-diff")).toHaveCount(0);
+    expect(apiCalls).toBe(0);
+    expect(await page.evaluate(() =>
+      document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+  });

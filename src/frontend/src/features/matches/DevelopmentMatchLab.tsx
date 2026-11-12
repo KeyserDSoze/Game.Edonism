@@ -17,6 +17,7 @@ import {
 import {
   compareOfflinePublicAuditReviews,
   type OfflinePublicAuditComparison,
+  type PublicAuditChangedField,
 } from "./comparePublicAudits";
 import { verifiedPublicHistory, type PublicHistory } from "./verifiedPublicHistory";
 
@@ -441,6 +442,17 @@ export function DevelopmentMatchLab({
 
   // An offline review is derived only from the fully verified public file.
   // It never updates the live map, game revision, seat token or HTTP state.
+  const publicDiffLabels: Record<PublicAuditChangedField["field"], string> = {
+    kind: t("dev.historyCompareFieldKind"),
+    actorId: t("dev.historyCompareFieldActor"),
+    fromStreetId: t("dev.historyCompareFieldFrom"),
+    toStreetId: t("dev.historyCompareFieldTo"),
+    phase: t("dev.historyCompareFieldPhase"),
+    activePlayerId: t("dev.historyCompareFieldTurn"),
+    playerId: t("dev.historyCompareFieldSeatId"),
+    streetId: t("dev.historyCompareFieldStreet"),
+    freeMoveUsed: t("dev.historyCompareFieldFreeMove"),
+  };
   const offlineFrame = offlineAudit?.status === "valid"
     ? offlineAudit.data.steps[offlineAudit.revision]
     : null;
@@ -1707,6 +1719,31 @@ export function DevelopmentMatchLab({
                         revision: offlineComparison.result.firstDifferentRevision,
                       })}
                     </p>
+                    <section aria-label={t("dev.historyCompareChangedTitle")}
+                      className="space-y-1">
+                      <p className="text-xs font-semibold">
+                        {t("dev.historyCompareChangedTitle")}
+                      </p>
+                      <ul data-testid="dev-public-audit-changes"
+                        className="list-disc space-y-1 pl-4 text-xs">
+                        {offlineComparison.result.firstDifference.changedFields.map(change => {
+                          const path = change.seatIndex === null
+                            ? change.field
+                            : `players[${change.seatIndex}].${change.field}`;
+                          const field = publicDiffLabels[change.field];
+                          return (
+                            <li key={path} data-testid="dev-public-audit-changed-field"
+                              data-field-path={path} className="[overflow-wrap:anywhere]">
+                              {change.seatIndex === null
+                                ? field
+                                : t("dev.historyCompareChangedSeatField", {
+                                    seat: change.seatIndex + 1, field,
+                                  })}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
                     <div className="grid gap-2 md:grid-cols-2">
                       {([
                         { id: "left", label: t("dev.historyCompareFirstFile"),

@@ -5,6 +5,13 @@ import type { OfflinePublicAuditReview, OfflinePublicAuditTimelineStep } from ".
  * the strict offline verifier). This comparison does not establish provenance:
  * either unsigned file can be forged, even when their histories agree.
  */
+/** Only allowlisted schema keys and verified 0-based seat indices, never raw values. */
+export type PublicAuditChangedField = Readonly<{
+  field: "kind" | "actorId" | "fromStreetId" | "toStreetId"
+    | "phase" | "activePlayerId" | "playerId" | "streetId" | "freeMoveUsed";
+  seatIndex: number | null;
+}>;
+
 export type OfflinePublicAuditComparison = Readonly<{
   status: "identical" | "left-prefix" | "right-prefix" | "divergent" | "different-match";
   firstDifferentRevision: number | null;
@@ -12,8 +19,42 @@ export type OfflinePublicAuditComparison = Readonly<{
   firstDifference?: Readonly<{
     left: OfflinePublicAuditTimelineStep;
     right: OfflinePublicAuditTimelineStep;
+    changedFields: readonly PublicAuditChangedField[];
   }>;
 }>;
+
+function changedPublicFields(
+  left: OfflinePublicAuditTimelineStep,
+  right: OfflinePublicAuditTimelineStep,
+): PublicAuditChangedField[] {
+  const differences: PublicAuditChangedField[] = [];
+  // The strict verifier guarantees each step's revision equals its array
+  // position. Compare only public event/turn keys, in canonical schema order.
+  const fields = [
+    "kind", "actorId", "fromStreetId", "toStreetId", "phase", "activePlayerId",
+  ] as const;
+  for (const field of fields) {
+    if (left[field] !== right[field])
+      differences.push({ field, seatIndex: null });
+  }
+
+  const playerFields = ["playerId", "streetId", "freeMoveUsed"] as const;
+  for (let i = 0; i < Math.max(left.players.length, right.players.length); i++) {
+    const a = left.players[i];
+    const b = right.players[i];
+    if (!a || !b) {
+      // Unlike a raw array dump, the missing-seat marker carries no player
+      // data. The first difference is the seat identity at that index.
+      differences.push({ field: "playerId", seatIndex: i });
+      continue;
+    }
+    for (const field of playerFields) {
+      if (a[field] !== b[field])
+        differences.push({ field, seatIndex: i });
+    }
+  }
+  return differences;
+}
 
 /** Never spread file data or retain unknown properties in comparison results. */
 function copyPublicStep(step: OfflinePublicAuditTimelineStep): OfflinePublicAuditTimelineStep {
@@ -68,6 +109,7 @@ export function compareOfflinePublicAuditReviews(
         firstDifference: {
           left: copyPublicStep(left.steps[revision]),
           right: copyPublicStep(right.steps[revision]),
+          changedFields: changedPublicFields(left.steps[revision], right.steps[revision]),
         },
       };
     }

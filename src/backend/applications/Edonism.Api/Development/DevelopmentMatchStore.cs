@@ -294,7 +294,7 @@ public sealed class DevelopmentMatchStore
         // needs coordination: without it concurrent reconnects each decrypt
         // and validate the same private checkpoint before GetOrAdd.
         if (_matches.TryGetValue(matchId, out entry!)) return true;
-        if (_checkpointFiles is null) return false;
+        if (_checkpointFiles is not { } checkpointFiles) return false;
 
         var stripe = (int)((uint)matchId.GetHashCode()
             % (uint)_restoreStripes.Length);
@@ -304,16 +304,18 @@ public sealed class DevelopmentMatchStore
             // already published the Entry; every following caller reuses it
             // instead of repeating AES-GCM I/O and Domain restoration.
             if (_matches.TryGetValue(matchId, out entry!)) return true;
-            return TryRestoreEntry(matchId, out entry);
+            return TryRestoreEntry(matchId, checkpointFiles, out entry);
         }
     }
 
-    private bool TryRestoreEntry(Guid matchId, out Entry entry)
+    private bool TryRestoreEntry(
+        Guid matchId, DevelopmentMatchCheckpointFiles checkpointFiles, out Entry entry)
     {
+        entry = null!;
         // Called only inside the bounded cold-restore lock. Corruption or
         // wrong keys fail closed, while a valid reload publishes one Entry.
         PersistedDevelopmentMatch? data;
-        try { data = _checkpointFiles.Load(matchId); }
+        try { data = checkpointFiles.Load(matchId); }
         catch (Exception ex) when (ex is InvalidDataException or IOException
             or UnauthorizedAccessException or ArgumentException)
         {

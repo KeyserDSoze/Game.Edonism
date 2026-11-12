@@ -251,7 +251,7 @@ export function DevelopmentMatchLab({
   // intentionally independent of session, seat, private hand and commands.
   const [offlineAudit, setOfflineAudit] = useState<
     { status: "valid"; data: PublicAuditFileCheck }
-    | { status: "invalid" | "checking" } | null
+    | { status: "invalid" } | { status: "checking" } | null
   >(null);
   const offlineAuditRequest = useRef(0);
   // Monotonic authority guards: HTTP polling/commands may resolve out of order.

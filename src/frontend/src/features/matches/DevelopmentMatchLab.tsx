@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CircleDot, FlaskConical, Hand, LogOut, MoveRight, RotateCw, Users } from "lucide-react";
+import { CircleDot, Download, FlaskConical, Hand, LogOut, MoveRight, RotateCw, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import type { TacticalFocus } from "@/features/city/tacticalFocus";
 import type { HistoricalStreetFocus } from "@/features/city/historicalStreetFocus";
 import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
 import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
+import { buildVerifiedPublicAuditExport } from "./publicAuditExport";
 import { verifiedPublicHistory, type PublicHistory } from "./verifiedPublicHistory";
 
 type DemoCredential = Readonly<{ playerId: string; token: string }>;
@@ -358,6 +359,39 @@ export function DevelopmentMatchLab({
     onHistoricalFocus(moveFocus);
     setHistoryRevision(frame.revision === history.verifiedRevision
       ? null : frame.revision);
+  }
+
+  // Download ONLY the currently authenticated, fully verified public replay.
+  // Never JSON-serialize DemoSession, a bearer, the private hand or a raw API
+  // response. This is an unsigned Development-only record, not match restore.
+  function exportPublicAudit() {
+    if (!session || !history || !token || !actorId) return;
+    const scope = currentActorScope.current;
+    if (scope?.matchId !== session.matchId || scope.seatId !== actorId
+      || scope.token !== token || history.matchId !== session.matchId
+      || history.verifiedRevision !== session.state.revision) return;
+
+    const proof = buildVerifiedPublicAuditExport(session.state, history);
+    if (!proof) return;
+    const blob = new Blob([JSON.stringify(proof, null, 2) + "\n"], {
+      type: "application/json",
+    });
+    const href = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement("a");
+      link.href = href;
+      // A GUID and server revision only, never a token or player ID.
+      link.download = `edonism-public-audit-${proof.matchId}-r${proof.verifiedRevision}.json`;
+      document.body.appendChild(link);
+      try {
+        link.click();
+      } finally {
+        link.remove();
+      }
+    } finally {
+      // Keep the object URL alive long enough for a browser download to begin.
+      window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+    }
   }
 
   const uncontrolledRoutes = routesLease && token
@@ -2006,7 +2040,20 @@ export function DevelopmentMatchLab({
               data-testid="dev-history-panel"
               className="space-y-3 rounded-xl border border-border p-3"
             >
-              <p className="text-xs font-semibold">{t("dev.historyTitle")}</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-semibold">{t("dev.historyTitle")}</p>
+                <Button type="button" size="sm" variant="outline"
+                  data-testid="dev-public-audit-export"
+                  disabled={!history || !actorId || !token}
+                  onClick={exportPublicAudit}>
+                  <Download aria-hidden="true" className="size-3.5" />
+                  {t("dev.historyExport")}
+                </Button>
+              </div>
+              <p data-testid="dev-public-audit-export-note"
+                className="text-[11px] leading-5 text-muted-foreground">
+                {t("dev.historyExportNote")}
+              </p>
               {!inspectedFrame || !history ? (
                 <p data-testid="dev-history-unavailable"
                   className="text-xs text-muted-foreground">{t("dev.historyUnavailable")}</p>

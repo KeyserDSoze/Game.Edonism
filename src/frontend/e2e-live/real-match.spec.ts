@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 
 type Seat = string;
@@ -1315,6 +1316,64 @@ test("real .NET: full Alice long-poll quota returns 429 without starving Bob bro
   } finally {
     await context.close();
   }
+});
+
+test("real .NET: verified first-round audit exports only public events and positions", async ({
+  page, request,
+}) => {
+  const match = await startRealMatch(page);
+  const token = tokenFor(match, "alice");
+  const otherToken = tokenFor(match, "bob");
+  const matchId = match.matchId;
+  const url = `http://127.0.0.1:5080/api/dev/matches/${matchId}`;
+  await expect(page.getByTestId("dev-public-audit-export")).toBeEnabled();
+
+  const move = page.locator('[data-testid^="dev-move-"]:not([disabled])').first();
+  const destination = (await move.getAttribute("data-testid"))!.replace("dev-move-", "");
+  await move.click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
+  await expect(page.getByTestId("dev-public-audit-export")).toBeEnabled();
+
+  const pending = page.waitForEvent("download");
+  await page.getByTestId("dev-public-audit-export").click();
+  const download = await pending;
+  expect(download.suggestedFilename()).toBe(
+    `edonism-public-audit-${matchId}-r1.json`);
+  const exportedText = await readFile(await download.path(), "utf8");
+  const payload = JSON.parse(exportedText) as {
+    format: string; matchId: string; round: number; verifiedRevision: number;
+    events: readonly unknown[]; frames: readonly unknown[];
+  };
+  const liveHistory = await request.get(url + "/history", { headers: auth(otherToken) });
+  const liveState = await request.get(url, { headers: auth(otherToken) });
+  expect(liveHistory.status()).toBe(200);
+  expect(liveState.status()).toBe(200);
+  const serverHistory = await liveHistory.json() as {
+    matchId: string; verifiedRevision: number; frames: readonly unknown[];
+  };
+  const serverState = await liveState.json() as {
+    events: readonly unknown[]; revision: number;
+  };
+  expect(payload.format).toBe("edonism-public-audit-v1");
+  expect(payload.matchId).toBe(matchId);
+  expect(payload.round).toBe(1);
+  expect(payload.verifiedRevision).toBe(1);
+  expect(payload.verifiedRevision).toBe(serverHistory.verifiedRevision);
+  expect(payload.verifiedRevision).toBe(serverState.revision);
+  expect(payload.events).toEqual(serverState.events);
+  expect(payload.frames).toEqual(serverHistory.frames);
+
+  const hand = await request.get(url + "/hand", { headers: auth(token) });
+  expect(hand.status()).toBe(200);
+  const privateHand = await hand.json() as Hand;
+  for (const card of privateHand.cardIds)
+    expect(exportedText).not.toContain(card);
+  expect(exportedText).not.toContain(token);
+  expect(exportedText).not.toContain(otherToken);
+  expect(exportedText).not.toMatch(/cardIds|token|credentials|digest|drawPile|idempotency|faction/i);
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
 });
 
 test("real .NET: two browsers inspect verified first-round history without changing live moves", async ({

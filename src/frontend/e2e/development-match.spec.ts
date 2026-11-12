@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 // E2E mocks stay Node-compatible: do not import Vite's JSON-backed board
 // module here, because Node 24 requires a JSON import attribute at runtime.
@@ -1521,6 +1522,98 @@ test("saturated conditional polling recovers without revoking private hand or re
   expect(JSON.stringify(data)).not.toContain("a".repeat(64));
   expect(JSON.stringify(data)).not.toContain("b".repeat(64));
 });
+
+// #68: the actual browser download must contain only explicit public fields,
+// never serialized session, private hand, bearer, idempotency key or future data.
+for (const seatCount of [2, 8] as const) {
+  test(`public replay export downloads a private-data-free verified JSON for ${seatCount} seats`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockMatchApi(page, { playerCount: seatCount });
+    await page.goto("/");
+    if (seatCount === 8) {
+      await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+      await page.getByTestId("dev-player-count").selectOption("8");
+    }
+    await page.getByTestId("dev-create").click();
+    const exportButton = page.getByTestId("dev-public-audit-export");
+    await expect(exportButton).toBeEnabled();
+    await expect(exportButton).toHaveText(
+      seatCount === 8 ? "Export public JSON" : "Esporta JSON pubblico");
+    await page.getByTestId("dev-move-planck").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("dev-history-revision")).toContainText("#1");
+    await expect(exportButton).toBeEnabled();
+
+    const pendingDownload = page.waitForEvent("download");
+    await exportButton.click();
+    const download = await pendingDownload;
+    expect(download.suggestedFilename()).toBe(
+      "edonism-public-audit-00000000-0000-0000-0000-000000000020-r1.json");
+    const text = await readFile(await download.path(), "utf8");
+    const proof = JSON.parse(text) as {
+      format: string; matchId: string; round: number; verifiedRevision: number;
+      events: Array<{ revision: number; kind: string; actorId: string; toStreetId: string | null }>;
+      frames: Array<{
+        revision: number; kind: string; phase: number; players: Array<{
+          playerId: string; streetId: string; freeMoveUsed: boolean
+        }>
+      }>;
+    };
+    expect(Object.keys(proof).sort()).toEqual(
+      ["events", "format", "frames", "matchId", "round", "verifiedRevision"]);
+    expect(proof.format).toBe("edonism-public-audit-v1");
+    expect(proof.matchId).toBe("00000000-0000-0000-0000-000000000020");
+    expect(proof.round).toBe(1);
+    expect(proof.verifiedRevision).toBe(1);
+    expect(proof.events.map(e => e.kind)).toEqual(["match-created", "free-move"]);
+    expect(proof.events[1].toStreetId).toBe("planck");
+    expect(proof.frames.map(f => f.revision)).toEqual([0, 1]);
+    expect(proof.frames[1].players).toHaveLength(seatCount);
+    for (const event of proof.events)
+      expect(Object.keys(event).sort()).toEqual(
+        ["actorId", "fromStreetId", "kind", "revision", "round", "toStreetId"]);
+    for (const frame of proof.frames) {
+      expect(Object.keys(frame).sort()).toEqual(
+        ["activePlayerId", "actorId", "kind", "phase", "players", "revision"]);
+      for (const player of frame.players)
+        expect(Object.keys(player).sort()).toEqual(
+          ["freeMoveUsed", "playerId", "streetId"]);
+    }
+    for (let index = 0; index < seatCount; index++)
+      expect(text).not.toContain(String.fromCharCode(97 + index).repeat(64));
+    expect(text).not.toMatch(/cardIds|demo:action:|credentials|token|drawPile|digest|idempotency|faction/i);
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+    const storage = await page.evaluate(() => JSON.stringify({
+      url: location.href, local: Object.values(localStorage),
+      session: Object.values(sessionStorage),
+    }));
+    expect(storage).not.toContain("a".repeat(64));
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+      .toBe(false);
+  });
+}
+
+for (const invalid of ["unavailable", "unknown-event", "forged-frame"] as const) {
+  test(`public replay export fails closed for ${invalid} history`, async ({ page }) => {
+    await mockMatchApi(page, invalid === "unavailable"
+      ? { historyUnavailable: true }
+      : invalid === "unknown-event"
+        ? { unknownSecretEvent: true }
+        : { tamperHistoryFrame: "street" });
+    await page.goto("/");
+    await page.getByTestId("dev-create").click();
+    if (invalid === "forged-frame") {
+      await expect(page.getByTestId("dev-public-audit-export")).toBeEnabled();
+      await page.getByTestId("dev-move-planck").click();
+      await page.getByTestId("dev-end-turn").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("2");
+    }
+    await expect(page.getByTestId("dev-history-unavailable")).toBeVisible();
+    await expect(page.getByTestId("dev-public-audit-export")).toBeDisabled();
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  });
+}
 
 test("public audit buttons jump to verified replay and map without moving LIVE players", async ({ page }) => {
   const { observedHeaders } = await mockMatchApi(page);

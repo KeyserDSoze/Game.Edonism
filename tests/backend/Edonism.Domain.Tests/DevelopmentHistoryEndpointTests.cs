@@ -111,6 +111,104 @@ public sealed class DevelopmentHistoryEndpointTests
         Assert.Equal(HttpStatusCode.OK, bobStill.StatusCode);
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    public async Task EverySeatReceivesOnlyWhitelistedPublicHistoryFields(
+        int seatCount)
+    {
+        using var host = Host();
+        using var creator = host.CreateClient();
+        var players = Enumerable.Range(0, seatCount)
+            .Select(index => $"player-{index}").ToArray();
+        using var response = await creator.PostAsJsonAsync(
+            "/api/dev/matches/from-full-deck", new
+            {
+                playerIds = players,
+                characters = CharacterSetupFixture.Catalog(),
+                availableActivities = ActivitySetupFixture.Catalog(),
+                actionCardIds = ActionDeckFixture.ActionIds(),
+                electionDayCardId = ActionDeckFixture.ElectionDayId,
+                seed = 2026
+            });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using var created = await response.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert.NotNull(created);
+        var id = created.RootElement.GetProperty("matchId").GetGuid();
+        var credentials = created.RootElement.GetProperty("credentials")
+            .EnumerateArray().Select(c => (
+                PlayerId: c.GetProperty("playerId").GetString()!,
+                Token: c.GetProperty("token").GetString()!)).ToArray();
+
+        using var actor = Actor(host, credentials[0].Token);
+        using var options = await actor.GetFromJsonAsync<JsonDocument>(
+            $"/api/dev/matches/{id}/turn-options");
+        Assert.NotNull(options);
+        var destination = options.RootElement.GetProperty("freeMoveStreetIds")[0]
+            .GetString()!;
+        using var moved = await actor.PostAsJsonAsync(
+            $"/api/dev/matches/{id}/free-move",
+            new { destinationStreetId = destination, expectedRevision = 0 });
+        Assert.Equal(HttpStatusCode.OK, moved.StatusCode);
+
+        static string[] Keys(JsonElement element) =>
+            element.EnumerateObject().Select(property => property.Name)
+                .OrderBy(name => name, StringComparer.Ordinal).ToArray();
+
+        foreach (var credential in credentials)
+        {
+            using var seat = Actor(host, credential.Token);
+            using var historyResponse =
+                await seat.GetAsync($"/api/dev/matches/{id}/history");
+            Assert.Equal(HttpStatusCode.OK, historyResponse.StatusCode);
+            Assert.Equal("no-store", historyResponse.Headers.CacheControl?.ToString());
+            var text = await historyResponse.Content.ReadAsStringAsync();
+            using var history = JsonDocument.Parse(text);
+            var root = history.RootElement;
+            Assert.Equal(new[] { "frames", "matchId", "verifiedRevision" }, Keys(root));
+            Assert.Equal(id, root.GetProperty("matchId").GetGuid());
+            Assert.Equal(1, root.GetProperty("verifiedRevision").GetInt64());
+            var frames = root.GetProperty("frames").EnumerateArray().ToArray();
+            Assert.Equal(2, frames.Length);
+            for (var revision = 0; revision < frames.Length; revision++)
+            {
+                var frame = frames[revision];
+                Assert.Equal(new[] {
+                    "activePlayerId", "actorId", "kind", "phase", "players", "revision"
+                }, Keys(frame));
+                Assert.Equal(revision, frame.GetProperty("revision").GetInt32());
+                Assert.Equal(seatCount,
+                    frame.GetProperty("players").GetArrayLength());
+                foreach (var player in frame.GetProperty("players").EnumerateArray())
+                {
+                    Assert.Equal(new[] { "freeMoveUsed", "playerId", "streetId" },
+                        Keys(player));
+                    Assert.Contains(player.GetProperty("playerId").GetString()!, players);
+                    Assert.False(string.IsNullOrWhiteSpace(
+                        player.GetProperty("streetId").GetString()));
+                }
+            }
+
+            foreach (var secret in credentials.Select(c => c.Token))
+                Assert.DoesNotContain(secret, text);
+            using var handResponse =
+                await seat.GetAsync($"/api/dev/matches/{id}/hand");
+            using var hand = await handResponse.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.NotNull(hand);
+            foreach (var card in hand.RootElement.GetProperty("cardIds").EnumerateArray())
+                Assert.DoesNotContain(card.GetString()!, text);
+            Assert.DoesNotContain("cardIds", text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("drawPile", text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("token", text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("digest", text, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     [Fact]
     public async Task ProductionDoesNotExposeReplayHistory()
     {

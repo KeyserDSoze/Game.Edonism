@@ -236,8 +236,22 @@ public sealed class DevelopmentSeatPresenceTests
         Assert.All(initially!.RootElement.GetProperty("seats").EnumerateArray().ToArray(),
             seat => Assert.False(seat.GetProperty("isActive").GetBoolean()));
 
-        using var heartbeat = await alice.PostAsJsonAsync(
+        // #82: a client-supplied playerId body is no longer silently
+        // discarded. Reject it before any heartbeat or seat identity change.
+        using var bodySpoof = await alice.PostAsJsonAsync(
             path + "?playerId=bob", new { playerId = "bob" });
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, bodySpoof.StatusCode);
+        Assert.Equal("no-store", bodySpoof.Headers.CacheControl?.ToString());
+        using (var deniedJson = await bodySpoof.Content.ReadFromJsonAsync<JsonDocument>())
+            Assert.Equal("dev_bodyless_payload_not_allowed",
+                deniedJson!.RootElement.GetProperty("code").GetString());
+        using (var untouched = await alice.GetFromJsonAsync<JsonDocument>(path))
+            Assert.All(untouched!.RootElement.GetProperty("seats").EnumerateArray(),
+                seat => Assert.False(seat.GetProperty("isActive").GetBoolean()));
+
+        // The query string is still untrusted; empty-body POST marks only
+        // Alice (resolved under the match lock), not the claimed Bob.
+        using var heartbeat = await alice.PostAsync(path + "?playerId=bob", null);
         Assert.Equal(HttpStatusCode.OK, heartbeat.StatusCode);
         Assert.Equal("no-store", heartbeat.Headers.CacheControl?.ToString());
         Assert.Equal("no-cache", Assert.Single(heartbeat.Headers.Pragma).Name);

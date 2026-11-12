@@ -84,8 +84,8 @@ public sealed class DevelopmentParallelRotationCheckpointTests
         foreach (var group in results.GroupBy(result => result.PlayerId))
         {
             Assert.Equal(2, group.Count());
-            var winner = Assert.Single(group.Where(item => item.Accepted));
-            var loser = Assert.Single(group.Where(item => !item.Accepted));
+            var winner = Assert.Single(group, item => item.Accepted);
+            var loser = Assert.Single(group, item => !item.Accepted);
             Assert.Null(loser.Replacement);
             Assert.NotNull(winner.Replacement);
             Assert.Equal(group.Key, winner.Replacement.PlayerId);

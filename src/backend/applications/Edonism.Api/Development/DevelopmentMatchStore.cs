@@ -127,13 +127,19 @@ public sealed class DevelopmentMatchStore
                 var suppliedDigest = SHA256.HashData(supplied);
                 try
                 {
+                    // A fixed-time digest comparison alone is not enough:
+                    // returning at the first matching seat would make the
+                    // number of comparisons depend on its insertion order.
+                    // Always inspect every seat (2-8 public players) before
+                    // returning the actor, including when the first one matches.
+                    string? matchedActor = null;
                     foreach (var (playerId, candidate) in TokenDigests)
                     {
                         if (CryptographicOperations.FixedTimeEquals(candidate, suppliedDigest))
-                            return playerId;
+                            matchedActor = playerId;
                     }
 
-                    return null;
+                    return matchedActor;
                 }
                 finally
                 {

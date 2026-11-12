@@ -185,6 +185,88 @@ public sealed class DevelopmentCheckpointPersistenceTests
     [InlineData(6)]
     [InlineData(7)]
     [InlineData(8)]
+    public void FirstMiddleAndLastSeatBearerResolveToOwnHandAfterFullScanAndRestart(
+        int seatCount)
+    {
+        using var temp = new TempDirectory();
+        var store = new DevelopmentMatchStore(temp.Files());
+        var players = Enumerable.Range(0, seatCount)
+            .Select(i => $"player-{i}").ToArray();
+        var created = store.CreateWithFullDeck(
+            players, CharacterSetupFixture.Catalog(),
+            ActivitySetupFixture.Catalog(), ActionDeckFixture.ActionIds(),
+            ActionDeckFixture.ElectionDayId, 2026);
+        var originalHands = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        foreach (var credential in created.Credentials)
+        {
+            Assert.True(store.TryReadHand(created.MatchId, credential.Token, out var hand));
+            Assert.NotNull(hand);
+            Assert.Equal(credential.PlayerId, hand.PlayerId);
+            Assert.Equal(4, hand.CardIds.Count);
+            originalHands.Add(credential.PlayerId, hand.CardIds.ToArray());
+        }
+
+        // Actual 59-card fixture, not identical/no-card synthetic hands.
+        Assert.Equal(seatCount * 4,
+            originalHands.Values.SelectMany(cards => cards)
+                .Distinct(StringComparer.Ordinal).Count());
+
+        // These are the positions that used to have different numbers of
+        // FixedTimeEquals invocations because ResolveActor returned early.
+        foreach (var index in new[] { 0, seatCount / 2, seatCount - 1 }.Distinct())
+        {
+            var credential = created.Credentials[index];
+            for (var attempt = 0; attempt < 4; attempt++)
+            {
+                Assert.True(store.HasSeatAccess(created.MatchId, credential.Token));
+                Assert.True(store.TryReadHand(created.MatchId,
+                    credential.Token.ToLowerInvariant(), out var actual));
+                Assert.NotNull(actual);
+                Assert.Equal(credential.PlayerId, actual.PlayerId);
+                Assert.Equal(originalHands[credential.PlayerId],
+                    actual.CardIds.ToArray());
+            }
+        }
+
+        Assert.False(store.HasSeatAccess(created.MatchId, new string('0', 64)));
+        Assert.False(store.TryReadHand(created.MatchId, new string('F', 64), out _));
+        Assert.False(store.TryReadHand(created.MatchId, "malformed", out _));
+        Assert.False(store.TryReadHand(created.MatchId, null, out _));
+
+        var rotatedSeat = created.Credentials[seatCount / 2];
+        Assert.True(store.TryRotateSeatToken(created.MatchId, rotatedSeat.Token,
+            out var replacement));
+        Assert.NotNull(replacement);
+        Assert.Equal(rotatedSeat.PlayerId, replacement.PlayerId);
+        Assert.False(store.HasSeatAccess(created.MatchId, rotatedSeat.Token));
+        Assert.True(store.TryReadHand(created.MatchId, replacement.Token,
+            out var updatedHand));
+        Assert.NotNull(updatedHand);
+        Assert.Equal(originalHands[rotatedSeat.PlayerId], updatedHand.CardIds.ToArray());
+
+        var restored = new DevelopmentMatchStore(temp.Files());
+        Assert.False(restored.HasSeatAccess(created.MatchId, rotatedSeat.Token));
+        Assert.False(restored.TryReadHand(created.MatchId, rotatedSeat.Token, out _));
+        foreach (var credential in created.Credentials)
+        {
+            var bearer = credential.PlayerId == rotatedSeat.PlayerId
+                ? replacement.Token : credential.Token;
+            Assert.True(restored.TryReadHand(created.MatchId, bearer, out var hand));
+            Assert.NotNull(hand);
+            Assert.Equal(credential.PlayerId, hand.PlayerId);
+            Assert.Equal(originalHands[credential.PlayerId], hand.CardIds.ToArray());
+        }
+        Assert.False(restored.TryReadHand(created.MatchId, new string('0', 64), out _));
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
     public void DistinctInitialSeatCapabilitiesStayIsolatedAfterRotationAndEncryptedRestart(
         int seatCount)
     {

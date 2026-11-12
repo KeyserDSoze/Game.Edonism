@@ -18,3 +18,12 @@ La regressione xUnit `RepeatedBearerAuthorizationClearsOnlyTemporaryBuffersAndRe
 L'azzeramento del buffer, una volta non più referenziato, è verificabile strutturalmente tramite i `try/finally` nel codice; un test black-box non può leggere in modo affidabile la memoria abbandonata dalla GC. Non si azzerano le stringhe immutabili dell'header HTTP, il contenuto di dump di processo o tutti i buffer intermedi della runtime. È **solo Development**; Production identity e persistenza distribuita rimangono in [#13](https://github.com/KeyserDSoze/Game.Edonism/issues/13).
 
 [Issue #63](https://github.com/KeyserDSoze/Game.Edonism/issues/63) · [Ledger](development-ledger.md).
+
+
+## Verifica senza scorciatoie basate sull'ordine dei posti (#64)
+
+La cancellazione dei buffer della #63 non impediva una differenza di lavoro tra posti: prima `ResolveActor` ritornava appena un `FixedTimeEquals` trovava il digest. Per un token al primo posto bastava un confronto, al secondo due, fino all'ultimo degli 8 posti. Ora il codice mantiene un attore candidato mentre percorre **l'intero dizionario** e restituisce il risultato soltanto dopo l'ultimo confronto. La proprietà richiede che la mappa conservi digest univoci (#60); per ogni digest è sempre usato `CryptographicOperations.FixedTimeEquals`.
+
+Il test parametrizzato `FirstMiddleAndLastSeatBearerResolveToOwnHandAfterFullScanAndRestart` verifica da 2 a 8 posti con carte private reali, lettura del primo/centrale/ultimo bearer, versioni minuscole della stringa esadecimale, token inesistenti e malformati, rotazione/revoca e restart da file AES-GCM. L'ispezione strutturale del ciclo verifica l'assenza di `return` anticipati: i test di durata sarebbero flakey e non attesterebbero l'assenza di tutte le differenze microarchitetturali. Il numero di posti e la durata complessiva della richiesta HTTP restano fuori dal contratto. Questa rimane esclusivamente un'API Development, non identità Production #13.
+
+[Issue #64](https://github.com/KeyserDSoze/Game.Edonism/issues/64).

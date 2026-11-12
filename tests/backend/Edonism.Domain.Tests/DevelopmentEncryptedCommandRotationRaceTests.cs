@@ -122,13 +122,13 @@ public sealed class DevelopmentEncryptedCommandRotationRaceTests
             .Select(x => x.GetString()!).ToArray();
     }
 
-    private static async Task AssertDenied(HttpResponseMessage response)
+    private static async Task AssertDenied(HttpResponseMessage response, string code = "match_not_found")
     {
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         NoStore(response);
         using var json = await response.Content.ReadFromJsonAsync<JsonDocument>();
         Assert.NotNull(json);
-        Assert.Equal("match_not_found",
+        Assert.Equal(code,
             json.RootElement.GetProperty("code").GetString());
     }
 
@@ -254,7 +254,7 @@ public sealed class DevelopmentEncryptedCommandRotationRaceTests
 
             using var current = AsSeat(firstHost, nextToken);
             using var denied = await commander.GetAsync($"/api/dev/matches/{id}/hand");
-            await AssertDenied(denied);
+            await AssertDenied(denied, "hand_not_found");
             using var initial = JsonDocument.Parse(await ReadPublic(current, id));
             Assert.Equal(commandWon ? 1 : 0,
                 initial.RootElement.GetProperty("revision").GetInt64());
@@ -285,7 +285,7 @@ public sealed class DevelopmentEncryptedCommandRotationRaceTests
             using (var denied = await revoked.GetAsync($"/api/dev/matches/{id}"))
                 await AssertDenied(denied);
             using (var deniedHand = await revoked.GetAsync($"/api/dev/matches/{id}/hand"))
-                await AssertDenied(deniedHand);
+                await AssertDenied(deniedHand, "hand_not_found");
             using (var deniedReplay = await Send(revoked, id, kind, destination, key))
                 await AssertDenied(deniedReplay);
             using (var deniedRotation = await revoked.PostAsync(
@@ -352,7 +352,7 @@ public sealed class DevelopmentEncryptedCommandRotationRaceTests
         using (var revoked = AsSeat(finalHost, seats[0].Token))
         {
             using (var denied = await revoked.GetAsync($"/api/dev/matches/{id}/hand"))
-                await AssertDenied(denied);
+                await AssertDenied(denied, "hand_not_found");
             Assert.Equal(committed, await ReadPublic(fresh, id));
             Assert.Equal(originalHands[seats[0].PlayerId],
                 await ReadHand(fresh, id, seats[0].PlayerId));

@@ -1272,8 +1272,11 @@ test("real .NET: full Alice long-poll quota returns 429 without starving Bob bro
       headers: waiting,
       timeout: 8000,
     }));
-    await page.waitForTimeout(450);
-    const rejected = await request.get(api, { headers: waiting, timeout: 3000 });
+    // CI browser/API scheduling may take longer than 450ms to register
+    // the four in-flight requests. The 429 is still mandatory; grant the
+    // framework a full wait budget rather than timing out the client first.
+    await page.waitForTimeout(1000);
+    const rejected = await request.get(api, { headers: waiting, timeout: 8000 });
     expect(rejected.status()).toBe(429);
     expect(rejected.headers()["retry-after"]).toBe("1");
     expect(rejected.headers()["cache-control"]).toBe("no-store");

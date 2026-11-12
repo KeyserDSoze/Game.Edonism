@@ -26,3 +26,15 @@ La UI non esporta token, `DemoSession`, `credentials`, `hand`, `cardIds`, `Priva
 Questo è un supporto di trasparenza **Development-only**: login Production, persistenza multi-istanza e la definizione completa delle regole rimangono nelle issue #13/#6/#4.
 
 [Issue #68](https://github.com/KeyserDSoze/Game.Edonism/issues/68).
+
+## Verifica locale di coerenza del JSON esportato (#69)
+
+Il pannello **Controllo locale del replay pubblico** / **Offline public replay check** è presente anche prima di creare o raggiungere un match. Consente di selezionare un file precedentemente ottenuto tramite l'export #68; il browser rifiuta file vuoti o oltre **64 KiB prima della lettura**. Nessun token, URL API, HTTP call, sessione, mano privata, storage persistente o movimento live viene usato dall'import. La selezione successiva invalida un'eventuale lettura in ritardo. L'input file è azzerato dopo l'avvio del controllo.
+
+La funzione pura `verifyPublicAuditFile(unknown)` è indipendente dallo stato live. Richiede una versione v1 conosciuta, GUID match, round 1, campi esatti senza proprietà extra, 2–8 player ID distinti e validi, revisioni intere contigue (0..16). Utilizza il primo frame come stato pubblico iniziale e ricostruisce, evento per evento, l'ordine dei turni e le posizioni; per ogni `free-move` controlla `isAdjacentStreet` sulla topologia della plancia, uso massimo una volta, attore corrente e partenza corretta. Per `turn-ended` e `round-settlement-pending` controlla l'ultimo attore e la transizione di fase. Ogni frame deve coincidere con stato calcolato: attore, fase, mosse effettuate, ID e posizioni pubbliche. Unknown future event kinds, stato alterato, informazioni extra e round successivi vengono rifiutati fino a nuova revisione del contratto.
+
+**Il verificatore NON dimostra che i dati siano davvero stati prodotti dal server Edonism.** Il JSON #68 è esportato come prova informativa non firmata; un malintenzionato può crearne uno falso ma internamente coerente. Il risultato dice espressamente **«internamente coerente; origine non verificata»**. Non importiamo posizioni live, non riveliamo le carte, non generiamo replay di gioco interattivo e non autorizziamo azioni.
+
+La suite automatica comprende xUnit della cronologia pubblica del primo round dopo la terminazione di tutti i 2–8 posti, Playwright UI che esporta e reimporta in un browser fresco senza capability (2 e 8 posti, IT/EN/mobile, corruzioni e oversized), e Playwright live che ripete la verifica usando un export ottenuto dalla vera API .NET. La CI richiede 3/3 job verdi sullo stesso HEAD finale.
+
+[Issue #69](https://github.com/KeyserDSoze/Game.Edonism/issues/69).

@@ -1318,6 +1318,72 @@ test("real .NET: full Alice long-poll quota returns 429 without starving Bob bro
   }
 });
 
+test("real .NET public replay download is internally consistent offline without a bearer",
+  async ({ page, browser, request }) => {
+    const match = await startRealMatch(page);
+    const matchId = match.matchId;
+    const aliceToken = tokenFor(match, "alice");
+    const bobToken = tokenFor(match, "bob");
+    const move = page.locator('[data-testid^="dev-move-"]:not([disabled])').first();
+    await move.click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("dev-public-audit-export")).toBeEnabled();
+
+    const pending = page.waitForEvent("download");
+    await page.getByTestId("dev-public-audit-export").click();
+    const download = await pending;
+    const file = await readFile(await download.path());
+    const payload = JSON.parse(file.toString("utf8")) as {
+      matchId: string; verifiedRevision: number;
+      events: readonly unknown[]; frames: readonly unknown[];
+    };
+    const historyResponse = await request.get(
+      `http://127.0.0.1:5080/api/dev/matches/${matchId}/history`,
+      { headers: auth(bobToken) });
+    expect(historyResponse.status()).toBe(200);
+    const history = await historyResponse.json() as { frames: readonly unknown[] };
+    expect(payload.matchId).toBe(matchId);
+    expect(payload.verifiedRevision).toBe(1);
+    expect(payload.frames).toEqual(history.frames);
+
+    const offlineContext = await browser.newContext({ viewport: { width: 375, height: 812 } });
+    try {
+      const offline = await offlineContext.newPage();
+      let apiCalls = 0;
+      await offline.route("**/api/**", async route => {
+        apiCalls++;
+        await route.abort();
+      });
+      await offline.goto("/");
+      await expect(offline.getByTestId("dev-session")).toHaveCount(0);
+      await offline.getByTestId("dev-public-audit-import-file").setInputFiles({
+        name: "other-player-public-replay.json",
+        mimeType: "application/json",
+        buffer: file,
+      });
+      const result = offline.getByTestId("dev-public-audit-import-status");
+      await expect(result).toHaveAttribute("data-check", "valid");
+      await expect(result).toContainText("2 giocatori");
+      await expect(result).toContainText("Origine non verificata");
+      expect(apiCalls).toBe(0);
+      await expect(offline.getByTestId("dev-session")).toHaveCount(0);
+      expect(await offline.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+        .toBe(false);
+    } finally {
+      await offlineContext.close();
+    }
+    const handResponse = await request.get(
+      `http://127.0.0.1:5080/api/dev/matches/${matchId}/hand`,
+      { headers: auth(aliceToken) });
+    expect(handResponse.status()).toBe(200);
+    const hand = await handResponse.json() as Hand;
+    for (const card of hand.cardIds) expect(file.toString("utf8")).not.toContain(card);
+    expect(file.toString("utf8")).not.toContain(aliceToken);
+    expect(file.toString("utf8")).not.toContain(bobToken);
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  });
+
 test("real .NET: verified first-round audit exports only public events and positions", async ({
   page, request,
 }) => {

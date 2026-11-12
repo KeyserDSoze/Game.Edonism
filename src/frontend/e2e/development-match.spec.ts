@@ -1523,6 +1523,94 @@ test("saturated conditional polling recovers without revoking private hand or re
   expect(JSON.stringify(data)).not.toContain("b".repeat(64));
 });
 
+// #69: an unsigned public export must be checkable offline by a SECOND
+// browser that has no match, actor capability or access to the .NET server.
+for (const seatCount of [2, 8] as const) {
+  test(`offline public replay checker validates ${seatCount}-seat exports and rejects tampering`,
+    async ({ page, browser }) => {
+      await mockMatchApi(page, { playerCount: seatCount });
+      await page.goto("/");
+      if (seatCount === 8)
+        await page.getByTestId("dev-player-count").selectOption("8");
+      await page.getByTestId("dev-create").click();
+      await page.getByTestId("dev-move-planck").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("1");
+      await expect(page.getByTestId("dev-public-audit-export")).toBeEnabled();
+
+      const pending = page.waitForEvent("download");
+      await page.getByTestId("dev-public-audit-export").click();
+      const downloaded = await pending;
+      const jsonBytes = await readFile(await downloaded.path());
+      const original = JSON.parse(jsonBytes.toString("utf8")) as {
+        format: string; verifiedRevision: number;
+        events: Array<{ kind: string; toStreetId: string | null }>;
+        frames: Array<{ players: Array<{ streetId: string }> }>;
+      };
+
+      const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
+      try {
+        const offline = await context.newPage();
+        let apiCalls = 0;
+        await offline.route("**/api/**", async route => {
+          apiCalls++;
+          await route.abort();
+        });
+        await offline.goto("/");
+        if (seatCount === 8)
+          await offline.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+        await expect(offline.getByTestId("dev-session")).toHaveCount(0);
+        const fileInput = offline.getByTestId("dev-public-audit-import-file");
+        const status = offline.getByTestId("dev-public-audit-import-status");
+        const upload = async (buffer: Buffer) => {
+          await fileInput.setInputFiles({
+            name: "received-public-replay.json",
+            mimeType: "application/json",
+            buffer,
+          });
+        };
+        await upload(jsonBytes);
+        await expect(status).toHaveAttribute("data-check", "valid");
+        await expect(status).toContainText(seatCount === 8
+          ? "Internally consistent history: 8 players"
+          : "Cronologia internamente coerente: 2 giocatori");
+        await expect(offline.getByTestId("dev-session")).toHaveCount(0);
+
+        const invalid = [
+          (value: typeof original) => { value.events[1].toStreetId = "unknown-street"; },
+          (value: typeof original) => { value.frames[1].players[0].streetId = "newton"; },
+          (value: typeof original) => { value.events[1].kind = "private-action"; },
+          (value: typeof original) => { value.format = "edonism-public-audit-v2"; },
+          (value: typeof original) => { (value as typeof original & { token: string }).token = "must-not-be-rendered"; },
+        ];
+        for (const mutate of invalid) {
+          const forged = JSON.parse(jsonBytes.toString("utf8")) as typeof original;
+          mutate(forged);
+          await upload(Buffer.from(JSON.stringify(forged)));
+          await expect(status).toHaveAttribute("data-check", "invalid");
+        }
+
+        await upload(Buffer.alloc(64 * 1024 + 1, "x"));
+        await expect(status).toHaveAttribute("data-check", "invalid");
+        await upload(Buffer.from("{invalid json"));
+        await expect(status).toHaveAttribute("data-check", "invalid");
+        await upload(jsonBytes);
+        await expect(status).toHaveAttribute("data-check", "valid");
+        await expect(offline.getByTestId("dev-session")).toHaveCount(0);
+        expect(apiCalls).toBe(0);
+        const browserState = await offline.evaluate(() => ({
+          url: location.href, local: Object.values(localStorage),
+          session: Object.values(sessionStorage),
+        }));
+        expect(JSON.stringify(browserState)).not.toContain("a".repeat(64));
+        expect(JSON.stringify(browserState)).not.toContain("b".repeat(64));
+        expect(await offline.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+          .toBe(false);
+      } finally {
+        await context.close();
+      }
+    });
+}
+
 // #68: the actual browser download must contain only explicit public fields,
 // never serialized session, private hand, bearer, idempotency key or future data.
 for (const seatCount of [2, 8] as const) {

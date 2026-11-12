@@ -10,6 +10,10 @@ import type { HistoricalStreetFocus } from "@/features/city/historicalStreetFocu
 import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
 import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
 import { buildVerifiedPublicAuditExport } from "./publicAuditExport";
+import {
+  MaxPublicAuditImportBytes, verifyPublicAuditFile,
+  type PublicAuditFileCheck,
+} from "./verifyPublicAuditFile";
 import { verifiedPublicHistory, type PublicHistory } from "./verifiedPublicHistory";
 
 type DemoCredential = Readonly<{ playerId: string; token: string }>;
@@ -243,6 +247,13 @@ export function DevelopmentMatchLab({
   const [rotationNotice, setRotationNotice] = useState<string | null>(null);
   const [joinMatchId, setJoinMatchId] = useState("");
   const [joinToken, setJoinToken] = useState("");
+  // Purely local consistency check of an UNSIGNED public JSON. This state is
+  // intentionally independent of session, seat, private hand and commands.
+  const [offlineAudit, setOfflineAudit] = useState<
+    { status: "valid"; data: PublicAuditFileCheck }
+    | { status: "invalid" | "checking" } | null
+  >(null);
+  const offlineAuditRequest = useRef(0);
   // Monotonic authority guards: HTTP polling/commands may resolve out of order.
   const currentMatchId = useRef<string | null>(null);
   const currentRevision = useRef(-1);
@@ -359,6 +370,31 @@ export function DevelopmentMatchLab({
     onHistoricalFocus(moveFocus);
     setHistoryRevision(frame.revision === history.verifiedRevision
       ? null : frame.revision);
+  }
+
+  async function checkOfflinePublicAudit(file: File | null) {
+    const request = ++offlineAuditRequest.current;
+    if (!file) {
+      setOfflineAudit(null);
+      return;
+    }
+    setOfflineAudit({ status: "checking" });
+    // Avoid reading unbounded or empty untrusted files at all.
+    if (file.size === 0 || file.size > MaxPublicAuditImportBytes) {
+      setOfflineAudit({ status: "invalid" });
+      return;
+    }
+    try {
+      const raw = await file.text();
+      if (request !== offlineAuditRequest.current) return;
+      const checked = verifyPublicAuditFile(JSON.parse(raw) as unknown);
+      setOfflineAudit(checked
+        ? { status: "valid", data: checked }
+        : { status: "invalid" });
+    } catch {
+      if (request === offlineAuditRequest.current)
+        setOfflineAudit({ status: "invalid" });
+    }
   }
 
   // Download ONLY the currently authenticated, fully verified public replay.
@@ -1527,6 +1563,42 @@ export function DevelopmentMatchLab({
           </Button>
           <p className="text-[11px] text-muted-foreground">{t("dev.joinNote")}</p>
         </form>
+
+        <section data-testid="dev-public-audit-import"
+          aria-label={t("dev.historyImportTitle")}
+          className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
+          <p className="text-xs font-semibold">{t("dev.historyImportTitle")}</p>
+          <label className="block space-y-1 text-xs">
+            <span>{t("dev.historyImportChoose")}</span>
+            <input type="file" accept=".json,application/json"
+              data-testid="dev-public-audit-import-file"
+              className="block w-full min-w-0 rounded-md border border-input bg-background p-2 text-xs"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0] ?? null;
+                event.currentTarget.value = "";
+                void checkOfflinePublicAudit(file);
+              }} />
+          </label>
+          <p className="text-[11px] leading-5 text-muted-foreground"
+            data-testid="dev-public-audit-import-note">
+            {t("dev.historyImportNote")}
+          </p>
+          {offlineAudit && (
+            <p role="status" aria-live="polite"
+              data-testid="dev-public-audit-import-status"
+              data-check={offlineAudit.status}
+              className="text-xs font-medium">
+              {offlineAudit.status === "checking"
+                ? t("dev.historyImportChecking")
+                : offlineAudit.status === "invalid"
+                  ? t("dev.historyImportInvalid")
+                  : t("dev.historyImportValid", {
+                      count: offlineAudit.data.playerCount,
+                      revision: offlineAudit.data.verifiedRevision,
+                    })}
+            </p>
+          )}
+        </section>
 
         {error && (
           <p role="alert" data-testid="dev-error" className="rounded-lg border border-destructive/40 p-3 text-sm text-destructive">

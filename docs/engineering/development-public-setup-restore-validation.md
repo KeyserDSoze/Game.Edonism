@@ -24,3 +24,8 @@ La policy non prova che un determinato ID di carta sia nella categoria ufficiale
 - Playwright live: vera API .NET con quote delle otto categorie, slot/CardId univoci, 2 character ID diversi, cuori 1–5 coerenti; Playwright UI mocked regressione generale.
 
 La [issue #59](https://github.com/KeyserDSoze/Game.Edonism/issues/59) conserva checklist e risultati finali. Chiudere solo dopo 3/3 job GitHub Actions success sullo stesso HEAD finale `main`.
+
+
+## Risultato della prima CI
+
+La [CI #43128535931](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43128535931) ha verificato il commit funzionale [`acf978f`](https://github.com/KeyserDSoze/Game.Edonism/commit/acf978fe79a54c71347ecd5960e421d2bd49d7e6) con **401/401 xUnit (0 skip), 97/97 Playwright UI e 30/30 Playwright contro la vera API .NET: 528/528 test**, tutti e tre i job verdi. Questi test non sono una prova della mappatura canonica dei singoli ID di carta (#19), ma dimostrano la coerenza interna delle quote e dei metadati restituiti/ripristinati secondo il contratto v1. La verifica del commit finale di documentazione e la chiusura sono nella [issue #59](https://github.com/KeyserDSoze/Game.Edonism/issues/59).

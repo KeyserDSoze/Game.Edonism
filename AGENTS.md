@@ -194,3 +194,6 @@ npm run test:e2e:live
 
 
 - **Encrypted concurrent Development rotation restore (#81):** cross-seat simultaneous capability rotations must publish only one durable successor per actor under the match lock. For 2–8 full-deck seats, validate the real AES-GCM checkpoint digests, cold `DevelopmentMatchStore` reload, old-bearer denial, exact private-hand continuity, unchanged public state/audit, and superseding a winning token after another restart. No Production claims; run xUnit, mocked Playwright and live Playwright all green on final `main` HEAD before closing.
+
+
+- **Development bodyless mutation guard (#82):** `POST /api/dev/matches/{guid}/rotate-token` and `/presence` accept zero payload bytes, with bearer preauthorization before inspecting any Content-Length or body bytes. For authenticated callers reject even one unexpected byte (including unknown-length/chunked) with 413 `dev_bodyless_payload_not_allowed` and no-store, without rotation/heartbeat/audit/revision changes. Reauthorize under the match lock. Do not extend this to JSON command or creator routes; test real HTTP with xUnit plus both Playwright gates on final HEAD before closure. Production sessions are still #13.

@@ -167,6 +167,45 @@ if (app.Environment.IsDevelopment())
         finally { context.Request.Body = original; }
     });
 }
+// #82: two Development mutations are intentionally BODYLESS. Authorize
+// before inspecting even Content-Length, then reject an unexpected single
+// byte without rotating a capability or recording a presence heartbeat.
+// Do not apply this rule to creators or JSON command routes.
+if (app.Environment.IsDevelopment())
+{
+    app.Use(async (context, next) =>
+    {
+        if (!HttpMethods.IsPost(context.Request.Method)
+            || !DevelopmentBodylessPostGuard.TryMatchPath(
+                context.Request.Path, out var matchId))
+        {
+            await next();
+            return;
+        }
+
+        var store = context.RequestServices.GetRequiredService<DevelopmentMatchStore>();
+        if (!store.HasSeatAccess(matchId,
+                context.Request.Headers["X-Edonism-Dev-Token"].ToString()))
+        {
+            await Results.NotFound(new { code = "match_not_found" })
+                .ExecuteAsync(context);
+            return;
+        }
+
+        if (!await DevelopmentBodylessPostGuard.HasNoBodyAsync(context))
+        {
+            await Results.Json(new { code = "dev_bodyless_payload_not_allowed" },
+                statusCode: StatusCodes.Status413PayloadTooLarge)
+                .ExecuteAsync(context);
+            return;
+        }
+
+        // Both endpoint handlers reauthorize inside the match lock. Rotation
+        // occurring after this preflight cannot grant stale-bearer access.
+        await next();
+    });
+}
+
 // Explicit routing here prevents implicit routing from executing BEFORE
 // the auth gate and exposing body/Content-Type validation to revoked tokens.
 app.UseRouting();

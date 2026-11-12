@@ -1523,6 +1523,56 @@ test("saturated conditional polling recovers without revoking private hand or re
   expect(JSON.stringify(data)).not.toContain("b".repeat(64));
 });
 
+test("offline public replay validates completed two-seat round but rejects premature settlement",
+  async ({ page, browser }) => {
+    await mockMatchApi(page);
+    await page.goto("/");
+    await page.getByTestId("dev-create").click();
+    await page.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await page.getByTestId("dev-seat-bob").click();
+    await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+    await page.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("2");
+    await expect(page.getByTestId("dev-history-revision")).toContainText("#2");
+    const pending = page.waitForEvent("download");
+    await page.getByTestId("dev-public-audit-export").click();
+    const download = await pending;
+    const bytes = await readFile(await download.path());
+    const data = JSON.parse(bytes.toString("utf8")) as {
+      events: Array<{ kind: string }>;
+      frames: Array<{ phase: number }>;
+      verifiedRevision: number;
+    };
+    expect(data.verifiedRevision).toBe(2);
+    expect(data.events.map(e => e.kind)).toEqual([
+      "match-created", "turn-ended", "round-settlement-pending"]);
+    expect(data.frames[2].phase).toBe(1);
+
+    const context = await browser.newContext();
+    try {
+      const offline = await context.newPage();
+      await offline.goto("/");
+      const fileInput = offline.getByTestId("dev-public-audit-import-file");
+      const status = offline.getByTestId("dev-public-audit-import-status");
+      await fileInput.setInputFiles({
+        name: "completed-round.json", mimeType: "application/json", buffer: bytes,
+      });
+      await expect(status).toHaveAttribute("data-check", "valid");
+      const forged = JSON.parse(bytes.toString("utf8")) as typeof data;
+      forged.events[1].kind = "round-settlement-pending";
+      await fileInput.setInputFiles({
+        name: "early-settlement.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify(forged)),
+      });
+      await expect(status).toHaveAttribute("data-check", "invalid");
+      await expect(offline.getByTestId("dev-session")).toHaveCount(0);
+    } finally {
+      await context.close();
+    }
+  });
+
 // #69: an unsigned public export must be checkable offline by a SECOND
 // browser that has no match, actor capability or access to the .NET server.
 for (const seatCount of [2, 8] as const) {

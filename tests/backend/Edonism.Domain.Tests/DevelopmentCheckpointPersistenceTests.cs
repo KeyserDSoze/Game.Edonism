@@ -39,6 +39,135 @@ public sealed class DevelopmentCheckpointPersistenceTests
             CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(),
             ActionDeckFixture.ActionIds(), ActionDeckFixture.ElectionDayId, 2026);
 
+    private static void RewriteCheckpointWithDigests(
+        TempDirectory temp, PersistedDevelopmentMatch saved,
+        IReadOnlyDictionary<string, string> digests)
+    {
+        // Construct a fully AES-GCM authenticated checkpoint whose mapping
+        // is *semantically* forged. An unmodified ciphertext would be stopped
+        // by the AES tag and would not exercise the seat-identity trust boundary.
+        var payload = JsonSerializer.SerializeToUtf8Bytes(saved with
+        {
+            TokenDigests = digests
+        });
+        try
+        {
+            var nonce = RandomNumberGenerator.GetBytes(12);
+            var cipher = new byte[payload.Length];
+            var tag = new byte[16];
+            using (var aes = new AesGcm(Convert.FromHexString(temp.KeyHex), 16))
+                aes.Encrypt(nonce, payload, cipher, tag, saved.MatchId.ToByteArray());
+
+            var fileBytes = new byte[8 + 12 + 16 + cipher.Length];
+            "EDONDM01"u8.CopyTo(fileBytes);
+            nonce.CopyTo(fileBytes, 8);
+            tag.CopyTo(fileBytes, 20);
+            cipher.CopyTo(fileBytes, 36);
+            File.WriteAllBytes(Path.Combine(temp.PathOnDisk,
+                saved.MatchId.ToString("N") + ".edonism"), fileBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(payload);
+        }
+    }
+
+    [Theory]
+    [InlineData("same-digest")]
+    [InlineData("hex-alias")]
+    [InlineData("null")]
+    [InlineData("too-short")]
+    [InlineData("non-hex")]
+    public void AuthenticatedFileWithInvalidSeatDigestMappingNeverRestores(
+        string tamper)
+    {
+        using var temp = new TempDirectory();
+        var existing = new DevelopmentMatchStore(temp.Files());
+        var created = Create(existing);
+        var persisted = temp.Files().Load(created.MatchId);
+        Assert.NotNull(persisted);
+
+        var changed = persisted.TokenDigests.ToDictionary(
+            kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+        var aliceHash = changed["alice"];
+        changed["bob"] = tamper switch
+        {
+            "same-digest" => aliceHash,
+            "hex-alias" => aliceHash.ToLowerInvariant(),
+            "null" => null!,
+            "too-short" => aliceHash[..63],
+            "non-hex" => new string('X', 64),
+            _ => throw new ArgumentOutOfRangeException(nameof(tamper))
+        };
+        RewriteCheckpointWithDigests(temp, persisted, changed);
+
+        var restarted = new DevelopmentMatchStore(temp.Files());
+        foreach (var bearer in created.Credentials.Select(c => c.Token))
+        {
+            Assert.False(restarted.TryRead(created.MatchId, bearer, out _));
+            Assert.False(restarted.TryReadHand(created.MatchId, bearer, out _));
+            Assert.False(restarted.TryReadHistory(created.MatchId, bearer, out _));
+            Assert.False(restarted.TryBootstrapSeat(created.MatchId, bearer, out _));
+            Assert.False(restarted.HasSeatAccess(created.MatchId, bearer));
+        }
+
+        // The already-authenticated, unrelated in-memory entry remains sound.
+        foreach (var c in created.Credentials)
+        {
+            Assert.True(existing.TryRead(created.MatchId, c.Token, out var state));
+            Assert.Equal(0, state!.Revision);
+            Assert.True(existing.TryReadHand(created.MatchId, c.Token, out var hand));
+            Assert.Equal(c.PlayerId, hand!.PlayerId);
+        }
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    public void DistinctInitialSeatCapabilitiesStayIsolatedAfterRotationAndEncryptedRestart(
+        int seatCount)
+    {
+        using var temp = new TempDirectory();
+        var store = new DevelopmentMatchStore(temp.Files());
+        var slots = BoardCatalog.LoadDefault().Slots.ToArray();
+        var created = store.Create(Enumerable.Range(0, seatCount)
+            .Select(i => new Edonism.Domain.Matches.MatchParticipantSeed(
+                $"player-{i}", slots[i].Id)).ToArray());
+        Assert.Equal(seatCount, created.Credentials.Count);
+        Assert.Equal(seatCount, created.Credentials
+            .Select(c => c.Token).Distinct(StringComparer.Ordinal).Count());
+        Assert.All(created.Credentials, c =>
+        {
+            Assert.Equal(64, c.Token.Length);
+            Assert.True(store.TryRead(created.MatchId, c.Token, out var state));
+            Assert.Equal(seatCount, state!.Players.Count);
+        });
+
+        var first = created.Credentials[0];
+        Assert.True(store.TryRotateSeatToken(created.MatchId, first.Token,
+            out var replacement));
+        Assert.Equal(first.PlayerId, replacement!.PlayerId);
+        Assert.NotEqual(first.Token, replacement.Token);
+        Assert.False(store.TryRead(created.MatchId, first.Token, out _));
+
+        var restored = new DevelopmentMatchStore(temp.Files());
+        Assert.False(restored.TryRead(created.MatchId, first.Token, out _));
+        Assert.True(restored.TryRead(created.MatchId, replacement.Token, out _));
+        for (var i = 1; i < created.Credentials.Count; i++)
+        {
+            var credential = created.Credentials[i];
+            Assert.True(restored.TryRead(created.MatchId, credential.Token, out var state));
+            Assert.Equal("player-0", state!.TurnOrder[0]);
+            Assert.Equal(credential.PlayerId, state.Players[i].PlayerId);
+            Assert.True(restored.HasSeatAccess(created.MatchId, credential.Token));
+        }
+    }
+
     [Fact]
     public void EphemeralSeatPresenceNeverWritesEncryptedCheckpointAndRestartsInactive()
     {

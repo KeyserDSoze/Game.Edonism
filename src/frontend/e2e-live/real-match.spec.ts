@@ -624,6 +624,19 @@ test("real .NET: joined browser rotates only its own Development seat token", as
     await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
     const oldHand = await guest.getByTestId("dev-hand").locator("li").allTextContents();
 
+    // #60: each bearer MUST map to exactly one physical seat. Bob's
+    // capability rotation never grants Alice's private cards to Bob, or
+    // changes Alice's own authenticated hand.
+    const beforeAlice = await request.get(`${api}/hand`, { headers: auth(aliceToken) });
+    const beforeBob = await request.get(`${api}/hand`, { headers: auth(oldBob) });
+    expect(beforeAlice.status()).toBe(200);
+    expect(beforeBob.status()).toBe(200);
+    const aliceCards = (await beforeAlice.json() as Hand).cardIds;
+    const bobCards = (await beforeBob.json() as Hand).cardIds;
+    expect(aliceCards).toHaveLength(4);
+    expect(bobCards).toHaveLength(4);
+    expect(aliceCards.every(c => !bobCards.includes(c))).toBe(true);
+
     const rotation = guest.waitForResponse((res) =>
       new URL(res.url()).pathname.endsWith("/rotate-token") && res.request().method() === "POST");
     await guest.getByTestId("dev-rotate-token").click();
@@ -652,6 +665,16 @@ test("real .NET: joined browser rotates only its own Development seat token", as
     expect(before.events).toHaveLength(1);
     const aliceRead = await request.get(api, { headers: auth(aliceToken) });
     expect(aliceRead.status()).toBe(200);
+    const afterAlice = await request.get(`${api}/hand`, { headers: auth(aliceToken) });
+    const afterBob = await request.get(`${api}/hand?playerId=alice`, {
+      headers: auth(newCredential.token),
+    });
+    expect(afterAlice.status()).toBe(200);
+    expect(afterBob.status()).toBe(200);
+    expect((await afterAlice.json() as Hand).cardIds).toEqual(aliceCards);
+    expect((await afterBob.json() as Hand).cardIds).toEqual(bobCards);
+    expect(await guest.getByTestId("dev-hand").locator("li").allTextContents())
+      .toEqual(bobCards);
 
     await page.getByTestId("dev-end-turn").click();
     await expect(guest.getByTestId("dev-active-player")).toHaveText("bob", { timeout: 12000 });

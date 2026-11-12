@@ -179,10 +179,24 @@ public sealed class DevelopmentMatchStore
             var credentials = new List<DevSeatCredential>();
             foreach (var player in match.Snapshot().Players)
             {
-                var bytes = RandomNumberGenerator.GetBytes(32);
-                secrets.Add(player.PlayerId, SHA256.HashData(bytes));
-                credentials.Add(new DevSeatCredential(player.PlayerId, Convert.ToHexString(bytes)));
-                CryptographicOperations.ZeroMemory(bytes);
+                // Every seat needs its OWN cryptographic capability. Rotation
+                // already retries digest collisions; initial admission must
+                // maintain the same invariant instead of relying solely on
+                // their overwhelming statistical improbability.
+                byte[] digest;
+                string newToken;
+                do
+                {
+                    var bytes = RandomNumberGenerator.GetBytes(32);
+                    digest = SHA256.HashData(bytes);
+                    newToken = Convert.ToHexString(bytes);
+                    CryptographicOperations.ZeroMemory(bytes);
+                }
+                while (secrets.Values.Any(existing =>
+                    CryptographicOperations.FixedTimeEquals(existing, digest)));
+
+                secrets.Add(player.PlayerId, digest);
+                credentials.Add(new DevSeatCredential(player.PlayerId, newToken));
             }
 
             // Disk commit precedes in-memory publication and quota increment.
@@ -220,11 +234,18 @@ public sealed class DevelopmentMatchStore
                 || data.TokenDigests.Keys.Any(id => !playerIds.Contains(id)))
                 return false;
             var hashes = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+            var uniqueDigests = new HashSet<string>(StringComparer.Ordinal);
             foreach (var (id, hex) in data.TokenDigests)
             {
-                if (hex.Length != 64) return false;
+                if (hex is null || hex.Length != 64) return false;
                 var digest = Convert.FromHexString(hex);
-                if (digest.Length != 32) return false;
+                // Decoding before deduplication prevents a lowercase/uppercase
+                // hex alias from assigning the SAME bearer to two seats.
+                // ResolveActor would otherwise return the first actor, which
+                // can reveal the wrong seat's private hand on restart.
+                if (digest.Length != 32
+                    || !uniqueDigests.Add(Convert.ToHexString(digest)))
+                    return false;
                 hashes.Add(id, digest);
             }
             // The encrypted v2 metadata is a trust boundary. Every receipt

@@ -49,3 +49,14 @@ La nuova logica assegna il dizionario di digest temporanei a un solo proprietari
 La nuova theory xUnit `ConcurrentFirstEncryptedRestoreNeverClearsWinningSeatDigests` esegue 64 richieste parallele con massimo 8 worker su un primo ripristino di 2–8 giocatori, verifica ciascuna mano privata e il bootstrap del relativo posto, quindi la rotazione di un token e un ulteriore restore dal checkpoint cifrato. Non è un test della cancellazione fisica della memoria abbandonata, verificata strutturalmente nel sorgente, e non equivale a autenticazione di produzione (#13).
 
 [Issue #66](https://github.com/KeyserDSoze/Game.Edonism/issues/66).
+
+
+## Reconnect cifrati: un solo restore concorrente per partita (#67)
+
+Quando più browser Development tentano il primo reconnect allo stesso match, la precedente sequenza `_matches.TryGetValue → Load → Restore → GetOrAdd` lasciava che ogni richiesta eseguisse indipendentemente I/O, decrypt AES-GCM e validazioni. Il nuovo fast-path rimane lock-free per match già in memoria; su miss viene acquisita una delle **64 stripe di lock** determinate da `(uint)matchId.GetHashCode() % 64`, e la cache viene **ricontrollata sotto il lock**. Solo se è ancora vuota si procede al restore. Nessun dizionario di lock per GUID arbitrari cresce con il traffico anonimo.
+
+Il lock copre esclusivamente il primo restore; non copre HTTP, long-poll o l'accesso a match già caricati. Due match freddi con la stessa stripe possono aspettarsi durante il restore, senza mutare i loro checkpoint. Il vincolo single-flight è per processo Development: Production richiede un piano DB/cluster distinto (#13).
+
+La nuova theory xUnit `ParallelReconnectAcrossMatchesPreservesSeatsAndRejectsBadCheckpoint` valida 2–8 posti, due match cifrati reali con mani da quattro carte, un terzo checkpoint AES-GCM manomesso e GUID inesistenti. Esegue 128 richieste parallele, verifica nessun cross-seat/cross-match leak, esegue rotazioni del token su entrambi i match e prova il nuovo restart. Il numero fisso di stripe e il double-check vengono verificati strutturalmente, non con benchmark temporali flakey.
+
+[Issue #67](https://github.com/KeyserDSo/Game.Edonism/issues/67).

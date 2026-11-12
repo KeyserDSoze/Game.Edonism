@@ -65,6 +65,12 @@ public sealed class DevelopmentMatchStore
     private readonly DevelopmentMatchCheckpointFiles? _checkpointFiles;
     private readonly TimeProvider _clock;
     private readonly object _creationGate = new();
+    // Never allocate per-Guid lock objects: an untrusted caller can supply
+    // arbitrary match IDs. Fixed stripes bound reconnect synchronization
+    // memory while allowing independent cold matches to restore in parallel.
+    private const int RestoreStripeCount = 64;
+    private readonly object[] _restoreStripes = Enumerable.Range(0, RestoreStripeCount)
+        .Select(_ => new object()).ToArray();
     private readonly int _maxNewMatches;
     private int _newMatches;
 
@@ -284,11 +290,28 @@ public sealed class DevelopmentMatchStore
 
     private bool TryGetEntry(Guid matchId, out Entry entry)
     {
+        // Keep the common active-match path lock-free. Only a cold restore
+        // needs coordination: without it concurrent reconnects each decrypt
+        // and validate the same private checkpoint before GetOrAdd.
         if (_matches.TryGetValue(matchId, out entry!)) return true;
         if (_checkpointFiles is null) return false;
 
-        // Lazy reload means restart works without retaining any bearer token in
-        // process memory. Corruption/wrong key fail closed as not found.
+        var stripe = (int)((uint)matchId.GetHashCode()
+            % (uint)_restoreStripes.Length);
+        lock (_restoreStripes[stripe])
+        {
+            // Recheck under the bounded stripe lock. The first caller has
+            // already published the Entry; every following caller reuses it
+            // instead of repeating AES-GCM I/O and Domain restoration.
+            if (_matches.TryGetValue(matchId, out entry!)) return true;
+            return TryRestoreEntry(matchId, out entry);
+        }
+    }
+
+    private bool TryRestoreEntry(Guid matchId, out Entry entry)
+    {
+        // Called only inside the bounded cold-restore lock. Corruption or
+        // wrong keys fail closed, while a valid reload publishes one Entry.
         PersistedDevelopmentMatch? data;
         try { data = _checkpointFiles.Load(matchId); }
         catch (Exception ex) when (ex is InvalidDataException or IOException

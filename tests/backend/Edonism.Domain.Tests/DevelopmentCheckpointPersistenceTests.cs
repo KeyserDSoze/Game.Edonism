@@ -129,6 +129,128 @@ public sealed class DevelopmentCheckpointPersistenceTests
     [InlineData(6)]
     [InlineData(7)]
     [InlineData(8)]
+    public void ParallelReconnectAcrossMatchesPreservesSeatsAndRejectsBadCheckpoint(
+        int seatCount)
+    {
+        using var temp = new TempDirectory();
+        var original = new DevelopmentMatchStore(temp.Files());
+        var players = Enumerable.Range(0, seatCount)
+            .Select(i => $"player-{i}").ToArray();
+
+        DevMatchCreated CreateMatch(int seed) => original.CreateWithFullDeck(
+            players, CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(),
+            ActionDeckFixture.ActionIds(), ActionDeckFixture.ElectionDayId, seed);
+
+        var first = CreateMatch(2026);
+        var second = CreateMatch(2027);
+        var invalid = CreateMatch(2028);
+
+        var expected = new Dictionary<Guid, Dictionary<string, string[]>>();
+        foreach (var match in new[] { first, second })
+        {
+            var hands = new Dictionary<string, string[]>(StringComparer.Ordinal);
+            foreach (var credential in match.Credentials)
+            {
+                Assert.True(original.TryReadHand(match.MatchId, credential.Token,
+                    out var hand));
+                Assert.NotNull(hand);
+                Assert.Equal(credential.PlayerId, hand.PlayerId);
+                hands.Add(credential.PlayerId, hand.CardIds.ToArray());
+            }
+            Assert.Equal(seatCount * 4, hands.Values.SelectMany(x => x)
+                .Distinct(StringComparer.Ordinal).Count());
+            expected.Add(match.MatchId, hands);
+        }
+
+        var badPath = Path.Combine(temp.PathOnDisk,
+            invalid.MatchId.ToString("N") + ".edonism");
+        var ciphertext = File.ReadAllBytes(badPath);
+        ciphertext[^1] ^= 0x80; // Break AES-GCM authentication, not other matches.
+        File.WriteAllBytes(badPath, ciphertext);
+
+        var restored = new DevelopmentMatchStore(temp.Files());
+        var active = new[] { first, second };
+        Parallel.For(0, 128, new ParallelOptions { MaxDegreeOfParallelism = 12 },
+            index =>
+            {
+                if (index % 4 == 0)
+                {
+                    Assert.False(restored.TryReadHand(invalid.MatchId,
+                        invalid.Credentials[0].Token, out _));
+                    return;
+                }
+                if (index % 4 == 1)
+                {
+                    Assert.False(restored.TryRead(Guid.NewGuid(),
+                        first.Credentials[0].Token, out _));
+                    return;
+                }
+
+                var match = active[(index / 4) % active.Length];
+                var credential = match.Credentials[(index / 8) % seatCount];
+                Assert.True(restored.TryReadHand(match.MatchId,
+                    credential.Token, out var hand));
+                Assert.NotNull(hand);
+                Assert.Equal(credential.PlayerId, hand.PlayerId);
+                Assert.Equal(expected[match.MatchId][credential.PlayerId],
+                    hand.CardIds.ToArray());
+                Assert.True(restored.HasSeatAccess(match.MatchId, credential.Token));
+            });
+
+        Assert.False(restored.TryReadHand(first.MatchId,
+            second.Credentials[0].Token, out _));
+        Assert.False(restored.TryReadHand(second.MatchId,
+            first.Credentials[0].Token, out _));
+
+        // A restored Entry must remain available for all actors and a later
+        // checkpoint write; the invalid file cannot poison an unrelated match.
+        var replacements = new Dictionary<Guid, DevSeatCredential>();
+        foreach (var match in active)
+        {
+            foreach (var credential in match.Credentials)
+            {
+                Assert.True(restored.TryBootstrapSeat(match.MatchId,
+                    credential.Token, out var seat));
+                Assert.NotNull(seat);
+                Assert.Equal(credential.PlayerId, seat.PlayerId);
+                Assert.Equal(expected[match.MatchId][credential.PlayerId],
+                    seat.Hand.CardIds.ToArray());
+            }
+
+            var rotating = match.Credentials[seatCount / 2];
+            Assert.True(restored.TryRotateSeatToken(match.MatchId,
+                rotating.Token, out var replacement));
+            Assert.NotNull(replacement);
+            replacements.Add(match.MatchId, replacement);
+            Assert.False(restored.HasSeatAccess(match.MatchId, rotating.Token));
+        }
+
+        var onceMore = new DevelopmentMatchStore(temp.Files());
+        foreach (var match in active)
+        {
+            foreach (var credential in match.Credentials)
+            {
+                var token = credential.PlayerId == replacements[match.MatchId].PlayerId
+                    ? replacements[match.MatchId].Token : credential.Token;
+                Assert.True(onceMore.TryReadHand(match.MatchId,
+                    token, out var hand));
+                Assert.NotNull(hand);
+                Assert.Equal(expected[match.MatchId][credential.PlayerId],
+                    hand.CardIds.ToArray());
+            }
+        }
+        Assert.False(onceMore.HasSeatAccess(invalid.MatchId,
+            invalid.Credentials[0].Token));
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
     public void ConcurrentFirstEncryptedRestoreNeverClearsWinningSeatDigests(
         int seatCount)
     {

@@ -133,6 +133,19 @@ type OpponentControlledLotRoutes = Readonly<{
   routes: readonly OpponentControlledLotRoute[];
 }>;
 
+// #88: a single actor- and revision-scoped read-only result from #87.
+// All three nested perspectives are validated before ANY is displayed.
+type TacticalOverview = Readonly<{
+  matchId: string;
+  playerId: string;
+  round: number;
+  verifiedRevision: number;
+  fromStreetId: string;
+  uncontrolled: UncontrolledRoutes;
+  otherPlayers: OtherSeatRoutes;
+  opponentControlledLots: OpponentControlledLotRoutes;
+}>;
+
 type FirstRoundTurnProgress = Readonly<{
   matchId: string;
   round: number;
@@ -245,14 +258,8 @@ export function DevelopmentMatchLab({
   const [activityRead, setActivityRead] = useState<{
     matchId: string; seatId: string; token: string; revision: number;
   } | null>(null);
-  const [routesLease, setRoutesLease] = useState<{
-    token: string; data: UncontrolledRoutes;
-  } | null>(null);
-  const [otherSeatLease, setOtherSeatLease] = useState<{
-    token: string; data: OtherSeatRoutes;
-  } | null>(null);
-  const [opponentLotLease, setOpponentLotLease] = useState<{
-    token: string; data: OpponentControlledLotRoutes;
+  const [tacticalLease, setTacticalLease] = useState<{
+    token: string; data: TacticalOverview;
   } | null>(null);
   // #85: local display preference, never permission or a server command.
   const [nearbyOpponentLotsOnly, setNearbyOpponentLotsOnly] = useState(false);
@@ -522,27 +529,17 @@ export function DevelopmentMatchLab({
     }
   }
 
-  const uncontrolledRoutes = routesLease && token
-    && routesLease.token === token
-    && routesLease.data.matchId === session?.matchId
-    && routesLease.data.playerId === actorId
-    && routesLease.data.verifiedRevision === session?.state.revision
-    && routesLease.data.fromStreetId === session?.state.players.find(p => p.playerId === actorId)?.streetId
-    ? routesLease.data : null;
-  const otherSeatRoutes = otherSeatLease && token
-    && otherSeatLease.token === token
-    && otherSeatLease.data.matchId === session?.matchId
-    && otherSeatLease.data.playerId === actorId
-    && otherSeatLease.data.verifiedRevision === session?.state.revision
-    && otherSeatLease.data.fromStreetId === player?.streetId
-    ? otherSeatLease.data : null;
-  const opponentLots = opponentLotLease && token
-    && opponentLotLease.token === token
-    && opponentLotLease.data.matchId === session?.matchId
-    && opponentLotLease.data.playerId === actorId
-    && opponentLotLease.data.verifiedRevision === session?.state.revision
-    && opponentLotLease.data.fromStreetId === player?.streetId
-    ? opponentLotLease.data : null;
+  const tactical = tacticalLease && token && player
+    && tacticalLease.token === token
+    && tacticalLease.data.matchId === session?.matchId
+    && tacticalLease.data.playerId === actorId
+    && tacticalLease.data.round === session?.state.round
+    && tacticalLease.data.verifiedRevision === session?.state.revision
+    && tacticalLease.data.fromStreetId === player.streetId
+    ? tacticalLease.data : null;
+  const uncontrolledRoutes = tactical?.uncontrolled ?? null;
+  const otherSeatRoutes = tactical?.otherPlayers ?? null;
+  const opponentLots = tactical?.opponentControlledLots ?? null;
   // Filter only the fully validated, actor/revision/token-scoped #84 result.
   // Zero or one canonical street edge is not a combat or travel-time rule.
   const visibleOpponentLots = opponentLots?.routes.filter(route =>
@@ -840,84 +837,20 @@ export function DevelopmentMatchLab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.matchId, session?.state.revision, actorId, token]);
 
-  // #49: read-only actor-scoped public location planner, never a buy/action
-  // affordance. Check the server projection against the public board placement
-  // and current revision, without deriving movement permissions in React.
-  useEffect(() => {
-    const matchId = session?.matchId;
-    const revision = session?.state.revision;
-    const seatId = actorId;
-    const actorToken = token;
-    const state = session?.state;
-    setRoutesLease(null);
-    if (!matchId || !state || revision === undefined || !seatId || !actorToken) return;
-    const controller = new AbortController();
-    void fetch(`/api/dev/matches/${matchId}/uncontrolled-routes`, {
-      headers: { "X-Edonism-Dev-Token": actorToken },
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then(response => {
-        if (response.status === 404 && !controller.signal.aborted)
-          reconcileRevokedSeat(matchId, seatId, actorToken);
-        return responseJson<UncontrolledRoutes>(response);
-      })
-      .then(result => {
-        const scope = currentActorScope.current;
-        if (controller.signal.aborted || scope?.matchId !== matchId
-          || scope.seatId !== seatId || scope.token !== actorToken
-          || currentRevision.current !== revision) return;
-        const position = state.players.find(p => p.playerId === seatId)?.streetId;
-        const controlled = new Set(state.controlledActivities.map(c => c.slotId));
-        const expected = state.boardActivities.filter(a => !controlled.has(a.slotId));
-        if (!position || result.matchId !== matchId || result.playerId !== seatId
-          || result.round !== state.round || result.verifiedRevision !== revision
-          || result.fromStreetId !== position || !Array.isArray(result.routes)
-          || result.routes.length !== expected.length) return;
-        const expectedBySlot = new Map(expected.map(card => [card.slotId, card]));
-        const used = new Set<string>();
-        let previousSteps = -1;
-        let previousSlot = "";
-        for (const route of result.routes) {
-          if (!route || typeof route.slotId !== "string" || used.has(route.slotId)
-            || !Number.isInteger(route.streetSteps) || route.streetSteps < 0
-            || route.streetSteps > 6 || typeof route.streetId !== "string") return;
-          const card = expectedBySlot.get(route.slotId);
-          const canonicalPath = shortestStreetPath(position, route.streetId);
-          if (!card || route.cardId !== card.cardId || route.category !== card.category
-            || slotById(route.slotId)?.streetId !== route.streetId
-            || !canonicalPath || !Array.isArray(route.streetPath)
-            || route.streetSteps !== canonicalPath.length - 1
-            || route.streetPath.length !== canonicalPath.length
-            || route.streetPath.some((id: string, index: number) => id !== canonicalPath[index])
-            || route.streetSteps < previousSteps
-            || (route.streetSteps === previousSteps && route.slotId <= previousSlot)) return;
-          used.add(route.slotId);
-          previousSteps = route.streetSteps;
-          previousSlot = route.slotId;
-        }
-        setRoutesLease({ token: actorToken, data: result });
-      })
-      .catch(() => {
-        // A malformed/stale/revoked response never manufactures a route.
-      });
-    return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.matchId, session?.state.revision, actorId, token]);
-
-  // #51: informational roster of OTHER public seats at an audited revision.
-  // The server authorizes the bearer, and the browser independently verifies
-  // the complete public graph path, owned lots and standing posture counts.
+  // #88: ONE bearer-authenticated atomic GET for all three public tactical
+  // projections. Never issue the three legacy GETs from the browser. The
+  // existing #49/#51/#84 *complete* per-item guards stay in place, but are
+  // evaluated as one transaction: one malformed nested view hides ALL lists.
   useEffect(() => {
     const matchId = session?.matchId;
     const state = session?.state;
     const revision = state?.revision;
     const seatId = actorId;
     const actorToken = token;
-    setOtherSeatLease(null);
+    setTacticalLease(null);
     if (!matchId || !state || revision === undefined || !seatId || !actorToken) return;
     const controller = new AbortController();
-    void fetch(`/api/dev/matches/${matchId}/other-player-routes`, {
+    void fetch(`/api/dev/matches/${matchId}/tactical-overview`, {
       headers: { "X-Edonism-Dev-Token": actorToken },
       cache: "no-store",
       signal: controller.signal,
@@ -925,141 +858,166 @@ export function DevelopmentMatchLab({
       .then(response => {
         if (response.status === 404 && !controller.signal.aborted)
           reconcileRevokedSeat(matchId, seatId, actorToken);
-        return responseJson<OtherSeatRoutes>(response);
+        return responseJson<TacticalOverview>(response);
       })
-      .then(result => {
+      .then(overview => {
         const scope = currentActorScope.current;
         if (controller.signal.aborted || scope?.matchId !== matchId
           || scope.seatId !== seatId || scope.token !== actorToken
           || currentRevision.current !== revision) return;
         const origin = state.players.find(p => p.playerId === seatId)?.streetId;
-        if (!origin || !result || result.matchId !== matchId
-          || result.playerId !== seatId || result.round !== state.round
-          || result.verifiedRevision !== revision
-          || result.fromStreetId !== origin || !Array.isArray(result.others)
-          || result.others.length !== state.players.length - 1) return;
-        const expected = new Map(state.players.filter(p => p.playerId !== seatId)
-          .map(p => [p.playerId, p] as const));
-        const encountered = new Set<string>();
-        let previousSteps = -1;
-        let previousId = "";
-        for (const other of result.others) {
-          if (!other || typeof other.otherPlayerId !== "string"
-            || encountered.has(other.otherPlayerId)) return;
-          const expectedPlayer = expected.get(other.otherPlayerId);
-          const canonical = shortestStreetPath(origin, other.streetId);
-          const controls = state.controlledActivities.filter(c =>
-            c.ownerPlayerId === other.otherPlayerId);
-          const standing = controls.filter(c => c.posture === 0).length;
-          if (!expectedPlayer || other.streetId !== expectedPlayer.streetId
-            || !canonical || !Array.isArray(other.streetPath)
-            || other.streetPath.length !== canonical.length
-            || other.streetPath.some((id: string, index: number) => id !== canonical[index])
-            || !Number.isInteger(other.streetSteps)
-            || other.streetSteps !== canonical.length - 1
-            || !Number.isInteger(other.controlledActivities)
-            || other.controlledActivities !== controls.length
-            || !Number.isInteger(other.standingHenchmen)
-            || other.standingHenchmen !== standing
-            || other.streetSteps < previousSteps
-            || (other.streetSteps === previousSteps && other.otherPlayerId <= previousId))
-            return;
-          encountered.add(other.otherPlayerId);
-          previousSteps = other.streetSteps;
-          previousId = other.otherPlayerId;
+        // No nested object may be rendered unless the top-level and ALL
+        // nested scopes match the exact current public revision and seat.
+        const sameScope = (view: UncontrolledRoutes | OtherSeatRoutes
+          | OpponentControlledLotRoutes | null | undefined): boolean =>
+          Boolean(view && view.matchId === matchId && view.playerId === seatId
+            && view.round === state.round && view.verifiedRevision === revision
+            && view.fromStreetId === origin);
+        if (!origin || !overview || overview.matchId !== matchId
+          || overview.playerId !== seatId || overview.round !== state.round
+          || overview.verifiedRevision !== revision
+          || overview.fromStreetId !== origin
+          || !sameScope(overview.uncontrolled)
+          || !sameScope(overview.otherPlayers)
+          || !sameScope(overview.opponentControlledLots)) {
+          onTacticalFocus(null);
+          return;
         }
-        setOtherSeatLease({ token: actorToken, data: result });
+        const validateUncontrolled = (result: UncontrolledRoutes): boolean => {
+      const position = state.players.find(p => p.playerId === seatId)?.streetId;
+      const controlled = new Set(state.controlledActivities.map(c => c.slotId));
+      const expected = state.boardActivities.filter(a => !controlled.has(a.slotId));
+      if (!position || result.matchId !== matchId || result.playerId !== seatId
+        || result.round !== state.round || result.verifiedRevision !== revision
+        || result.fromStreetId !== position || !Array.isArray(result.routes)
+        || result.routes.length !== expected.length) return false;
+      const expectedBySlot = new Map(expected.map(card => [card.slotId, card]));
+      const used = new Set<string>();
+      let previousSteps = -1;
+      let previousSlot = "";
+      for (const route of result.routes) {
+        if (!route || typeof route.slotId !== "string" || used.has(route.slotId)
+          || !Number.isInteger(route.streetSteps) || route.streetSteps < 0
+          || route.streetSteps > 6 || typeof route.streetId !== "string") return false;
+        const card = expectedBySlot.get(route.slotId);
+        const canonicalPath = shortestStreetPath(position, route.streetId);
+        if (!card || route.cardId !== card.cardId || route.category !== card.category
+          || slotById(route.slotId)?.streetId !== route.streetId
+          || !canonicalPath || !Array.isArray(route.streetPath)
+          || route.streetSteps !== canonicalPath.length - 1
+          || route.streetPath.length !== canonicalPath.length
+          || route.streetPath.some((id: string, index: number) => id !== canonicalPath[index])
+          || route.streetSteps < previousSteps
+          || (route.streetSteps === previousSteps && route.slotId <= previousSlot)) return false;
+        used.add(route.slotId);
+        previousSteps = route.streetSteps;
+        previousSlot = route.slotId;
+      }
+          return true;
+        };
+        const validateOtherPlayers = (result: OtherSeatRoutes): boolean => {
+      const origin = state.players.find(p => p.playerId === seatId)?.streetId;
+      if (!origin || !result || result.matchId !== matchId
+        || result.playerId !== seatId || result.round !== state.round
+        || result.verifiedRevision !== revision
+        || result.fromStreetId !== origin || !Array.isArray(result.others)
+        || result.others.length !== state.players.length - 1) return false;
+      const expected = new Map(state.players.filter(p => p.playerId !== seatId)
+        .map(p => [p.playerId, p] as const));
+      const encountered = new Set<string>();
+      let previousSteps = -1;
+      let previousId = "";
+      for (const other of result.others) {
+        if (!other || typeof other.otherPlayerId !== "string"
+          || encountered.has(other.otherPlayerId)) return false;
+        const expectedPlayer = expected.get(other.otherPlayerId);
+        const canonical = shortestStreetPath(origin, other.streetId);
+        const controls = state.controlledActivities.filter(c =>
+          c.ownerPlayerId === other.otherPlayerId);
+        const standing = controls.filter(c => c.posture === 0).length;
+        if (!expectedPlayer || other.streetId !== expectedPlayer.streetId
+          || !canonical || !Array.isArray(other.streetPath)
+          || other.streetPath.length !== canonical.length
+          || other.streetPath.some((id: string, index: number) => id !== canonical[index])
+          || !Number.isInteger(other.streetSteps)
+          || other.streetSteps !== canonical.length - 1
+          || !Number.isInteger(other.controlledActivities)
+          || other.controlledActivities !== controls.length
+          || !Number.isInteger(other.standingHenchmen)
+          || other.standingHenchmen !== standing
+          || other.streetSteps < previousSteps
+          || (other.streetSteps === previousSteps && other.otherPlayerId <= previousId))
+          return false;
+        encountered.add(other.otherPlayerId);
+        previousSteps = other.streetSteps;
+        previousId = other.otherPlayerId;
+      }
+          return true;
+        };
+        const validateOpponentLots = (result: OpponentControlledLotRoutes): boolean => {
+      const origin = state.players.find(p => p.playerId === seatId)?.streetId;
+      const expected = state.controlledActivities.filter(c =>
+        c.ownerPlayerId !== seatId);
+      if (!origin || !result || result.matchId !== matchId
+        || result.playerId !== seatId || result.round !== state.round
+        || result.verifiedRevision !== revision
+        || result.fromStreetId !== origin || !Array.isArray(result.routes)
+        || result.routes.length !== expected.length) return false;
+       const otherPlayerIds = new Set(state.players.filter(p =>
+        p.playerId !== seatId).map(p => p.playerId));
+      if (expected.some(lot => !otherPlayerIds.has(lot.ownerPlayerId)))
+        return false;
+      const bySlot = new Map(expected.map(lot => [lot.slotId, lot] as const));
+      const seen = new Set<string>();
+      let previousSteps = -1;
+      let previousOwner = "";
+      let previousSlot = "";
+      for (const route of result.routes) {
+        if (!route || typeof route.slotId !== "string"
+          || seen.has(route.slotId) || route.ownerPlayerId === seatId
+          || !Number.isInteger(route.posture)
+          || !Number.isInteger(route.streetSteps)) return false;
+        const lot = bySlot.get(route.slotId);
+        const canonical = shortestStreetPath(origin, route.streetId);
+        if (!lot || route.ownerPlayerId !== lot.ownerPlayerId
+          || route.posture !== lot.posture
+          || slotById(route.slotId)?.streetId !== route.streetId
+          || !canonical || !Array.isArray(route.streetPath)
+          || route.streetPath.length !== canonical.length
+          || route.streetPath.some((id: string, i: number) => id !== canonical[i])
+          || route.streetSteps !== canonical.length - 1
+          || route.streetSteps < previousSteps
+          || (route.streetSteps === previousSteps
+            && (route.ownerPlayerId < previousOwner
+              || (route.ownerPlayerId === previousOwner
+                && route.slotId <= previousSlot)))) return false;
+        seen.add(route.slotId);
+        previousSteps = route.streetSteps;
+        previousOwner = route.ownerPlayerId;
+        previousSlot = route.slotId;
+      }
+          return true;
+        };
+        if (!validateUncontrolled(overview.uncontrolled)
+          || !validateOtherPlayers(overview.otherPlayers)
+          || !validateOpponentLots(overview.opponentControlledLots)) {
+          onTacticalFocus(null);
+          return;
+        }
+        setTacticalLease({ token: actorToken, data: overview });
       })
       .catch(() => {
-        // A temporary failure or forged/stale route never asserts a rival's
-        // location and never enables an attack or a player command.
+        // A revoked/stale/malformed tactical result can never populate any
+        // public route list or enable map focus, movement, combat or purchase.
       });
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.matchId, session?.state.revision, actorId, token]);
 
-  // #85: a previous seat's tactical display choice never follows a new
-  // match, actor or capability. No extra HTTP fetch is tied to the toggle.
+  // #85: the read-only nearby display filter resets on seat/secret/match.
   useEffect(() => {
     setNearbyOpponentLotsOnly(false);
   }, [session?.matchId, actorId, token]);
-
-  // #84: actor-bound public routes to OTHER controlled lots; every returned
-  // owner, posture and path must match this revision's public snapshot.
-  useEffect(() => {
-    const matchId = session?.matchId;
-    const state = session?.state;
-    const revision = state?.revision;
-    const seatId = actorId;
-    const actorToken = token;
-    setOpponentLotLease(null);
-    if (!matchId || !state || revision === undefined || !seatId || !actorToken) return;
-    const controller = new AbortController();
-    void fetch(`/api/dev/matches/${matchId}/opponent-controlled-routes`, {
-      headers: { "X-Edonism-Dev-Token": actorToken },
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then(response => {
-        if (response.status === 404 && !controller.signal.aborted)
-          reconcileRevokedSeat(matchId, seatId, actorToken);
-        return responseJson<OpponentControlledLotRoutes>(response);
-      })
-      .then(result => {
-        const scope = currentActorScope.current;
-        if (controller.signal.aborted || scope?.matchId !== matchId
-          || scope.seatId !== seatId || scope.token !== actorToken
-          || currentRevision.current !== revision) return;
-        const origin = state.players.find(p => p.playerId === seatId)?.streetId;
-        const expected = state.controlledActivities.filter(c =>
-          c.ownerPlayerId !== seatId);
-        if (!origin || !result || result.matchId !== matchId
-          || result.playerId !== seatId || result.round !== state.round
-          || result.verifiedRevision !== revision
-          || result.fromStreetId !== origin || !Array.isArray(result.routes)
-          || result.routes.length !== expected.length) return;
-
-        const otherPlayerIds = new Set(state.players.filter(p =>
-          p.playerId !== seatId).map(p => p.playerId));
-        if (expected.some(lot => !otherPlayerIds.has(lot.ownerPlayerId)))
-          return;
-        const bySlot = new Map(expected.map(lot => [lot.slotId, lot] as const));
-        const seen = new Set<string>();
-        let previousSteps = -1;
-        let previousOwner = "";
-        let previousSlot = "";
-        for (const route of result.routes) {
-          if (!route || typeof route.slotId !== "string"
-            || seen.has(route.slotId) || route.ownerPlayerId === seatId
-            || !Number.isInteger(route.posture)
-            || !Number.isInteger(route.streetSteps)) return;
-          const lot = bySlot.get(route.slotId);
-          const canonical = shortestStreetPath(origin, route.streetId);
-          if (!lot || route.ownerPlayerId !== lot.ownerPlayerId
-            || route.posture !== lot.posture
-            || slotById(route.slotId)?.streetId !== route.streetId
-            || !canonical || !Array.isArray(route.streetPath)
-            || route.streetPath.length !== canonical.length
-            || route.streetPath.some((id: string, i: number) => id !== canonical[i])
-            || route.streetSteps !== canonical.length - 1
-            || route.streetSteps < previousSteps
-            || (route.streetSteps === previousSteps
-              && (route.ownerPlayerId < previousOwner
-                || (route.ownerPlayerId === previousOwner
-                  && route.slotId <= previousSlot)))) return;
-          seen.add(route.slotId);
-          previousSteps = route.streetSteps;
-          previousOwner = route.ownerPlayerId;
-          previousSlot = route.slotId;
-        }
-        setOpponentLotLease({ token: actorToken, data: result });
-      })
-      .catch(() => {
-        // A stale or forged response cannot manufacture tactical focus.
-      });
-    return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.matchId, session?.state.revision, actorId, token]);
 
   // Read only after the FINAL first-round event; never derive net payments
   // or apply next-round order locally. Old HTTP responses cannot resurrect

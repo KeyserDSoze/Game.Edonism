@@ -1,5 +1,4 @@
-import { cityBoard, isAdjacentStreet, shortestStreetPath } from "../src/features/city/board";
-import canonicalRoutes from "../../shared/board/canonical-street-paths.v1.json";
+import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
 test("original city board loads with 30 spaces and selectable streets", async ({ page }) => {
@@ -75,29 +74,51 @@ test("mobile layout keeps the board and accessible space picker usable without h
 });
 
 
-test("all 49 Development street paths match the pinned cross-language contract", () => {
-  expect(canonicalRoutes.format).toBe("edonism-canonical-street-paths-v1");
-  expect(canonicalRoutes.boardVersion).toBe(cityBoard.version);
-  expect(canonicalRoutes.paths).toHaveLength(49);
-  const known = cityBoard.streets.map(street => street.id);
-  const pairs = new Set<string>();
-  for (const route of canonicalRoutes.paths) {
-    pairs.add(`${route.from}:${route.to}`);
-    const actual = shortestStreetPath(route.from, route.to);
-    expect(actual, `${route.from} -> ${route.to}`).toEqual(route.path);
+// Browser-side Vite import, not a Node import: Node 24 disallows a bare
+// JSON import in the test runner. Read the frozen fixture as file bytes.
+test("all 49 Development street paths match the pinned cross-language contract",
+  async ({ page }) => {
+  const contract = JSON.parse(await readFile(
+    new URL("../../shared/board/canonical-street-paths.v1.json", import.meta.url),
+    "utf8",
+  )) as {
+    format: string; boardVersion: string;
+    paths: { from: string; to: string; path: string[] }[];
+  };
+  expect(contract.format).toBe("edonism-canonical-street-paths-v1");
+  expect(contract.paths).toHaveLength(49);
+  const pairs = new Set(contract.paths.map(route => `${route.from}:${route.to}`));
+  expect(pairs.size).toBe(49);
+
+  await page.goto("/");
+  const verified = await page.evaluate(async routes => {
+    // Run the REAL TypeScript path function in Vite's browser module graph.
+    const { cityBoard, shortestStreetPath, isAdjacentStreet } =
+      await import("/src/features/city/board.ts");
+    return {
+      boardVersion: cityBoard.version,
+      streets: cityBoard.streets.map(street => street.id),
+      paths: routes.map(route => ({
+        computed: shortestStreetPath(route.from, route.to),
+        allEdgesAdjacent: route.path.every((id, index) =>
+          index === 0 || isAdjacentStreet(route.path[index - 1], id)),
+      })),
+      unknownFrom: shortestStreetPath("unknown", "gauss"),
+      unknownTo: shortestStreetPath("gauss", "unknown"),
+    };
+  }, contract.paths);
+  expect(verified.boardVersion).toBe(contract.boardVersion);
+  expect(verified.paths).toHaveLength(49);
+  expect(pairs).toEqual(new Set(verified.streets.flatMap(from =>
+    verified.streets.map(to => `${from}:${to}`))));
+  for (const [index, route] of contract.paths.entries()) {
+    const { computed, allEdgesAdjacent } = verified.paths[index];
+    expect(computed, `${route.from} -> ${route.to}`).toEqual(route.path);
     expect(route.path[0]).toBe(route.from);
     expect(route.path.at(-1)).toBe(route.to);
     expect(new Set(route.path).size).toBe(route.path.length);
-    for (let i = 1; i < route.path.length; i++)
-      expect(isAdjacentStreet(route.path[i - 1], route.path[i])).toBe(true);
+    expect(allEdgesAdjacent).toBe(true);
   }
-  expect(pairs.size).toBe(49);
-  expect(pairs).toEqual(new Set(known.flatMap(from =>
-    known.map(to => `${from}:${to}`))));
-  expect(shortestStreetPath("gauss", "einstein"))
-    .toEqual(["gauss", "main-square", "einstein"]);
-  expect(shortestStreetPath("newton", "planck"))
-    .toEqual(["newton", "einstein", "planck"]);
-  expect(shortestStreetPath("invalid", "gauss")).toBeNull();
-  expect(shortestStreetPath("gauss", "invalid")).toBeNull();
+  expect(verified.unknownFrom).toBeNull();
+  expect(verified.unknownTo).toBeNull();
 });

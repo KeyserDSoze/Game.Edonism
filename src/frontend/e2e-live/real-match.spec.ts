@@ -1,4 +1,3 @@
-import canonicalRoutes from "../../shared/board/canonical-street-paths.v1.json";
 import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -2664,7 +2663,15 @@ test("real .NET: both authenticated seats' rival-lot paths match all pinned stre
   async ({ page, request }) => {
   const created = await startRealMatch(page);
   const url = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`;
-  const golden = new Map(canonicalRoutes.paths.map(route => [
+  const contract = JSON.parse(await readFile(
+    new URL("../../shared/board/canonical-street-paths.v1.json", import.meta.url),
+    "utf8",
+  )) as {
+    format: string; boardVersion: string;
+    paths: { from: string; to: string; path: string[] }[];
+  };
+  expect(contract.format).toBe("edonism-canonical-street-paths-v1");
+  const golden = new Map(contract.paths.map(route => [
     `${route.from}:${route.to}`, route.path,
   ]));
   expect(golden.size).toBe(49);

@@ -19,3 +19,11 @@ Il container è una dipendenza di infrastruttura: se MCR/registry/pull dovesse f
 - .NET 10 build e 282+ xUnit (inclusi quota creator 64/60s, body max 128 KiB, no-store e gating Production)
 - React TypeScript + bundling + Playwright browser reale con UI IT/EN e mobile
 - Playwright con due browser contro la vera API .NET in Development, inclusi nuovi test #46 e regressioni di privacy/turni
+
+## #91 — Budget mirato per replay offline con due pagine
+
+I workflow #43448948141, #43449098525 e #43449265718 falliscono sempre lo stesso test `offline public replay validates completed two-seat round but rejects premature settlement` con `Test timeout of 30000ms exceeded`, seguito da `browserContext.close` su un contesto già terminato; gli altri 133–137 test UI, gli xUnit e i Playwright full-stack sono verdi in questi run. Un'altra revisione esegue invece questo test correttamente, quindi il comportamento è compatibile con un **budget insufficiente sotto carico**, non con una modifica dimostrata al validatore.
+
+Soluzione: `test.setTimeout(75_000)` **solo dentro quel test**. Il test avvia due pagine complete con scena/canvas e confronta un export di round completo con il suo replay offline, poi manipola `round-settlement-pending` e verifica il rifiuto del file contraffatto e l'assenza di sessione. I test restano identici e obbligatori, con gli stessi retry CI (`1`), timeout di default (`30s`) e asserzioni. La pulizia del secondo contesto rimane nel `finally`, senza nasconderne gli errori. Un eventuale ulteriore fallimento richiede analisi del trace, **non** l'esclusione dei test.
+
+La chiusura #91 e della #90 richiede 3 job completati con successo sullo **stesso SHA finale** di `main`, non solo run precedenti. [Issue #91](https://github.com/KeyserDSoze/Game.Edonism/issues/91).

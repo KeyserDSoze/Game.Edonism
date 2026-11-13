@@ -1796,6 +1796,10 @@ for (const playerCount of [2, 8] as const) {
 
 test("offline public replay validates completed two-seat round but rejects premature settlement",
   async ({ page, browser }) => {
+    // #91: two fully rendered browser pages, export/import and tampering are
+    // more expensive than ordinary single-page UI checks on shared CI runners.
+    // Keep all checks and retries; only this test gets the two-browser budget.
+    test.setTimeout(75_000);
     await mockMatchApi(page);
     await page.goto("/");
     await page.getByTestId("dev-create").click();

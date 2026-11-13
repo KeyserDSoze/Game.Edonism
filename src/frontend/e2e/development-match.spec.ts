@@ -3226,6 +3226,15 @@ test("English mobile tactical focus remains accessible when WebGL is unavailable
   await expect(page.getByText("3D is not available on this device.", { exact: false }))
     .toBeVisible();
   await page.getByTestId("dev-create").click();
+  // #97: public per-street counts and quick selection remain DOM-only.
+  await expect(page.getByTestId("dev-opponent-street-distribution-list").locator("li"))
+    .toHaveCount(7);
+  const fallbackStreet = page.getByTestId("dev-opponent-street-select-einstein");
+  await fallbackStreet.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("dev-opponent-lots-street-filter")).toHaveValue("einstein");
+  await fallbackStreet.click();
+  await expect(page.getByTestId("dev-opponent-lots-street-filter")).toHaveValue("");
   // #94: real street IDs from the canonical board remain selectable without WebGL.
   const streetFallback = page.getByTestId("dev-opponent-lots-street-filter");
   await expect(streetFallback).toHaveValue("");
@@ -4021,6 +4030,7 @@ test("#94: forged public lot street ID makes all rival filters unavailable", asy
   await page.getByTestId("dev-create").click();
   await expect(page.getByTestId("dev-opponent-lots-unavailable")).toBeVisible();
   await expect(page.getByTestId("dev-opponent-lots-street-filter")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-street-distribution")).toHaveCount(0);
   await expect(page.getByTestId("dev-opponent-lots-reset-filters")).toHaveCount(0);
   await expect(page.getByTestId("dev-opponent-lots-active-filter-summary")).toHaveCount(0);
   await expect(page.getByTestId("dev-rival-nearest-summary")).toHaveCount(0);
@@ -4126,6 +4136,105 @@ test("#95: eight-seat reset preserves verified roster and actor/token capability
   await expect(street).toHaveValue("");
   await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
   expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview"))).toHaveLength(3);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+
+test("#97: two-seat canonical street counts and keyboard quick selection on mobile IT/EN",
+  async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { fallenHenchman: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const summary = page.getByTestId("dev-opponent-street-distribution");
+  const rows = page.getByTestId("dev-opponent-street-distribution-list").locator("li");
+  const street = page.getByTestId("dev-opponent-lots-street-filter");
+  await expect(summary).toContainText("Distribuzione dei lotti rivali");
+  await expect(rows).toHaveCount(7);
+  const einstein = page.getByTestId("dev-opponent-street-row-einstein");
+  await expect(einstein).toHaveAttribute("data-total", "1");
+  await expect(einstein).toHaveAttribute("data-standing", "0");
+  await expect(einstein).toHaveAttribute("data-fallen", "1");
+  await expect(page.getByTestId("dev-opponent-street-row-main-square"))
+    .toHaveAttribute("data-total", "0");
+  const totals = await rows.evaluateAll(nodes =>
+    nodes.map(node => Number(node.getAttribute("data-total"))));
+  expect(totals.reduce((sum, count) => sum + count, 0)).toBe(1);
+  const chooseEinstein = page.getByTestId("dev-opponent-street-select-einstein");
+  await chooseEinstein.focus();
+  await expect(chooseEinstein).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(chooseEinstein).toHaveAttribute("aria-pressed", "true");
+  await expect(street).toHaveValue("einstein");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await page.getByTestId("dev-focus-rival-nearest-bob").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await page.getByTestId("dev-opponent-street-select-gauss").click();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(street).toHaveValue("gauss");
+  await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-focus-rival-player-bob")).toBeVisible();
+  // The seven counters describe the complete audited public list, not a
+  // filtered subset of routes. Toggling a selected row clears the street.
+  await expect(einstein).toHaveAttribute("data-total", "1");
+  await page.getByTestId("dev-opponent-street-select-gauss").click();
+  await expect(street).toHaveValue("");
+  await page.getByTestId("dev-opponent-lots-owner-filter").selectOption("bob");
+  await page.getByTestId("dev-opponent-lots-posture-filter").selectOption("standing");
+  await page.getByTestId("dev-opponent-street-select-einstein").click();
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await expect(einstein).toHaveAttribute("data-fallen", "1");
+  await page.getByTestId("dev-opponent-lots-reset-filters").click();
+  await expect(street).toHaveValue("");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(summary).toContainText("Rival-held lots by public street");
+  await expect(chooseEinstein).toHaveAttribute("aria-label",
+    "Filter Einstein Avenue: 1 rival lots, 0 standing and 1 fallen");
+  expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview")))
+    .toHaveLength(1);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("#97: eight-seat public street totals follow verified actor and token isolation",
+  async ({ page }) => {
+  test.setTimeout(60_000);
+  const { observedHeaders } = await mockMatchApi(page, { playerCount: 8 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  await page.getByTestId("dev-create").click();
+  const roster = page.getByTestId("dev-rival-nearest-list");
+  const street = page.getByTestId("dev-opponent-lots-street-filter");
+  const gauss = page.getByTestId("dev-opponent-street-row-gauss");
+  const einstein = page.getByTestId("dev-opponent-street-row-einstein");
+  await expect(roster.locator("li")).toHaveCount(7);
+  await expect(page.getByTestId("dev-opponent-street-distribution-list").locator("li"))
+    .toHaveCount(7);
+  await expect(einstein).toHaveAttribute("data-total", "1");
+  await expect(gauss).toHaveAttribute("data-total", "0");
+  await page.getByTestId("dev-opponent-street-select-main-square").click();
+  await expect(street).toHaveValue("main-square");
+  await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-focus-rival-player-heidi")).toBeVisible();
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(street).toHaveValue("");
+  await expect(gauss).toHaveAttribute("data-total", "1");
+  await expect(einstein).toHaveAttribute("data-total", "0");
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
+  await page.getByTestId("dev-opponent-street-select-gauss").click();
+  await expect(street).toHaveValue("gauss");
+  await page.getByTestId("dev-rotate-token").click();
+  await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+  await expect(street).toHaveValue("");
+  await expect(gauss).toHaveAttribute("data-total", "1");
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
+  expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview")))
+    .toHaveLength(3);
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);

@@ -3004,6 +3004,22 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
   await expect(page.getByTestId("city-renderer"))
     .toHaveAttribute("data-focus-path", aliceOther.streetPath.join(">"));
   await expect(page.getByTestId("city-tactical-target")).toContainText("bob");
+  // #97: all seven public board streets are counted from the same audited
+  // atomic actor-scoped .NET response; no additional HTTP is involved.
+  const sevenStreets = ["gauss", "einstein", "newton", "planck",
+    "boson", "meson", "main-square"];
+  for (const streetId of sevenStreets) {
+    const routes = aliceTactical.opponentControlledLots.routes
+      .filter(route => route.streetId === streetId);
+    const row = page.getByTestId("dev-opponent-street-row-" + streetId);
+    await expect(row).toHaveAttribute("data-total", String(routes.length));
+    await expect(row).toHaveAttribute("data-standing",
+      String(routes.filter(route => route.posture === 0).length));
+    await expect(row).toHaveAttribute("data-fallen",
+      String(routes.filter(route => route.posture === 1).length));
+  }
+  await expect(page.getByTestId("dev-opponent-street-distribution-list").locator("li"))
+    .toHaveCount(7);
   const nearestBob = aliceTactical.opponentControlledLots.routes
     .filter(lot => lot.ownerPlayerId === "bob")[0];
   expect(nearestBob).toBeDefined();
@@ -3099,6 +3115,26 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
       .toHaveAttribute("data-slot", nearestAlice.slotId);
     await expect(bobPage.getByTestId("dev-rival-nearest-alice"))
       .toHaveAttribute("data-steps", String(nearestAlice.streetSteps));
+    // #97: Bob sees the same seven streets with counts scoped to Bob's
+    // separate verified .NET capability, not Alice's browser state.
+    for (const streetId of sevenStreets) {
+      const routes = bobTactical.opponentControlledLots.routes
+        .filter(route => route.streetId === streetId);
+      const row = bobPage.getByTestId("dev-opponent-street-row-" + streetId);
+      await expect(row).toHaveAttribute("data-total", String(routes.length));
+      await expect(row).toHaveAttribute("data-standing",
+        String(routes.filter(route => route.posture === 0).length));
+      await expect(row).toHaveAttribute("data-fallen",
+        String(routes.filter(route => route.posture === 1).length));
+    }
+    const bobQuickStreet = bobPage.getByTestId(
+      "dev-opponent-street-select-" + nearestAlice.streetId);
+    await bobQuickStreet.click();
+    await expect(bobPage.getByTestId("dev-opponent-lots-street-filter"))
+      .toHaveValue(nearestAlice.streetId);
+    await bobQuickStreet.click();
+    await expect(bobPage.getByTestId("dev-opponent-lots-street-filter"))
+      .toHaveValue("");
     const bobPostureFilter = bobPage.getByTestId("dev-opponent-lots-posture-filter");
     for (const [option, value] of [["standing", 0], ["fallen", 1]] as const) {
       const matching = bobTactical.opponentControlledLots.routes.filter(lot =>

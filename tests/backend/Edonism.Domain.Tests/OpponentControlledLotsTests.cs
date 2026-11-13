@@ -407,4 +407,60 @@ public sealed class OpponentControlledLotsTests
         Assert.True(match.VerifyPublicAudit().IsValid);
     }
 
+
+    // #97: a public street distribution is only a grouping of the same
+    // verified actor-scoped opponent lot routes, never a PvP permission.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void RivalStreetDistributionMatchesCanonicalPublicBoardAndPreservesAudit(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = FullMatch(count);
+        var state = match.Snapshot();
+        var originalCheckpoint = JsonSerializer.Serialize(match.CaptureCheckpoint());
+        Assert.Equal(7, board.Streets.Count);
+
+        foreach (var actor in state.Players)
+        {
+            var overview = match.VerifiedTacticalOverviewForActor(actor.PlayerId)!;
+            Assert.Equal(state.Revision, overview.VerifiedRevision);
+            var routes = overview.OpponentControlledLots.Routes;
+            var total = 0;
+            foreach (var street in board.Streets)
+            {
+                var matchedRoutes = routes.Where(route => route.StreetId == street.Id).ToArray();
+                var expected = state.ControlledActivities
+                    .Where(lot => lot.OwnerPlayerId != actor.PlayerId
+                        && board.Slots.Single(slot => slot.Id == lot.SlotId).StreetId == street.Id)
+                    .ToArray();
+
+                Assert.Equal(expected.Length, matchedRoutes.Length);
+                Assert.Equal(expected.Count(lot => lot.Posture == HenchmanPosture.Standing),
+                    matchedRoutes.Count(route => route.Posture == HenchmanPosture.Standing));
+                Assert.Equal(expected.Count(lot => lot.Posture == HenchmanPosture.Fallen),
+                    matchedRoutes.Count(route => route.Posture == HenchmanPosture.Fallen));
+                Assert.Equal(matchedRoutes.Length,
+                    matchedRoutes.Count(route => route.Posture == HenchmanPosture.Standing)
+                    + matchedRoutes.Count(route => route.Posture == HenchmanPosture.Fallen));
+                foreach (var route in matchedRoutes)
+                {
+                    Assert.Equal(board.ShortestStreetPath(actor.StreetId, street.Id),
+                        route.StreetPath);
+                    Assert.Contains(expected, lot => lot.SlotId == route.SlotId
+                        && lot.OwnerPlayerId == route.OwnerPlayerId
+                        && lot.Posture == route.Posture);
+                }
+                total += matchedRoutes.Length;
+                if (street.Id == "main-square") Assert.Equal(0, matchedRoutes.Length);
+            }
+            Assert.Equal(routes.Count, total);
+            Assert.DoesNotContain(routes, route => route.OwnerPlayerId == actor.PlayerId);
+        }
+
+        Assert.Equal(originalCheckpoint, JsonSerializer.Serialize(match.CaptureCheckpoint()));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
 }

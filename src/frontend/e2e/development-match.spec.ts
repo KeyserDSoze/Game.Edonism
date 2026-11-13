@@ -73,7 +73,7 @@ type MockOptions = {
   invalidOpponentLots?: "revision" | "owner" | "path" | "street" | "posture" | "count" | "steps";
   delayFirstAliceOpponentLots?: boolean;
   invalidTacticalOverview?: "outer-revision" | "outer-player" | "nested-origin"
-    | "missing-uncontrolled" | "missing-other" | "missing-lots";
+    | "nested-lots-player" | "missing-uncontrolled" | "missing-other" | "missing-lots";
   delayRotationAcknowledgement?: boolean;
 };
 
@@ -433,6 +433,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         },
         opponentControlledLots: defect === "missing-lots" ? null : {
           ...fields,
+          playerId: defect === "nested-lots-player" ? "intruder" : seat,
           verifiedRevision: options.invalidOpponentLots === "revision"
             ? revision + 99 : revision,
           routes: opponentRoutes,
@@ -4344,6 +4345,35 @@ test("#98: eight-seat holdings only list public other owners and clear on seat/t
   await expect(aliceChoice).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByTestId("dev-rival-nearest-list").locator("li")).toHaveCount(7);
   expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview"))).toHaveLength(3);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+
+test("#100: forged nested rival lot actor scope hides all atomic tactical views (eight seats)",
+  async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, {
+    playerCount: 8, invalidTacticalOverview: "nested-lots-player",
+  });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  await page.getByTestId("dev-create").click();
+  for (const id of ["dev-other-seats-unavailable",
+    "dev-routes-unavailable", "dev-opponent-lots-unavailable"])
+    await expect(page.getByTestId(id)).toBeVisible();
+  await expect(page.getByTestId("dev-other-seats-list")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-street-distribution")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveCount(0);
+  await expect(page.getByTestId("dev-rival-nearest-summary")).toHaveCount(0);
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  const readPaths = observedHeaders.filter(event => event.path.endsWith("/tactical-overview"));
+  expect(readPaths).toHaveLength(1);
+  expect(readPaths[0].token).toBe("a".repeat(64));
+  expect(observedHeaders.filter(event =>
+    /\/(uncontrolled-routes|other-player-routes|opponent-controlled-routes)$/
+      .test(event.path))).toHaveLength(0);
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);

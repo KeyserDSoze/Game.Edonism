@@ -263,6 +263,9 @@ export function DevelopmentMatchLab({
   } | null>(null);
   // #85: local display preference, never permission or a server command.
   const [nearbyOpponentLotsOnly, setNearbyOpponentLotsOnly] = useState(false);
+  // #89: display-only public controller filter; never choose a faction/foe,
+  // submit commands, or persist the current Development seat's preference.
+  const [selectedOpponentOwnerId, setSelectedOpponentOwnerId] = useState("");
   const [turnProgressLease, setTurnProgressLease] = useState<{
     token: string; data: FirstRoundTurnProgress;
   } | null>(null);
@@ -540,10 +543,16 @@ export function DevelopmentMatchLab({
   const uncontrolledRoutes = tactical?.uncontrolled ?? null;
   const otherSeatRoutes = tactical?.otherPlayers ?? null;
   const opponentLots = tactical?.opponentControlledLots ?? null;
-  // Filter only the fully validated, actor/revision/token-scoped #84 result.
-  // Zero or one canonical street edge is not a combat or travel-time rule.
+  // #89: allow a controller ONLY if listed by the same fully validated,
+  // atomic actor/revision/token-scoped #88 other-seat projection. The two
+  // client-side predicates compose; no new HTTP or gameplay permission.
+  const knownOpponentOwners = new Set(
+    otherSeatRoutes?.others.map(other => other.otherPlayerId) ?? []);
+  const selectedOpponentOwner = knownOpponentOwners.has(selectedOpponentOwnerId)
+    ? selectedOpponentOwnerId : "";
   const visibleOpponentLots = opponentLots?.routes.filter(route =>
-    !nearbyOpponentLotsOnly || route.streetSteps <= 1) ?? [];
+    (!selectedOpponentOwner || route.ownerPlayerId === selectedOpponentOwner)
+    && (!nearbyOpponentLotsOnly || route.streetSteps <= 1)) ?? [];
   const turnProgress = turnProgressLease && token
     && turnProgressLease.token === token
     && turnProgressLease.data.matchId === session?.matchId
@@ -1014,9 +1023,11 @@ export function DevelopmentMatchLab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.matchId, session?.state.revision, actorId, token]);
 
-  // #85: the read-only nearby display filter resets on seat/secret/match.
+  // #85/#89: no browser-only tactical filter preference may follow another
+  // match, player or capability (including a token rotation at same revision).
   useEffect(() => {
     setNearbyOpponentLotsOnly(false);
+    setSelectedOpponentOwnerId("");
   }, [session?.matchId, actorId, token]);
 
   // Read only after the FINAL first-round event; never derive net payments
@@ -2251,18 +2262,59 @@ export function DevelopmentMatchLab({
                       <p data-testid="dev-opponent-lots-count" aria-live="polite">
                         {t("dev.opponentLotsCount", { count: opponentLots.routes.length })}
                       </p>
+                      <label className="block space-y-1">
+                        <span className="block font-medium">
+                          {t("dev.opponentLotsOwnerFilterLabel")}
+                        </span>
+                        <select
+                          aria-label={t("dev.opponentLotsOwnerFilterLabel")}
+                          data-testid="dev-opponent-lots-owner-filter"
+                          className="h-10 w-full max-w-full rounded-md border border-input bg-background px-3 text-foreground"
+                          value={selectedOpponentOwner}
+                          onChange={(event) => {
+                            setSelectedOpponentOwnerId(event.target.value);
+                            // A previously selected map route may now be hidden.
+                            // This is read-only focus, never movement authority.
+                            onTacticalFocus(null);
+                          }}
+                        >
+                          <option value="">{t("dev.opponentLotsAllOwners")}</option>
+                          {otherSeatRoutes?.others.map(other => (
+                            <option key={other.otherPlayerId} value={other.otherPlayerId}>
+                              {other.otherPlayerId}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       <Button type="button" size="sm" variant="outline"
                         data-testid="dev-opponent-lots-nearby-toggle"
                         aria-pressed={nearbyOpponentLotsOnly}
-                        onClick={() => setNearbyOpponentLotsOnly(previous => !previous)}>
+                        onClick={() => {
+                          setNearbyOpponentLotsOnly(previous => !previous);
+                          onTacticalFocus(null);
+                        }}>
                         {t("dev.opponentLotsNearbyToggle")}
                       </Button>
+                      {selectedOpponentOwner && (
+                        <p data-testid="dev-opponent-lots-owner-filtered-count" aria-live="polite">
+                          {t("dev.opponentLotsOwnerFilteredCount", {
+                            owner: selectedOpponentOwner, count: visibleOpponentLots.length,
+                          })}
+                        </p>
+                      )}
                       {nearbyOpponentLotsOnly && (
                         <p data-testid="dev-opponent-lots-filtered-count" aria-live="polite">
                           {t("dev.opponentLotsFilteredCount", { count: visibleOpponentLots.length })}
                         </p>
                       )}
-                      {nearbyOpponentLotsOnly && visibleOpponentLots.length === 0 && (
+                      {selectedOpponentOwner && visibleOpponentLots.length === 0 && (
+                        <p data-testid="dev-opponent-lots-no-owner"
+                          className="text-muted-foreground">
+                          {t("dev.opponentLotsNoOwner", { owner: selectedOpponentOwner })}
+                        </p>
+                      )}
+                      {nearbyOpponentLotsOnly && !selectedOpponentOwner
+                        && visibleOpponentLots.length === 0 && (
                         <p data-testid="dev-opponent-lots-no-nearby"
                           className="text-muted-foreground">{t("dev.opponentLotsNoNearby")}</p>
                       )}

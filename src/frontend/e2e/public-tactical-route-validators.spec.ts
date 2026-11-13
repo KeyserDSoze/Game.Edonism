@@ -151,7 +151,7 @@ for (const count of [2, 4, 8] as const) {
       x => { x.opponentControlledLots.routes[0].posture = 55; },
       x => { x.opponentControlledLots.routes[0].slotId = "seat-0"; },
       x => { x.opponentControlledLots.routes[0].streetId = "unmapped"; },
-      x => { x.opponentControlledLots.routes[0].streetPath = ["gauss"]; },
+      x => { x.opponentControlledLots.routes[0].streetPath = ["gauss", "gauss"]; },
       x => { x.opponentControlledLots.routes[0].streetSteps = 55; },
       x => { x.opponentControlledLots.routes.pop(); },
       x => { x.opponentControlledLots.routes.push(clone(x.opponentControlledLots.routes[0])); },

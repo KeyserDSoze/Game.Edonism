@@ -340,4 +340,71 @@ public sealed class OpponentControlledLotsTests
         Assert.True(match.VerifyPublicAudit().IsValid);
     }
 
+
+    // #94: All street selections are public BOARD IDs; the browser only
+    // intersects already-audited routes. Neither route authority nor match
+    // state changes when grouping by a particular board street.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void VerifiedStreetFilterIntersectsRivalOwnerPostureNearbyAndNeverMutatesMatch(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = FullMatch(count);
+        var state = match.Snapshot();
+        var before = JsonSerializer.Serialize(match.CaptureCheckpoint());
+        Assert.Equal(7, board.Streets.Count);
+
+        foreach (var actor in state.Players)
+        {
+            var overview = match.VerifiedTacticalOverviewForActor(actor.PlayerId)!;
+            var otherIds = overview.OtherPlayers.Others
+                .Select(other => other.OtherPlayerId).ToArray();
+            var all = overview.OpponentControlledLots.Routes;
+            Assert.Equal(count - 1, otherIds.Length);
+            Assert.DoesNotContain(actor.PlayerId, otherIds);
+            Assert.Equal(state.Revision, overview.VerifiedRevision);
+
+            foreach (var street in board.Streets)
+            {
+                var selected = all.Where(route => route.StreetId == street.Id).ToArray();
+                var expected = state.ControlledActivities
+                    .Where(control => control.OwnerPlayerId != actor.PlayerId
+                        && board.Slots.Single(s => s.Id == control.SlotId).StreetId == street.Id)
+                    .Select(control => control.SlotId)
+                    .OrderBy(id => id, StringComparer.Ordinal);
+                Assert.Equal(expected, selected.Select(route => route.SlotId)
+                    .OrderBy(id => id, StringComparer.Ordinal));
+                Assert.All(selected, route =>
+                {
+                    Assert.Contains(route.OwnerPlayerId, otherIds);
+                    Assert.Equal(street.Id, board.Slots.Single(s => s.Id == route.SlotId).StreetId);
+                    Assert.Equal(board.ShortestStreetPath(actor.StreetId, street.Id),
+                        route.StreetPath);
+                    Assert.Equal(route.StreetPath.Count - 1, route.StreetSteps);
+                });
+                foreach (var owner in otherIds)
+                foreach (var posture in new[] { HenchmanPosture.Standing, HenchmanPosture.Fallen })
+                {
+                    var sameOwnerAndPosture = selected.Where(route =>
+                        route.OwnerPlayerId == owner && route.Posture == posture).ToArray();
+                    var nearby = sameOwnerAndPosture
+                        .Where(route => route.StreetSteps <= 1).ToArray();
+                    Assert.Equal(all.Where(route => route.StreetId == street.Id
+                        && route.OwnerPlayerId == owner && route.Posture == posture
+                        && route.StreetSteps <= 1), nearby);
+                    Assert.Equal(sameOwnerAndPosture.OrderBy(route => route.StreetSteps)
+                        .ThenBy(route => route.SlotId, StringComparer.Ordinal),
+                        sameOwnerAndPosture);
+                }
+            }
+            // The city hall/main square has no activity slots to control.
+            Assert.Empty(all.Where(route => route.StreetId == "main-square"));
+            Assert.DoesNotContain(all, route => route.StreetId == "unmapped-road");
+        }
+        Assert.Equal(before, JsonSerializer.Serialize(match.CaptureCheckpoint()));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
 }

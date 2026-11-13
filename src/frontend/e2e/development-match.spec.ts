@@ -3225,6 +3225,15 @@ test("English mobile tactical focus remains accessible when WebGL is unavailable
   await expect(page.getByText("3D is not available on this device.", { exact: false }))
     .toBeVisible();
   await page.getByTestId("dev-create").click();
+  // #94: real street IDs from the canonical board remain selectable without WebGL.
+  const streetFallback = page.getByTestId("dev-opponent-lots-street-filter");
+  await expect(streetFallback).toHaveValue("");
+  await streetFallback.selectOption("gauss");
+  await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-focus-rival-player-bob")).toBeVisible();
+  await streetFallback.selectOption("einstein");
+  await expect(page.getByTestId("dev-rival-nearest-bob")).toHaveAttribute("data-slot", "S-01");
+  await streetFallback.selectOption("");
   // #93: filtered public rival lots remain a keyboard-accessible DOM-only
   // view when 3D is unavailable; a hidden lot cannot retain a map focus.
   const postureFallback = page.getByTestId("dev-opponent-lots-posture-filter");
@@ -3900,5 +3909,103 @@ test("#93: invalid public posture never exposes a selector or any lot focus",
   await expect(page.getByTestId("dev-opponent-lots-posture-filter")).toHaveCount(0);
   await expect(page.getByTestId("dev-focus-opponent-lot-S-01")).toHaveCount(0);
   await expect(page.getByTestId("dev-rival-nearest-summary")).toHaveCount(0);
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+});
+
+
+test("#94: canonical street filter intersects owner, posture and nearby on mobile IT/EN",
+  async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { fallenHenchman: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const street = page.getByTestId("dev-opponent-lots-street-filter");
+  const owner = page.getByTestId("dev-opponent-lots-owner-filter");
+  const posture = page.getByTestId("dev-opponent-lots-posture-filter");
+  await expect(street).toHaveValue("");
+  await expect(street.locator("option")).toHaveCount(8);
+  await expect(street.locator('option[value="einstein"]')).toHaveText("Einstein Avenue");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await page.getByTestId("dev-focus-rival-nearest-bob").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await street.selectOption("gauss");
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-focus-rival-player-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lots-street-filtered-count")).toContainText("0 lotti");
+  await street.selectOption("einstein");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toHaveAttribute("data-owner", "bob");
+  await expect(page.getByTestId("dev-rival-nearest-bob")).toHaveAttribute("data-slot", "S-01");
+  await owner.selectOption("bob");
+  await posture.selectOption("standing");
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await posture.selectOption("fallen");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await page.getByTestId("dev-opponent-lots-nearby-toggle").click();
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+  await page.getByTestId("dev-opponent-lots-nearby-toggle").click();
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(street).toHaveAttribute("aria-label", "Filter rival lots by public street");
+  await expect(street.locator("option").first()).toHaveText("All streets");
+  await street.focus();
+  await expect(street).toBeFocused();
+  await street.selectOption("");
+  await expect(page.getByTestId("dev-opponent-lots-street-filtered-count")).toHaveCount(0);
+  expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview"))).toHaveLength(1);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("#94: eight-seat street selection keeps rival roster and resets on actor/token changes",
+  async ({ page }) => {
+  test.setTimeout(60_000);
+  const { observedHeaders } = await mockMatchApi(page, { playerCount: 8 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  await page.getByTestId("dev-create").click();
+  const street = page.getByTestId("dev-opponent-lots-street-filter");
+  const owners = page.getByTestId("dev-rival-nearest-list");
+  await expect(owners.locator("li")).toHaveCount(7);
+  await street.selectOption("gauss");
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-focus-rival-player-heidi")).toBeVisible();
+  await street.selectOption("einstein");
+  await expect(page.getByTestId("dev-rival-nearest-bob")).toHaveAttribute("data-slot", "S-01");
+  await page.getByTestId("dev-opponent-lots-owner-filter").selectOption("heidi");
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await expect(page.getByTestId("dev-focus-rival-player-heidi")).toBeVisible();
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(street).toHaveValue("");
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
+  await expect(page.getByTestId("dev-rival-nearest-bob")).toHaveCount(0);
+  await street.selectOption("gauss");
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
+  await page.getByTestId("dev-focus-rival-nearest-alice").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await page.getByTestId("dev-rotate-token").click();
+  await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+  await expect(street).toHaveValue("");
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
+  expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview"))).toHaveLength(3);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("#94: malformed public street or revision makes all rival filters unavailable", async ({ page }) => {
+  await mockMatchApi(page, { invalidOpponentLots: "path" });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-opponent-lots-unavailable")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lots-street-filter")).toHaveCount(0);
+  await expect(page.getByTestId("dev-rival-nearest-summary")).toHaveCount(0);
+  await expect(page.getByTestId("dev-focus-opponent-lot-S-01")).toHaveCount(0);
   await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
 });

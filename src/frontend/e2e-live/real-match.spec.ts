@@ -2961,7 +2961,7 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
   async ({ page, browser, request }) => {
   test.setTimeout(75_000); // #93: two real browsers and repeated public posture checks
   type Lot = { slotId: string; ownerPlayerId: string; streetSteps: number;
-    posture: number; streetPath: string[] };
+    posture: number; streetId: string; streetPath: string[] };
   type Tactical = {
     playerId: string; verifiedRevision: number;
     otherPlayers: { others: { otherPlayerId: string; streetSteps: number; streetPath: string[] }[] };
@@ -3028,6 +3028,17 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
     await expect(page.getByTestId("dev-focus-rival-player-bob")).toBeVisible();
   }
   await postureFilter.selectOption("all");
+  // #94: the named street is from the same server-verified lot projection.
+  const streetFilter = page.getByTestId("dev-opponent-lots-street-filter");
+  await expect(streetFilter).toHaveValue("");
+  await streetFilter.selectOption(nearestBob.streetId);
+  await expect(page.getByTestId("dev-rival-nearest-bob"))
+    .toHaveAttribute("data-slot", nearestBob.slotId);
+  const emptyStreet = nearestBob.streetId === "gauss" ? "einstein" : "gauss";
+  await streetFilter.selectOption(emptyStreet);
+  await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-focus-rival-player-bob")).toBeVisible();
+  await streetFilter.selectOption("");
   await expect(page.getByTestId("dev-opponent-lot-posture-" + nearestBob.slotId))
     .toBeVisible();
   expect(readPaths).toHaveLength(1);
@@ -3082,6 +3093,16 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
       await expect(bobPage.getByTestId("dev-focus-rival-player-alice")).toBeVisible();
     }
     await bobPostureFilter.selectOption("all");
+    // #94: second bearer independently uses the same immutable public streets.
+    const bobStreetFilter = bobPage.getByTestId("dev-opponent-lots-street-filter");
+    await bobStreetFilter.selectOption(nearestAlice.streetId);
+    await expect(bobPage.getByTestId("dev-rival-nearest-alice"))
+      .toHaveAttribute("data-slot", nearestAlice.slotId);
+    const otherStreet = nearestAlice.streetId === "gauss" ? "einstein" : "gauss";
+    await bobStreetFilter.selectOption(otherStreet);
+    await expect(bobPage.getByTestId("dev-rival-nearest-empty-alice")).toBeVisible();
+    await expect(bobPage.getByTestId("dev-focus-rival-player-alice")).toBeVisible();
+    await bobStreetFilter.selectOption("");
 
     await expect(bobPage.getByTestId("dev-rival-nearest-bob")).toHaveCount(0);
     expect(bobBrowserReads).toEqual([bobToken]);

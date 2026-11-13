@@ -22,6 +22,7 @@ import {
 import { verifiedPublicHistory, type PublicHistory } from "./verifiedPublicHistory";
 import { selectPublicScoutingView } from "./publicScoutingSelectors";
 import { hasAtomicPublicTacticalScope } from "./publicTacticalScope";
+import { validatePublicTacticalRoutes } from "./publicTacticalRouteValidators";
 
 type DemoCredential = Readonly<{ playerId: string; token: string }>;
 type DemoPlayer = Readonly<{
@@ -913,124 +914,15 @@ export function DevelopmentMatchLab({
           onTacticalFocus(null);
           return;
         }
-        const validateUncontrolled = (result: UncontrolledRoutes): boolean => {
-      const position = state.players.find(p => p.playerId === seatId)?.streetId;
-      const controlled = new Set(state.controlledActivities.map(c => c.slotId));
-      const expected = state.boardActivities.filter(a => !controlled.has(a.slotId));
-      if (!position || result.matchId !== matchId || result.playerId !== seatId
-        || result.round !== state.round || result.verifiedRevision !== revision
-        || result.fromStreetId !== position || !Array.isArray(result.routes)
-        || result.routes.length !== expected.length) return false;
-      const expectedBySlot = new Map(expected.map(card => [card.slotId, card]));
-      const used = new Set<string>();
-      let previousSteps = -1;
-      let previousSlot = "";
-      for (const route of result.routes) {
-        if (!route || typeof route.slotId !== "string" || used.has(route.slotId)
-          || !Number.isInteger(route.streetSteps) || route.streetSteps < 0
-          || route.streetSteps > 6 || typeof route.streetId !== "string") return false;
-        const card = expectedBySlot.get(route.slotId);
-        const canonicalPath = shortestStreetPath(position, route.streetId);
-        if (!card || route.cardId !== card.cardId || route.category !== card.category
-          || slotById(route.slotId)?.streetId !== route.streetId
-          || !canonicalPath || !Array.isArray(route.streetPath)
-          || route.streetSteps !== canonicalPath.length - 1
-          || route.streetPath.length !== canonicalPath.length
-          || route.streetPath.some((id: string, index: number) => id !== canonicalPath[index])
-          || route.streetSteps < previousSteps
-          || (route.streetSteps === previousSteps && route.slotId <= previousSlot)) return false;
-        used.add(route.slotId);
-        previousSteps = route.streetSteps;
-        previousSlot = route.slotId;
-      }
-          return true;
-        };
-        const validateOtherPlayers = (result: OtherSeatRoutes): boolean => {
-      const origin = state.players.find(p => p.playerId === seatId)?.streetId;
-      if (!origin || !result || result.matchId !== matchId
-        || result.playerId !== seatId || result.round !== state.round
-        || result.verifiedRevision !== revision
-        || result.fromStreetId !== origin || !Array.isArray(result.others)
-        || result.others.length !== state.players.length - 1) return false;
-      const expected = new Map(state.players.filter(p => p.playerId !== seatId)
-        .map(p => [p.playerId, p] as const));
-      const encountered = new Set<string>();
-      let previousSteps = -1;
-      let previousId = "";
-      for (const other of result.others) {
-        if (!other || typeof other.otherPlayerId !== "string"
-          || encountered.has(other.otherPlayerId)) return false;
-        const expectedPlayer = expected.get(other.otherPlayerId);
-        const canonical = shortestStreetPath(origin, other.streetId);
-        const controls = state.controlledActivities.filter(c =>
-          c.ownerPlayerId === other.otherPlayerId);
-        const standing = controls.filter(c => c.posture === 0).length;
-        if (!expectedPlayer || other.streetId !== expectedPlayer.streetId
-          || !canonical || !Array.isArray(other.streetPath)
-          || other.streetPath.length !== canonical.length
-          || other.streetPath.some((id: string, index: number) => id !== canonical[index])
-          || !Number.isInteger(other.streetSteps)
-          || other.streetSteps !== canonical.length - 1
-          || !Number.isInteger(other.controlledActivities)
-          || other.controlledActivities !== controls.length
-          || !Number.isInteger(other.standingHenchmen)
-          || other.standingHenchmen !== standing
-          || other.streetSteps < previousSteps
-          || (other.streetSteps === previousSteps && other.otherPlayerId <= previousId))
-          return false;
-        encountered.add(other.otherPlayerId);
-        previousSteps = other.streetSteps;
-        previousId = other.otherPlayerId;
-      }
-          return true;
-        };
-        const validateOpponentLots = (result: OpponentControlledLotRoutes): boolean => {
-      const origin = state.players.find(p => p.playerId === seatId)?.streetId;
-      const expected = state.controlledActivities.filter(c =>
-        c.ownerPlayerId !== seatId);
-      if (!origin || !result || result.matchId !== matchId
-        || result.playerId !== seatId || result.round !== state.round
-        || result.verifiedRevision !== revision
-        || result.fromStreetId !== origin || !Array.isArray(result.routes)
-        || result.routes.length !== expected.length) return false;
-       const otherPlayerIds = new Set(state.players.filter(p =>
-        p.playerId !== seatId).map(p => p.playerId));
-      if (expected.some(lot => !otherPlayerIds.has(lot.ownerPlayerId)))
-        return false;
-      const bySlot = new Map(expected.map(lot => [lot.slotId, lot] as const));
-      const seen = new Set<string>();
-      let previousSteps = -1;
-      let previousOwner = "";
-      let previousSlot = "";
-      for (const route of result.routes) {
-        if (!route || typeof route.slotId !== "string"
-          || seen.has(route.slotId) || route.ownerPlayerId === seatId
-          || !Number.isInteger(route.posture)
-          || !Number.isInteger(route.streetSteps)) return false;
-        const lot = bySlot.get(route.slotId);
-        const canonical = shortestStreetPath(origin, route.streetId);
-        if (!lot || route.ownerPlayerId !== lot.ownerPlayerId
-          || route.posture !== lot.posture
-          || slotById(route.slotId)?.streetId !== route.streetId
-          || !canonical || !Array.isArray(route.streetPath)
-          || route.streetPath.length !== canonical.length
-          || route.streetPath.some((id: string, i: number) => id !== canonical[i])
-          || route.streetSteps !== canonical.length - 1
-          || route.streetSteps < previousSteps
-          || (route.streetSteps === previousSteps
-            && (route.ownerPlayerId < previousOwner
-              || (route.ownerPlayerId === previousOwner
-                && route.slotId <= previousSlot)))) return false;
-        seen.add(route.slotId);
-        previousSteps = route.streetSteps;
-        previousOwner = route.ownerPlayerId;
-        previousSlot = route.slotId;
-      }
-          return true;
-        };
-        if (!validateUncontrolled(overview.uncontrolled)
-          || !validateOtherPlayers(overview.otherPlayers)
-          || !validateOpponentLots(overview.opponentControlledLots)) {
+        // #101: deep, pure, all-or-nothing route checks after #100 scope,
+        // actor/credential/revision checks. No unverified nested view renders.
+        if (!validatePublicTacticalRoutes(overview, {
+          scope: { matchId, playerId: seatId, round: state.round,
+            verifiedRevision: revision, fromStreetId: origin },
+          state,
+          shortestPath: shortestStreetPath,
+          slotStreetId: slotId => slotById(slotId)?.streetId,
+        })) {
           onTacticalFocus(null);
           return;
         }

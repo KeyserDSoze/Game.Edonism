@@ -7,7 +7,7 @@ The frontend has three separate, mandatory layers:
 
 1. **Capability/race guard (React):** verify current in-memory bearer token, current actor/seat, match UUID, latest public revision and aborted request state. A delayed response for an old actor/token/round cannot update the current view. The creator's all-seat credentials remain Development-only.
 2. **Atomic scope guard (pure helper):** `hasAtomicPublicTacticalScope(response, expected)` in `src/frontend/src/features/matches/publicTacticalScope.ts` checks all five fields against the authoritative current public context, at the outer response and each of its three nested projections. It rejects missing, null, array, primitive, mismatched or forged scopes. This is read-only structural validation, **not a new authorization mechanism**.
-3. **Deep semantic guards (unchanged):** the original `validateUncontrolled`, `validateOtherPlayers`, and `validateOpponentLots` compare public lot/card counts, owner identity, standing/fallen posture, street-graph paths, distance and canonical server order with the latest authoritative public match snapshot. These remain necessary even when scope fields match.
+3. **Deep semantic guards (pure #101 extraction):** `validateUncontrolledPublicRoutes`, `validateOtherPublicPlayerRoutes`, and `validateOpponentPublicLotRoutes` compare public lot/card counts, owner identity, standing/fallen posture, street-graph paths, distance and canonical server order with the latest authoritative public match snapshot. These remain necessary even when scope fields match.
 
 Any layer failing invalidates the **entire** atomic display (no partial views) and prevents public route or map-focus rendering. Never infer attack, movement, purchase, faction, private card details or Production identity from passing these checks. The game rules #4 and Production login #13 remain unresolved.
 
@@ -18,3 +18,5 @@ Any layer failing invalidates the **entire** atomic display (no partial views) a
 - **Existing xUnit .NET 10:** 2/4/8 route/owner/street/posture/public-audit and checkpoint invariants.
 
 This change does not move fetches, UI local state, token storage, actor race checks or any Domain command. Three job gates (.NET/xUnit, React mocked Playwright, real React + .NET Playwright) must all pass on the **exact current main SHA** before closure.
+
+See [#101 route semantics](pure-public-tactical-route-validators.md) for the direct validation matrix and pure module boundary.

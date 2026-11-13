@@ -15,3 +15,6 @@ All three exports take unknown server projections and return boolean; nulls, mis
 ## Regression and closure
 
 `src/frontend/e2e/public-tactical-route-validators.spec.ts` tests positive 2/4/8 fixtures, unchanged inputs, mutated card/category/count/slot, player identity, owner/posture, graph paths/steps and ordering plus invalid/missing/mismatched scopes. Existing mocked Playwright checks forged nested projections fail closed in UI and map focus; existing real .NET Playwright uses two independent bearer browsers. .NET xUnit remains the authority for path/owner/audit/checkpoint invariants. Issue #101 may close only after **all three CI jobs succeed on the exact final main SHA**; update ledger and issue with actual test totals. No printed rulebook #4 or Production identity #13 is inferred.
+
+## Functional validation result
+[CI #43508994557](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43508994557) ran on implementation SHA `e08b1073`: **665/665 xUnit, 177/177 mocked Playwright (13 new deterministic validators), 40/40 live .NET Playwright**, all three jobs completed/success. For issue closure verify again on the final documentation-only main HEAD and record its SHA in #101.

@@ -2454,6 +2454,11 @@ export function DevelopmentMatchLab({
                               {streetById(route.streetId)?.name ?? route.streetId} · {
                                 t("dev.routeSteps", { count: route.streetSteps })}
                             </span>
+                            <span className="block text-muted-foreground"
+                              data-testid={`dev-opponent-lot-posture-${route.slotId}`}>
+                              {route.posture === 0 ? t("dev.opponentLotStanding")
+                                : t("dev.opponentLotFallen")}
+                            </span>
                             <span className="block break-words text-muted-foreground">
                               {t("dev.routePath")}: {route.streetPath.map(id =>
                                 streetById(id)?.name ?? id).join(" → ")}
@@ -2507,11 +2512,6 @@ export function DevelopmentMatchLab({
                               {streetById(route.streetId)?.name ?? route.streetId} · {
                                 t("dev.routeSteps", { count: route.streetSteps })
                               }
-                            </span>
-                            <span className="block text-muted-foreground"
-                              data-testid={`dev-opponent-lot-posture-${route.slotId}`}>
-                              {route.posture === 0 ? t("dev.opponentLotStanding")
-                                : t("dev.opponentLotFallen")}
                             </span>
                             <span className="block break-words text-muted-foreground"
                               data-testid={`dev-route-path-${route.slotId}`}>

@@ -193,4 +193,95 @@ public sealed class OpponentControlledLotsTests
         Assert.True(match.VerifyPublicAudit().IsValid);
     }
 
+    // #90: this UI nearest route is a derived read-only group of the EXACT
+    // independently verified public projection; the Domain remains authority.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void NearestRivalLotUsesCanonicalShortestRouteAndStableTieBreak(int count)
+    {
+        var match = FullMatch(count);
+        var board = BoardCatalog.LoadDefault();
+        var state = match.Snapshot();
+        var checkpoint = JsonSerializer.Serialize(match.CaptureCheckpoint());
+
+        foreach (var actor in state.Players)
+        {
+            var overview = match.VerifiedTacticalOverviewForActor(actor.PlayerId)!;
+            Assert.Equal(state.Revision, overview.VerifiedRevision);
+            var otherIds = overview.OtherPlayers.Others
+                .Select(other => other.OtherPlayerId).ToArray();
+            Assert.Equal(count - 1, otherIds.Length);
+            Assert.DoesNotContain(actor.PlayerId, otherIds);
+
+            foreach (var otherId in otherIds)
+            {
+                var validPublicRoutes = overview.OpponentControlledLots.Routes
+                    .Where(route => route.OwnerPlayerId == otherId).ToArray();
+
+                var canonical = state.ControlledActivities
+                    .Where(control => control.OwnerPlayerId == otherId)
+                    .Select(control =>
+                    {
+                        var slot = board.Slots.Single(slot => slot.Id == control.SlotId);
+                        var path = board.ShortestStreetPath(actor.StreetId, slot.StreetId)!;
+                        return (control.SlotId, StreetSteps: path.Count - 1,
+                            StreetPath: path.ToArray());
+                    })
+                    .OrderBy(route => route.StreetSteps)
+                    .ThenBy(route => route.SlotId, StringComparer.Ordinal)
+                    .ToArray();
+
+                Assert.Equal(canonical.Length, validPublicRoutes.Length);
+                if (canonical.Length == 0)
+                {
+                    Assert.Empty(validPublicRoutes);
+                    continue;
+                }
+                // The first canonical route is already nearest for that owner
+                // because #88 also verifies the full server sorting invariant.
+                var nearest = validPublicRoutes[0];
+                Assert.Equal(canonical[0].SlotId, nearest.SlotId);
+                Assert.Equal(canonical[0].StreetSteps, nearest.StreetSteps);
+                Assert.Equal(canonical[0].StreetPath, nearest.StreetPath);
+
+                var nearOnly = validPublicRoutes
+                    .Where(route => route.StreetSteps <= 1).ToArray();
+                Assert.Equal(canonical.Where(route => route.StreetSteps <= 1)
+                    .Select(route => route.SlotId),
+                    nearOnly.Select(route => route.SlotId));
+                Assert.All(nearOnly, route =>
+                    Assert.InRange(route.StreetSteps, 0, 1));
+            }
+        }
+
+        Assert.Equal(checkpoint, JsonSerializer.Serialize(match.CaptureCheckpoint()));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
+    [Fact]
+    public void NearestRivalLotTracksVerifiedRevisionAfterMovementAndRestoration()
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = GameMatch.CreateFromTrustedSetup(Guid.NewGuid(), board,
+        [
+            new MatchParticipantSeed("alice", "N-01"),
+            new MatchParticipantSeed("bob", "S-01")
+        ]);
+        var initial = match.VerifiedTacticalOverviewForActor("alice")!;
+        Assert.Equal(2, initial.OpponentControlledLots.Routes[0].StreetSteps);
+        Assert.True(match.TryFreeMove("alice", "main-square", 0).Accepted);
+        var moved = match.VerifiedTacticalOverviewForActor("alice")!;
+        Assert.Equal(1, moved.OpponentControlledLots.Routes[0].StreetSteps);
+        Assert.Equal(1, moved.VerifiedRevision);
+        Assert.Equal(0, initial.VerifiedRevision);
+        var stored = JsonSerializer.Serialize(match.CaptureCheckpoint());
+        var restored = GameMatch.RestoreFromCheckpoint(board, match.CaptureCheckpoint());
+        Assert.Equal(JsonSerializer.Serialize(moved),
+            JsonSerializer.Serialize(restored.VerifiedTacticalOverviewForActor("alice")));
+        Assert.Equal(stored, JsonSerializer.Serialize(restored.CaptureCheckpoint()));
+        Assert.True(restored.VerifyPublicAudit().IsValid);
+    }
+
 }

@@ -2710,3 +2710,66 @@ test("real .NET: both authenticated seats' rival-lot paths match all pinned stre
   expect(after.status()).toBe(200);
   expect(await after.json()).toEqual(snapshot);
 });
+
+test("real .NET: tactical overview bundles all three scoped read-only public projections",
+  async ({ page, request }) => {
+  const created = await startRealMatch(page);
+  const url = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`;
+  const denied = await request.get(`${url}/tactical-overview`);
+  expect(denied.status()).toBe(404);
+  expect(denied.headers()["cache-control"]).toBe("no-store");
+
+  const initial = await request.get(url, { headers: auth(tokenFor(created, "alice")) });
+  expect(initial.status()).toBe(200);
+  const baseline = await initial.json() as PublicMatch;
+  for (const seat of ["alice", "bob"]) {
+    const headers = auth(tokenFor(created, seat));
+    const response = await request.get(`${url}/tactical-overview?playerId=${seat === "alice" ? "bob" : "alice"}`, {
+      headers,
+    });
+    expect(response.status()).toBe(200);
+    expect(response.headers()["cache-control"]).toBe("no-store");
+    const overview = await response.json() as {
+      matchId: string; playerId: string; round: number; verifiedRevision: number;
+      fromStreetId: string;
+      uncontrolled: { matchId: string; playerId: string; verifiedRevision: number;
+        fromStreetId: string; routes: unknown[] };
+      otherPlayers: { matchId: string; playerId: string; verifiedRevision: number;
+        fromStreetId: string; others: unknown[] };
+      opponentControlledLots: { matchId: string; playerId: string; verifiedRevision: number;
+        fromStreetId: string; routes: unknown[] };
+    };
+    expect(overview.playerId).toBe(seat);
+    expect(overview.matchId).toBe(created.matchId);
+    expect(overview.round).toBe(1);
+    expect(overview.verifiedRevision).toBe(0);
+    expect(overview.fromStreetId).toBe(baseline.players.find(p => p.playerId === seat)!.streetId);
+    for (const [field, legacy] of [
+      ["uncontrolled", "uncontrolled-routes"],
+      ["otherPlayers", "other-player-routes"],
+      ["opponentControlledLots", "opponent-controlled-routes"],
+    ] as const) {
+      const part = overview[field];
+      expect(part.playerId).toBe(seat);
+      expect(part.matchId).toBe(created.matchId);
+      expect(part.verifiedRevision).toBe(overview.verifiedRevision);
+      expect(part.fromStreetId).toBe(overview.fromStreetId);
+      const separately = await request.get(`${url}/${legacy}`, { headers });
+      expect(separately.status()).toBe(200);
+      expect(part).toEqual(await separately.json());
+    }
+    expect(overview.uncontrolled.routes).toHaveLength(28);
+    expect(overview.otherPlayers.others).toHaveLength(1);
+    expect(overview.opponentControlledLots.routes).toHaveLength(1);
+    const serialized = JSON.stringify(overview);
+    for (const secret of [tokenFor(created, "alice"), tokenFor(created, "bob"),
+      "cardIds", "drawPile", "faction", "atoms"]) expect(serialized).not.toContain(secret);
+  }
+
+  await expect(page.getByTestId("dev-other-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lots-count")).toBeVisible();
+  await expect(page.getByTestId("dev-routes-count")).toBeVisible();
+  const finalResponse = await request.get(url, { headers: auth(tokenFor(created, "alice")) });
+  expect(finalResponse.status()).toBe(200);
+  expect(await finalResponse.json()).toEqual(baseline);
+});

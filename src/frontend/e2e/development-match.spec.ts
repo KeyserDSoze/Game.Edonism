@@ -3270,3 +3270,22 @@ test("nearby opponent-lot filter is public-only and resets when switching seats"
   await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
 });
+
+test("legacy tactical panels remain public and actor-scoped before atomic overview UI migration", async ({ page }) => {
+  await mockMatchApi(page, { routePlannerWithFreeCards: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-other-seat-bob")).toHaveAttribute("data-steps", "2");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toHaveAttribute("data-owner", "bob");
+  await expect(page.getByTestId("dev-route-N-02")).toHaveAttribute("data-steps", "0");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-other-seat-alice")).toHaveAttribute("data-steps", "2");
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toHaveAttribute("data-owner", "alice");
+  await expect(page.getByTestId("dev-route-S-02")).toHaveAttribute("data-steps", "0");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-other-seats")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lots")).toHaveCount(0);
+  await expect(page.getByTestId("dev-route-planner")).toHaveCount(0);
+});

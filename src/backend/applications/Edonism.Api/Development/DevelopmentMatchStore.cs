@@ -634,6 +634,25 @@ public sealed class DevelopmentMatchStore
     }
 
     /// <summary>
+    /// #87: compose three previously verified PUBLIC tactical perspectives
+    /// for the same bearer-derived actor under one match lock and revision.
+    /// None are permissions to move, attack, or purchase; no private cards.
+    /// </summary>
+    public bool TryReadTacticalOverview(Guid matchId, string? token,
+        out MatchTacticalOverview? overview)
+    {
+        overview = null;
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            var actor = entry.ResolveActor(token);
+            if (actor is null) return false;
+            overview = entry.Match.VerifiedTacticalOverviewForActor(actor);
+            return overview is not null;
+        }
+    }
+
+    /// <summary>
     /// Server-verified, read-only public first-round turn progression. A
     /// forged/revoked token must never learn who already ended a turn.
     /// </summary>

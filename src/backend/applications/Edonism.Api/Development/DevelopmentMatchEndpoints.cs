@@ -192,6 +192,17 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "match_not_found" });
         });
 
+        // #87: one atomic, actor-bound read of the three already-audited
+        // public tactical routes. Existing individual endpoints are unchanged.
+        // No new gameplay decisions or permissions can come from this DTO.
+        group.MapGet("/{matchId:guid}/tactical-overview",
+            (Guid matchId, HttpContext context, DevelopmentMatchStore store) =>
+        {
+            return store.TryReadTacticalOverview(matchId, Token(context), out var overview)
+                ? Results.Ok(overview)
+                : Results.NotFound(new { code = "match_not_found" });
+        });
+
         // #43: actor-authorized, audit-verified completed/remaining turn order.
         // Does not grant turn permissions, reveal private cards or skip actors.
         group.MapGet("/{matchId:guid}/turn-progress",

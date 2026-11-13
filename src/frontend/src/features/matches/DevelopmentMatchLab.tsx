@@ -266,6 +266,10 @@ export function DevelopmentMatchLab({
   // #89: display-only public controller filter; never choose a faction/foe,
   // submit commands, or persist the current Development seat's preference.
   const [selectedOpponentOwnerId, setSelectedOpponentOwnerId] = useState("");
+  // #93: public posture is a verified enum (0 standing, 1 fallen). This is
+  // a browser-only display predicate, never targeting or game authority.
+  const [selectedOpponentPosture, setSelectedOpponentPosture] =
+    useState<"all" | "standing" | "fallen">("all");
   const [turnProgressLease, setTurnProgressLease] = useState<{
     token: string; data: FirstRoundTurnProgress;
   } | null>(null);
@@ -552,7 +556,9 @@ export function DevelopmentMatchLab({
     ? selectedOpponentOwnerId : "";
   const visibleOpponentLots = opponentLots?.routes.filter(route =>
     (!selectedOpponentOwner || route.ownerPlayerId === selectedOpponentOwner)
-    && (!nearbyOpponentLotsOnly || route.streetSteps <= 1)) ?? [];
+    && (!nearbyOpponentLotsOnly || route.streetSteps <= 1)
+    && (selectedOpponentPosture === "all"
+      || route.posture === (selectedOpponentPosture === "standing" ? 0 : 1))) ?? [];
   // #90: stable server tie-break has already been verified for all routes by
   // #88. The first *visible* controlled lot per authenticated public rival
   // is therefore the canonical closest one, or null after #89/#85 filters.
@@ -1040,6 +1046,7 @@ export function DevelopmentMatchLab({
   useEffect(() => {
     setNearbyOpponentLotsOnly(false);
     setSelectedOpponentOwnerId("");
+    setSelectedOpponentPosture("all");
   }, [session?.matchId, actorId, token]);
 
   // Read only after the FINAL first-round event; never derive net payments
@@ -2298,6 +2305,28 @@ export function DevelopmentMatchLab({
                           ))}
                         </select>
                       </label>
+                      <label className="block space-y-1">
+                        <span className="block font-medium">
+                          {t("dev.opponentLotsPostureFilterLabel")}
+                        </span>
+                        <select
+                          aria-label={t("dev.opponentLotsPostureFilterLabel")}
+                          data-testid="dev-opponent-lots-posture-filter"
+                          className="h-10 w-full max-w-full rounded-md border border-input bg-background px-3 text-foreground"
+                          value={selectedOpponentPosture}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setSelectedOpponentPosture(
+                              value === "standing" || value === "fallen" ? value : "all");
+                            // A hidden held lot can never retain the old map focus.
+                            onTacticalFocus(null);
+                          }}
+                        >
+                          <option value="all">{t("dev.opponentLotsPostureAll")}</option>
+                          <option value="standing">{t("dev.opponentLotsPostureStanding")}</option>
+                          <option value="fallen">{t("dev.opponentLotsPostureFallen")}</option>
+                        </select>
+                      </label>
                       <Button type="button" size="sm" variant="outline"
                         data-testid="dev-opponent-lots-nearby-toggle"
                         aria-pressed={nearbyOpponentLotsOnly}
@@ -2307,6 +2336,11 @@ export function DevelopmentMatchLab({
                         }}>
                         {t("dev.opponentLotsNearbyToggle")}
                       </Button>
+                      {selectedOpponentPosture !== "all" && (
+                        <p data-testid="dev-opponent-lots-posture-filtered-count" aria-live="polite">
+                          {t("dev.opponentLotsPostureFilteredCount", { count: visibleOpponentLots.length })}
+                        </p>
+                      )}
                       {selectedOpponentOwner && (
                         <p data-testid="dev-opponent-lots-owner-filtered-count" aria-live="polite">
                           {t("dev.opponentLotsOwnerFilteredCount", {
@@ -2371,6 +2405,11 @@ export function DevelopmentMatchLab({
                                       slot: route.slotId,
                                       steps: t("dev.routeSteps", { count: route.streetSteps }),
                                     })}
+                                  </span>
+                                  <span className="block text-muted-foreground"
+                                    data-testid={`dev-rival-nearest-posture-${otherPlayerId}`}>
+                                    {route.posture === 0 ? t("dev.opponentLotStanding")
+                                      : t("dev.opponentLotFallen")}
                                   </span>
                                   <Button type="button" size="sm" variant="outline"
                                     className="h-8 w-full"
@@ -2468,6 +2507,11 @@ export function DevelopmentMatchLab({
                               {streetById(route.streetId)?.name ?? route.streetId} · {
                                 t("dev.routeSteps", { count: route.streetSteps })
                               }
+                            </span>
+                            <span className="block text-muted-foreground"
+                              data-testid={`dev-opponent-lot-posture-${route.slotId}`}>
+                              {route.posture === 0 ? t("dev.opponentLotStanding")
+                                : t("dev.opponentLotFallen")}
                             </span>
                             <span className="block break-words text-muted-foreground"
                               data-testid={`dev-route-path-${route.slotId}`}>

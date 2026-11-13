@@ -284,4 +284,60 @@ public sealed class OpponentControlledLotsTests
         Assert.True(restored.VerifyPublicAudit().IsValid);
     }
 
+
+    // #93: the optional browser posture predicate is only an intersection
+    // of the immutable audited PUBLIC routes; no new gameplay permission.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void VerifiedPublicHenchmanPostureIntersectsOwnerAndNearbyWithoutMutation(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = FullMatch(count);
+        var state = match.Snapshot();
+        var before = JsonSerializer.Serialize(match.CaptureCheckpoint());
+        foreach (var actor in state.Players)
+        {
+            var overview = match.VerifiedTacticalOverviewForActor(actor.PlayerId)!;
+            Assert.Equal(state.Revision, overview.VerifiedRevision);
+            var all = overview.OpponentControlledLots.Routes;
+            var otherIds = overview.OtherPlayers.Others.Select(other => other.OtherPlayerId).ToArray();
+            Assert.DoesNotContain(actor.PlayerId, otherIds);
+
+            foreach (var posture in new[] { HenchmanPosture.Standing, HenchmanPosture.Fallen })
+            {
+                var subset = all.Where(route => route.Posture == posture).ToArray();
+                var expectedSlotIds = state.ControlledActivities
+                    .Where(lot => lot.OwnerPlayerId != actor.PlayerId
+                        && lot.Posture == posture)
+                    .Select(lot => lot.SlotId)
+                    .OrderBy(id => id, StringComparer.Ordinal);
+                Assert.Equal(expectedSlotIds, subset.Select(lot => lot.SlotId)
+                    .OrderBy(id => id, StringComparer.Ordinal));
+
+                foreach (var owner in otherIds)
+                {
+                    var owned = subset.Where(route => route.OwnerPlayerId == owner).ToArray();
+                    var nearby = owned.Where(route => route.StreetSteps <= 1).ToArray();
+                    Assert.Equal(all.Where(route => route.OwnerPlayerId == owner
+                        && route.Posture == posture && route.StreetSteps <= 1), nearby);
+                    Assert.Equal(owned.OrderBy(route => route.StreetSteps)
+                        .ThenBy(route => route.SlotId, StringComparer.Ordinal), owned);
+                    foreach (var route in owned)
+                    {
+                        Assert.Equal(board.ShortestStreetPath(actor.StreetId, route.StreetId),
+                            route.StreetPath);
+                        Assert.Equal(route.StreetPath.Count - 1, route.StreetSteps);
+                        Assert.Contains(state.ControlledActivities, lot =>
+                            lot.SlotId == route.SlotId && lot.OwnerPlayerId == owner
+                            && lot.Posture == posture);
+                    }
+                }
+            }
+        }
+        Assert.Equal(before, JsonSerializer.Serialize(match.CaptureCheckpoint()));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
 }

@@ -3225,6 +3225,16 @@ test("English mobile tactical focus remains accessible when WebGL is unavailable
   await expect(page.getByText("3D is not available on this device.", { exact: false }))
     .toBeVisible();
   await page.getByTestId("dev-create").click();
+  // #93: filtered public rival lots remain a keyboard-accessible DOM-only
+  // view when 3D is unavailable; a hidden lot cannot retain a map focus.
+  const postureFallback = page.getByTestId("dev-opponent-lots-posture-filter");
+  await expect(postureFallback).toHaveValue("all");
+  await postureFallback.selectOption("fallen");
+  await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-focus-rival-player-bob")).toBeVisible();
+  await postureFallback.selectOption("standing");
+  await expect(page.getByTestId("dev-rival-nearest-bob")).toHaveAttribute("data-slot", "S-01");
+  await postureFallback.selectOption("all");
   // #92: the paired player focus must also be a DOM-only control when
   // WebGL is disabled, without authorizing a command or new API read.
   const publicRival = page.getByTestId("dev-focus-rival-player-bob");
@@ -3793,4 +3803,102 @@ test("#92: eight-seat owner focus survives empty-lot filters, not token/seat swi
     .toHaveLength(3);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);
+});
+
+
+test("#93: fallen rival posture filter intersects public owner and nearby without mutations",
+  async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { fallenHenchman: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const posture = page.getByTestId("dev-opponent-lots-posture-filter");
+  await expect(posture).toHaveValue("all");
+  await expect(page.getByTestId("dev-opponent-lot-posture-S-01"))
+    .toHaveText("Scagnozzo atterrato");
+  await expect(page.getByTestId("dev-rival-nearest-posture-bob"))
+    .toHaveText("Scagnozzo atterrato");
+  await page.getByTestId("dev-focus-rival-nearest-bob").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await posture.selectOption("standing");
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-focus-rival-player-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lots-posture-filtered-count"))
+    .toContainText("0 lotti");
+  await posture.selectOption("fallen");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toHaveAttribute("data-posture", "1");
+  await expect(page.getByTestId("dev-rival-nearest-bob")).toHaveAttribute("data-slot", "S-01");
+  await page.getByTestId("dev-opponent-lots-owner-filter").selectOption("bob");
+  await page.getByTestId("dev-opponent-lots-nearby-toggle").click();
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+  await page.getByTestId("dev-opponent-lots-nearby-toggle").click();
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(posture).toHaveAttribute("aria-label", "Filter by henchman posture on lot");
+  await expect(posture.locator("option[value=fallen]")).toHaveText("Fallen only");
+  await expect(page.getByTestId("dev-opponent-lot-posture-S-01"))
+    .toHaveText("Fallen henchman");
+  await posture.focus();
+  await expect(posture).toBeFocused();
+  await posture.selectOption("all");
+  await expect(page.getByTestId("dev-opponent-lots-posture-filtered-count")).toHaveCount(0);
+  expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview")))
+    .toHaveLength(1);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("#93: eight-seat posture filter resets on seat/token changes and refuses forged posture",
+  async ({ page }) => {
+  test.setTimeout(60_000);
+  const { observedHeaders } = await mockMatchApi(page,
+    { playerCount: 8, fallenHenchman: true });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  await page.getByTestId("dev-create").click();
+  const posture = page.getByTestId("dev-opponent-lots-posture-filter");
+  const roster = page.getByTestId("dev-rival-nearest-list");
+  await expect(roster.locator("li")).toHaveCount(7);
+  await posture.selectOption("standing");
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-focus-rival-player-heidi")).toBeVisible();
+  await page.getByTestId("dev-opponent-lots-owner-filter").selectOption("heidi");
+  await posture.selectOption("fallen");
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await expect(page.getByTestId("dev-focus-rival-player-heidi")).toBeVisible();
+  await page.getByTestId("dev-opponent-lots-owner-filter").selectOption("bob");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toHaveAttribute("data-posture", "1");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(posture).toHaveValue("all");
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toHaveAttribute("data-posture", "0");
+  await expect(page.getByTestId("dev-rival-nearest-bob")).toHaveCount(0);
+  await posture.selectOption("fallen");
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await page.getByTestId("dev-rotate-token").click();
+  await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+  await expect(posture).toHaveValue("all");
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
+  expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview")))
+    .toHaveLength(3);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("#93: invalid public posture never exposes a selector or any lot focus",
+  async ({ page }) => {
+  await mockMatchApi(page, { invalidOpponentLots: "posture" });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-opponent-lots-unavailable")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lots-posture-filter")).toHaveCount(0);
+  await expect(page.getByTestId("dev-focus-opponent-lot-S-01")).toHaveCount(0);
+  await expect(page.getByTestId("dev-rival-nearest-summary")).toHaveCount(0);
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
 });

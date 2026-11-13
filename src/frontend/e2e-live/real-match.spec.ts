@@ -2959,8 +2959,9 @@ test("#89: real .NET owner and nearby tactical filters are browser-only across t
 
 test("#90: two real .NET browser seats show canonical nearest rival lot and filter without mutations",
   async ({ page, browser, request }) => {
+  test.setTimeout(75_000); // #93: two real browsers and repeated public posture checks
   type Lot = { slotId: string; ownerPlayerId: string; streetSteps: number;
-    streetPath: string[] };
+    posture: number; streetPath: string[] };
   type Tactical = {
     playerId: string; verifiedRevision: number;
     otherPlayers: { others: { otherPlayerId: string; streetSteps: number; streetPath: string[] }[] };
@@ -3010,6 +3011,25 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
     .toHaveAttribute("data-slot", nearestBob.slotId);
   await expect(page.getByTestId("dev-rival-nearest-bob"))
     .toHaveAttribute("data-steps", String(nearestBob.streetSteps));
+  // #93: posture is audited public data, never a combat permission or API filter.
+  const postureFilter = page.getByTestId("dev-opponent-lots-posture-filter");
+  await expect(postureFilter).toHaveValue("all");
+  for (const [option, value] of [["standing", 0], ["fallen", 1]] as const) {
+    const matching = aliceTactical.opponentControlledLots.routes.filter(lot =>
+      lot.ownerPlayerId === "bob" && lot.posture === value);
+    await postureFilter.selectOption(option);
+    await expect(page.getByTestId("dev-opponent-lots-list").locator("li"))
+      .toHaveCount(matching.length);
+    if (matching.length)
+      await expect(page.getByTestId("dev-rival-nearest-bob"))
+        .toHaveAttribute("data-slot", matching[0].slotId);
+    else
+      await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+    await expect(page.getByTestId("dev-focus-rival-player-bob")).toBeVisible();
+  }
+  await postureFilter.selectOption("all");
+  await expect(page.getByTestId("dev-opponent-lot-posture-" + nearestBob.slotId))
+    .toBeVisible();
   expect(readPaths).toHaveLength(1);
   await page.getByTestId("dev-opponent-lots-owner-filter").selectOption("bob");
   await page.getByTestId("dev-focus-rival-nearest-bob").click();
@@ -3047,6 +3067,22 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
       .toHaveAttribute("data-slot", nearestAlice.slotId);
     await expect(bobPage.getByTestId("dev-rival-nearest-alice"))
       .toHaveAttribute("data-steps", String(nearestAlice.streetSteps));
+    const bobPostureFilter = bobPage.getByTestId("dev-opponent-lots-posture-filter");
+    for (const [option, value] of [["standing", 0], ["fallen", 1]] as const) {
+      const matching = bobTactical.opponentControlledLots.routes.filter(lot =>
+        lot.ownerPlayerId === "alice" && lot.posture === value);
+      await bobPostureFilter.selectOption(option);
+      await expect(bobPage.getByTestId("dev-opponent-lots-list").locator("li"))
+        .toHaveCount(matching.length);
+      if (matching.length)
+        await expect(bobPage.getByTestId("dev-rival-nearest-alice"))
+          .toHaveAttribute("data-slot", matching[0].slotId);
+      else
+        await expect(bobPage.getByTestId("dev-rival-nearest-empty-alice")).toBeVisible();
+      await expect(bobPage.getByTestId("dev-focus-rival-player-alice")).toBeVisible();
+    }
+    await bobPostureFilter.selectOption("all");
+
     await expect(bobPage.getByTestId("dev-rival-nearest-bob")).toHaveCount(0);
     expect(bobBrowserReads).toEqual([bobToken]);
     expect(readPaths).toEqual([aliceToken]);

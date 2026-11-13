@@ -2955,3 +2955,108 @@ test("#89: real .NET owner and nearby tactical filters are browser-only across t
   expect(await auditAfter.json()).toEqual(auditBefore);
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
 });
+
+
+test("#90: two real .NET browser seats show canonical nearest rival lot and filter without mutations",
+  async ({ page, browser, request }) => {
+  type Lot = { slotId: string; ownerPlayerId: string; streetSteps: number;
+    streetPath: string[] };
+  type Tactical = {
+    playerId: string; verifiedRevision: number;
+    otherPlayers: { others: { otherPlayerId: string }[] };
+    opponentControlledLots: { routes: Lot[] };
+  };
+  const readPaths: string[] = [];
+  page.on("request", req => {
+    if (req.method() === "GET" && new URL(req.url()).pathname.endsWith("/tactical-overview"))
+      readPaths.push(req.headers()["x-edonism-dev-token"] ?? "");
+  });
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const url = `http://127.0.0.1:5080/api/dev/matches/${id}`;
+  const getTactical = async (token: string) => {
+    const response = await request.get(`${url}/tactical-overview`, { headers: auth(token) });
+    expect(response.status()).toBe(200);
+    return await response.json() as Tactical;
+  };
+  const beforeReply = await request.get(url, { headers: auth(aliceToken) });
+  const auditReply = await request.get(`${url}/audit`, { headers: auth(aliceToken) });
+  expect(beforeReply.status()).toBe(200);
+  expect(auditReply.status()).toBe(200);
+  const publicBefore = await beforeReply.json();
+  const auditBefore = await auditReply.json();
+  const aliceTactical = await getTactical(aliceToken);
+  const bobTactical = await getTactical(bobToken);
+
+  await expect(page.getByTestId("dev-rival-nearest-list").locator("li")).toHaveCount(1);
+  expect(aliceTactical.playerId).toBe("alice");
+  expect(bobTactical.playerId).toBe("bob");
+  const aliceOther = aliceTactical.otherPlayers.others[0];
+  expect(aliceOther.otherPlayerId).toBe("bob");
+  const nearestBob = aliceTactical.opponentControlledLots.routes
+    .filter(lot => lot.ownerPlayerId === "bob")[0];
+  expect(nearestBob).toBeDefined();
+  await expect(page.getByTestId("dev-rival-nearest-bob"))
+    .toHaveAttribute("data-slot", nearestBob.slotId);
+  await expect(page.getByTestId("dev-rival-nearest-bob"))
+    .toHaveAttribute("data-steps", String(nearestBob.streetSteps));
+  expect(readPaths).toHaveLength(1);
+  await page.getByTestId("dev-opponent-lots-owner-filter").selectOption("bob");
+  await page.getByTestId("dev-focus-rival-nearest-bob").click();
+  await expect(page.getByTestId("city-renderer"))
+    .toHaveAttribute("data-focus-path", nearestBob.streetPath.join(">"));
+  await page.getByTestId("dev-opponent-lots-nearby-toggle").click();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  if (nearestBob.streetSteps > 1)
+    await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+  else
+    await expect(page.getByTestId("dev-rival-nearest-bob"))
+      .toHaveAttribute("data-slot", nearestBob.slotId);
+  await page.getByTestId("dev-opponent-lots-nearby-toggle").click();
+  await expect(page.getByTestId("dev-rival-nearest-bob"))
+    .toHaveAttribute("data-slot", nearestBob.slotId);
+  await page.getByTestId("dev-opponent-lots-owner-filter").selectOption("");
+  expect(readPaths).toHaveLength(1);
+
+  const bobContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const bobPage = await bobContext.newPage();
+    const bobBrowserReads: string[] = [];
+    bobPage.on("request", req => {
+      if (req.method() === "GET" && new URL(req.url()).pathname.endsWith("/tactical-overview"))
+        bobBrowserReads.push(req.headers()["x-edonism-dev-token"] ?? "");
+    });
+    await bobPage.goto("/");
+    await bobPage.getByTestId("dev-join-id").fill(id);
+    await bobPage.getByTestId("dev-join-token").fill(bobToken);
+    await bobPage.getByTestId("dev-join").click();
+    const nearestAlice = bobTactical.opponentControlledLots.routes
+      .filter(lot => lot.ownerPlayerId === "alice")[0];
+    expect(nearestAlice).toBeDefined();
+    await expect(bobPage.getByTestId("dev-rival-nearest-alice"))
+      .toHaveAttribute("data-slot", nearestAlice.slotId);
+    await expect(bobPage.getByTestId("dev-rival-nearest-alice"))
+      .toHaveAttribute("data-steps", String(nearestAlice.streetSteps));
+    await expect(bobPage.getByTestId("dev-rival-nearest-bob")).toHaveCount(0);
+    expect(bobBrowserReads).toEqual([bobToken]);
+    expect(readPaths).toEqual([aliceToken]);
+    await bobPage.getByTestId("dev-focus-rival-nearest-alice").click();
+    await expect(bobPage.getByTestId("city-renderer"))
+      .toHaveAttribute("data-focus-path", nearestAlice.streetPath.join(">"));
+    await bobPage.getByTestId("dev-opponent-lots-owner-filter").selectOption("alice");
+    await expect(bobPage.getByTestId("city-tactical-focus")).toHaveCount(0);
+    expect(bobBrowserReads).toEqual([bobToken]);
+  } finally {
+    await bobContext.close();
+  }
+
+  const afterReply = await request.get(url, { headers: auth(aliceToken) });
+  const auditAfterReply = await request.get(`${url}/audit`, { headers: auth(aliceToken) });
+  expect(afterReply.status()).toBe(200);
+  expect(auditAfterReply.status()).toBe(200);
+  expect(await afterReply.json()).toEqual(publicBefore);
+  expect(await auditAfterReply.json()).toEqual(auditBefore);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+});

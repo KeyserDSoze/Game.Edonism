@@ -70,7 +70,7 @@ type MockOptions = {
   invalidRouteSteps?: boolean;
   invalidOtherSeatRoutes?: "revision" | "path" | "steps" | "count" | "identity";
   delayFirstAliceOtherSeatRoutes?: boolean;
-  invalidOpponentLots?: "revision" | "owner" | "path" | "posture" | "count" | "steps";
+  invalidOpponentLots?: "revision" | "owner" | "path" | "street" | "posture" | "count" | "steps";
   delayFirstAliceOpponentLots?: boolean;
   invalidTacticalOverview?: "outer-revision" | "outer-player" | "nested-origin"
     | "missing-uncontrolled" | "missing-other" | "missing-lots";
@@ -362,6 +362,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         const first = opponentRoutes[0];
         if (options.invalidOpponentLots === "owner") first.ownerPlayerId = seat;
         if (options.invalidOpponentLots === "path") first.streetPath = [origin, "main-square"];
+        if (options.invalidOpponentLots === "street") first.streetId = "unmapped-road";
         if (options.invalidOpponentLots === "posture") first.posture = 99;
         if (options.invalidOpponentLots === "steps") first.streetSteps++;
         if (options.invalidOpponentLots === "count") opponentRoutes.pop();
@@ -3934,6 +3935,10 @@ test("#94: canonical street filter intersects owner, posture and nearby on mobil
   await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
   await expect(page.getByTestId("dev-focus-rival-player-bob")).toBeVisible();
   await expect(page.getByTestId("dev-opponent-lots-street-filtered-count")).toContainText("0 lotti");
+  // The Municipio is a canonical public street but contains no activity lots.
+  await street.selectOption("main-square");
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await expect(page.getByTestId("dev-focus-rival-player-bob")).toBeVisible();
   await street.selectOption("einstein");
   await expect(page.getByTestId("dev-opponent-lot-S-01")).toHaveAttribute("data-owner", "bob");
   await expect(page.getByTestId("dev-rival-nearest-bob")).toHaveAttribute("data-slot", "S-01");
@@ -3999,8 +4004,8 @@ test("#94: eight-seat street selection keeps rival roster and resets on actor/to
     .toBe(false);
 });
 
-test("#94: malformed public street or revision makes all rival filters unavailable", async ({ page }) => {
-  await mockMatchApi(page, { invalidOpponentLots: "path" });
+test("#94: forged public lot street ID makes all rival filters unavailable", async ({ page }) => {
+  await mockMatchApi(page, { invalidOpponentLots: "street" });
   await page.goto("/");
   await page.getByTestId("dev-create").click();
   await expect(page.getByTestId("dev-opponent-lots-unavailable")).toBeVisible();

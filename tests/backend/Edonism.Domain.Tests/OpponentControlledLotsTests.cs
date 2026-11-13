@@ -453,7 +453,8 @@ public sealed class OpponentControlledLotsTests
                         && lot.Posture == route.Posture);
                 }
                 total += matchedRoutes.Length;
-                if (street.Id == "main-square") Assert.Equal(0, matchedRoutes.Length);
+                if (street.Id == "main-square")
+                    Assert.DoesNotContain(routes, route => route.StreetId == "main-square");
             }
             Assert.Equal(routes.Count, total);
             Assert.DoesNotContain(routes, route => route.OwnerPlayerId == actor.PlayerId);

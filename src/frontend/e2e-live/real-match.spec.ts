@@ -3027,6 +3027,26 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
     .toHaveAttribute("data-slot", nearestBob.slotId);
   await expect(page.getByTestId("dev-rival-nearest-bob"))
     .toHaveAttribute("data-steps", String(nearestBob.streetSteps));
+  // #98: owner-by-street public breakdown is paired to the same audited
+  // server projections, and the pair control is display-only.
+  const alicePairs = aliceTactical.opponentControlledLots.routes.filter(route =>
+    route.streetId === nearestBob.streetId && route.ownerPlayerId === "bob");
+  const alicePairRow = page.getByTestId(
+    "dev-opponent-street-owner-row-" + nearestBob.streetId + "-bob");
+  await expect(alicePairRow).toHaveAttribute("data-total", String(alicePairs.length));
+  await expect(alicePairRow).toHaveAttribute("data-standing",
+    String(alicePairs.filter(route => route.posture === 0).length));
+  await expect(alicePairRow).toHaveAttribute("data-fallen",
+    String(alicePairs.filter(route => route.posture === 1).length));
+  const alicePair = page.getByTestId(
+    "dev-opponent-street-owner-select-" + nearestBob.streetId + "-bob");
+  await alicePair.click();
+  await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("bob");
+  await expect(page.getByTestId("dev-opponent-lots-street-filter"))
+    .toHaveValue(nearestBob.streetId);
+  await alicePair.click();
+  await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
+  await expect(page.getByTestId("dev-opponent-lots-street-filter")).toHaveValue("");
   // #93: posture is audited public data, never a combat permission or API filter.
   const postureFilter = page.getByTestId("dev-opponent-lots-posture-filter");
   await expect(postureFilter).toHaveValue("all");
@@ -3115,6 +3135,27 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
       .toHaveAttribute("data-slot", nearestAlice.slotId);
     await expect(bobPage.getByTestId("dev-rival-nearest-alice"))
       .toHaveAttribute("data-steps", String(nearestAlice.streetSteps));
+    // #98: Bob's owner breakdown excludes his own held lots and is
+    // independently derived from Bob's authenticated server projection.
+    const bobPairs = bobTactical.opponentControlledLots.routes.filter(route =>
+      route.streetId === nearestAlice.streetId && route.ownerPlayerId === "alice");
+    const bobPairRow = bobPage.getByTestId(
+      "dev-opponent-street-owner-row-" + nearestAlice.streetId + "-alice");
+    await expect(bobPairRow).toHaveAttribute("data-total", String(bobPairs.length));
+    await expect(bobPairRow).toHaveAttribute("data-standing",
+      String(bobPairs.filter(route => route.posture === 0).length));
+    await expect(bobPairRow).toHaveAttribute("data-fallen",
+      String(bobPairs.filter(route => route.posture === 1).length));
+    const bobPair = bobPage.getByTestId(
+      "dev-opponent-street-owner-select-" + nearestAlice.streetId + "-alice");
+    await bobPair.click();
+    await expect(bobPage.getByTestId("dev-opponent-lots-owner-filter"))
+      .toHaveValue("alice");
+    await expect(bobPage.getByTestId("dev-opponent-lots-street-filter"))
+      .toHaveValue(nearestAlice.streetId);
+    await bobPair.click();
+    await expect(bobPage.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
+    await expect(bobPage.getByTestId("dev-opponent-lots-street-filter")).toHaveValue("");
     // #97: Bob sees the same seven streets with counts scoped to Bob's
     // separate verified .NET capability, not Alice's browser state.
     for (const streetId of sevenStreets) {

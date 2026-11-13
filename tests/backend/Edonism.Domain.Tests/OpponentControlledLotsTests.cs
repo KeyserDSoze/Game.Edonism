@@ -464,4 +464,72 @@ public sealed class OpponentControlledLotsTests
         Assert.True(match.VerifyPublicAudit().IsValid);
     }
 
+
+    // #98: grouping public rival lots by a canonical street and verified
+    // other-seat ID cannot invent self-owned lots or change authoritative state.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void RivalOwnerByStreetBreakdownMatchesAuditedSnapshotWithoutMutations(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = FullMatch(count);
+        var state = match.Snapshot();
+        var before = JsonSerializer.Serialize(match.CaptureCheckpoint());
+
+        foreach (var actor in state.Players)
+        {
+            var overview = match.VerifiedTacticalOverviewForActor(actor.PlayerId)!;
+            var others = overview.OtherPlayers.Others;
+            var routes = overview.OpponentControlledLots.Routes;
+            Assert.Equal(count - 1, others.Count);
+            Assert.DoesNotContain(others, other => other.OtherPlayerId == actor.PlayerId);
+            Assert.DoesNotContain(routes, route => route.OwnerPlayerId == actor.PlayerId);
+            var total = 0;
+
+            foreach (var street in board.Streets)
+            {
+                var onStreet = routes.Where(route => route.StreetId == street.Id).ToArray();
+                var byOwners = 0;
+                foreach (var other in others)
+                {
+                    var owned = onStreet.Where(route =>
+                        route.OwnerPlayerId == other.OtherPlayerId).ToArray();
+                    var snapshotOwned = state.ControlledActivities.Where(activity =>
+                        activity.OwnerPlayerId == other.OtherPlayerId &&
+                        board.Slots.Single(slot => slot.Id == activity.SlotId).StreetId == street.Id)
+                        .ToArray();
+                    Assert.Equal(snapshotOwned.Length, owned.Length);
+                    Assert.Equal(snapshotOwned.Count(activity =>
+                        activity.Posture == HenchmanPosture.Standing),
+                        owned.Count(route => route.Posture == HenchmanPosture.Standing));
+                    Assert.Equal(snapshotOwned.Count(activity =>
+                        activity.Posture == HenchmanPosture.Fallen),
+                        owned.Count(route => route.Posture == HenchmanPosture.Fallen));
+                    Assert.Equal(owned.Length,
+                        owned.Count(route => route.Posture == HenchmanPosture.Standing)
+                        + owned.Count(route => route.Posture == HenchmanPosture.Fallen));
+                    foreach (var route in owned)
+                    {
+                        Assert.Equal(board.ShortestStreetPath(actor.StreetId, street.Id),
+                            route.StreetPath);
+                        Assert.Contains(snapshotOwned, activity => activity.SlotId == route.SlotId
+                            && activity.OwnerPlayerId == route.OwnerPlayerId
+                            && activity.Posture == route.Posture);
+                    }
+                    byOwners += owned.Length;
+                }
+                Assert.Equal(onStreet.Length, byOwners);
+                total += byOwners;
+                if (street.Id == "main-square")
+                    Assert.DoesNotContain(routes, route => route.StreetId == "main-square");
+            }
+            Assert.Equal(routes.Count, total);
+            Assert.Equal(state.Revision, overview.VerifiedRevision);
+        }
+        Assert.Equal(before, JsonSerializer.Serialize(match.CaptureCheckpoint()));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
 }

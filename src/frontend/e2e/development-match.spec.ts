@@ -3226,6 +3226,15 @@ test("English mobile tactical focus remains accessible when WebGL is unavailable
   await expect(page.getByText("3D is not available on this device.", { exact: false }))
     .toBeVisible();
   await page.getByTestId("dev-create").click();
+  // #98: the verified owner+street pair is also a DOM-only keyboard control.
+  const fallbackOwner = page.getByTestId("dev-opponent-street-owner-select-einstein-bob");
+  await fallbackOwner.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("bob");
+  await expect(page.getByTestId("dev-opponent-lots-street-filter")).toHaveValue("einstein");
+  await fallbackOwner.click();
+  await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
+  await expect(page.getByTestId("dev-opponent-lots-street-filter")).toHaveValue("");
   // #97: public per-street counts and quick selection remain DOM-only.
   await expect(page.getByTestId("dev-opponent-street-distribution-list").locator("li"))
     .toHaveCount(7);
@@ -4031,6 +4040,7 @@ test("#94: forged public lot street ID makes all rival filters unavailable", asy
   await expect(page.getByTestId("dev-opponent-lots-unavailable")).toBeVisible();
   await expect(page.getByTestId("dev-opponent-lots-street-filter")).toHaveCount(0);
   await expect(page.getByTestId("dev-opponent-street-distribution")).toHaveCount(0);
+  await expect(page.locator("[data-testid^=dev-opponent-street-owner-select-]")).toHaveCount(0);
   await expect(page.getByTestId("dev-opponent-lots-reset-filters")).toHaveCount(0);
   await expect(page.getByTestId("dev-opponent-lots-active-filter-summary")).toHaveCount(0);
   await expect(page.getByTestId("dev-rival-nearest-summary")).toHaveCount(0);
@@ -4235,6 +4245,105 @@ test("#97: eight-seat public street totals follow verified actor and token isola
   await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
   expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview")))
     .toHaveLength(3);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+
+test("#98: paired public owner+street holdings select and clear without changing posture/nearby",
+  async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { fallenHenchman: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const owner = page.getByTestId("dev-opponent-lots-owner-filter");
+  const street = page.getByTestId("dev-opponent-lots-street-filter");
+  const posture = page.getByTestId("dev-opponent-lots-posture-filter");
+  const nearby = page.getByTestId("dev-opponent-lots-nearby-toggle");
+  const row = page.getByTestId("dev-opponent-street-owner-row-einstein-bob");
+  const choice = page.getByTestId("dev-opponent-street-owner-select-einstein-bob");
+  await expect(row).toHaveAttribute("data-total", "1");
+  await expect(row).toHaveAttribute("data-standing", "0");
+  await expect(row).toHaveAttribute("data-fallen", "1");
+  await expect(page.getByTestId("dev-opponent-street-owners-einstein").locator("li"))
+    .toHaveCount(1);
+  await expect(page.getByTestId("dev-opponent-street-no-owners-main-square")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-street-owners-gauss")).toHaveCount(0);
+  await expect(choice).toHaveAttribute("aria-pressed", "false");
+  await posture.selectOption("fallen");
+  await nearby.click();
+  await page.getByTestId("dev-focus-rival-player-bob").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await choice.focus();
+  await expect(choice).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(choice).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(owner).toHaveValue("bob");
+  await expect(street).toHaveValue("einstein");
+  await expect(posture).toHaveValue("fallen");
+  await expect(nearby).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("dev-opponent-lots-active-filter-summary"))
+    .toContainText("4 filtri attivi");
+  // Counts are complete public observations, even with active filters.
+  await expect(row).toHaveAttribute("data-total", "1");
+  await choice.click();
+  await expect(choice).toHaveAttribute("aria-pressed", "false");
+  await expect(owner).toHaveValue("");
+  await expect(street).toHaveValue("");
+  await expect(posture).toHaveValue("fallen");
+  await expect(nearby).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(choice).toHaveAttribute("aria-label",
+    "Filter bob on Einstein Avenue: 1 public lot, 0 standing and 1 fallen");
+  await expect(page.getByTestId("dev-opponent-street-no-owners-main-square"))
+    .toContainText("No public rival-held lots");
+  expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview"))).toHaveLength(1);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("#98: eight-seat holdings only list public other owners and clear on seat/token change",
+  async ({ page }) => {
+  test.setTimeout(60_000);
+  const { observedHeaders } = await mockMatchApi(page, { playerCount: 8 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  await page.getByTestId("dev-create").click();
+  const owner = page.getByTestId("dev-opponent-lots-owner-filter");
+  const street = page.getByTestId("dev-opponent-lots-street-filter");
+  await expect(page.getByTestId("dev-rival-nearest-list").locator("li")).toHaveCount(7);
+  await expect(page.locator("[data-testid^=dev-opponent-street-owner-row-]"))
+    .toHaveCount(1);
+  await expect(page.getByTestId("dev-opponent-street-owner-row-einstein-bob"))
+    .toHaveAttribute("data-total", "1");
+  await expect(page.getByTestId("dev-opponent-street-owner-row-gauss-alice"))
+    .toHaveCount(0);
+  await page.getByTestId("dev-opponent-street-owner-select-einstein-bob").click();
+  await expect(owner).toHaveValue("bob");
+  await expect(street).toHaveValue("einstein");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(owner).toHaveValue("");
+  await expect(street).toHaveValue("");
+  await expect(page.getByTestId("dev-opponent-street-owner-row-einstein-bob")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-street-owner-row-gauss-alice"))
+    .toHaveAttribute("data-total", "1");
+  const aliceChoice = page.getByTestId("dev-opponent-street-owner-select-gauss-alice");
+  await aliceChoice.click();
+  await expect(owner).toHaveValue("alice");
+  await expect(street).toHaveValue("gauss");
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
+  await page.getByTestId("dev-rotate-token").click();
+  await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+  await expect(owner).toHaveValue("");
+  await expect(street).toHaveValue("");
+  await expect(aliceChoice).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("dev-rival-nearest-list").locator("li")).toHaveCount(7);
+  expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview"))).toHaveLength(3);
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);

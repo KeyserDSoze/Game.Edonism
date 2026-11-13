@@ -553,6 +553,17 @@ export function DevelopmentMatchLab({
   const visibleOpponentLots = opponentLots?.routes.filter(route =>
     (!selectedOpponentOwner || route.ownerPlayerId === selectedOpponentOwner)
     && (!nearbyOpponentLotsOnly || route.streetSteps <= 1)) ?? [];
+  // #90: stable server tie-break has already been verified for all routes by
+  // #88. The first *visible* controlled lot per authenticated public rival
+  // is therefore the canonical closest one, or null after #89/#85 filters.
+  // In particular, empty rivals have NO target and never a synthetic path.
+  const nearestVisibleLotByRival = otherSeatRoutes && opponentLots
+    ? otherSeatRoutes.others.map(other => ({
+      otherPlayerId: other.otherPlayerId,
+      route: visibleOpponentLots.find(lot =>
+        lot.ownerPlayerId === other.otherPlayerId) ?? null,
+    }))
+    : [];
   const turnProgress = turnProgressLease && token
     && turnProgressLease.token === token
     && turnProgressLease.data.matchId === session?.matchId
@@ -2318,6 +2329,52 @@ export function DevelopmentMatchLab({
                         <p data-testid="dev-opponent-lots-no-nearby"
                           className="text-muted-foreground">{t("dev.opponentLotsNoNearby")}</p>
                       )}
+                      <div className="space-y-2" data-testid="dev-rival-nearest-summary">
+                        <p className="font-semibold">{t("dev.rivalNearestTitle")}</p>
+                        <ol data-testid="dev-rival-nearest-list"
+                          className="grid gap-2 sm:grid-cols-2">
+                          {nearestVisibleLotByRival.map(({ otherPlayerId, route }) => (
+                            <li key={otherPlayerId}
+                              data-testid={`dev-rival-nearest-${otherPlayerId}`}
+                              data-steps={route?.streetSteps ?? ""}
+                              data-slot={route?.slotId ?? ""}
+                              className="min-w-0 space-y-1 rounded-md border border-border p-2">
+                              <span className="block font-semibold">{otherPlayerId}</span>
+                              {route ? (
+                                <>
+                                  <span className="block text-muted-foreground">
+                                    {t("dev.rivalNearestLot", {
+                                      slot: route.slotId,
+                                      steps: t("dev.routeSteps", { count: route.streetSteps }),
+                                    })}
+                                  </span>
+                                  <Button type="button" size="sm" variant="outline"
+                                    className="h-8 w-full"
+                                    data-testid={`dev-focus-rival-nearest-${otherPlayerId}`}
+                                    aria-label={t("dev.focusRivalNearest", {
+                                      player: otherPlayerId, slot: route.slotId,
+                                    })}
+                                    onClick={() => onTacticalFocus({
+                                      kind: "opponent-lot",
+                                      matchId: session.matchId,
+                                      revision: session.state.revision,
+                                      actorId,
+                                      targetId: route.slotId,
+                                      streetPath: [...route.streetPath],
+                                    })}>
+                                    {t("dev.focusOnMap")}
+                                  </Button>
+                                </>
+                              ) : (
+                                <span className="block text-muted-foreground"
+                                  data-testid={`dev-rival-nearest-empty-${otherPlayerId}`}>
+                                  {t("dev.rivalNearestNone")}
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
                       <ol data-testid="dev-opponent-lots-list" className="grid gap-2 sm:grid-cols-2">
                         {visibleOpponentLots.map(route => (
                           <li key={route.slotId}

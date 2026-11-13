@@ -4,7 +4,7 @@ import { CircleDot, Download, FlaskConical, Hand, LogOut, MoveRight, RotateCw, U
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { shortestStreetPath, streetById, slotById } from "@/features/city/board";
+import { cityBoard, shortestStreetPath, streetById, slotById } from "@/features/city/board";
 import type { TacticalFocus } from "@/features/city/tacticalFocus";
 import type { HistoricalStreetFocus } from "@/features/city/historicalStreetFocus";
 import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
@@ -266,6 +266,8 @@ export function DevelopmentMatchLab({
   // #89: display-only public controller filter; never choose a faction/foe,
   // submit commands, or persist the current Development seat's preference.
   const [selectedOpponentOwnerId, setSelectedOpponentOwnerId] = useState("");
+  // #94: only public canonical board streets can be selected; never gameplay authority.
+  const [selectedOpponentStreetId, setSelectedOpponentStreetId] = useState("");
   // #93: public posture is a verified enum (0 standing, 1 fallen). This is
   // a browser-only display predicate, never targeting or game authority.
   const [selectedOpponentPosture, setSelectedOpponentPosture] =
@@ -554,8 +556,13 @@ export function DevelopmentMatchLab({
     otherSeatRoutes?.others.map(other => other.otherPlayerId) ?? []);
   const selectedOpponentOwner = knownOpponentOwners.has(selectedOpponentOwnerId)
     ? selectedOpponentOwnerId : "";
+  // #94: a board street selector never trusts street names or frontend geometry
+  // for routing. Matched routes must be from the verified #88 public projection.
+  const selectedOpponentStreet = cityBoard.streets.some(street =>
+    street.id === selectedOpponentStreetId) ? selectedOpponentStreetId : "";
   const visibleOpponentLots = opponentLots?.routes.filter(route =>
     (!selectedOpponentOwner || route.ownerPlayerId === selectedOpponentOwner)
+    && (!selectedOpponentStreet || route.streetId === selectedOpponentStreet)
     && (!nearbyOpponentLotsOnly || route.streetSteps <= 1)
     && (selectedOpponentPosture === "all"
       || route.posture === (selectedOpponentPosture === "standing" ? 0 : 1))) ?? [];
@@ -1046,6 +1053,7 @@ export function DevelopmentMatchLab({
   useEffect(() => {
     setNearbyOpponentLotsOnly(false);
     setSelectedOpponentOwnerId("");
+    setSelectedOpponentStreetId("");
     setSelectedOpponentPosture("all");
   }, [session?.matchId, actorId, token]);
 
@@ -2307,6 +2315,29 @@ export function DevelopmentMatchLab({
                       </label>
                       <label className="block space-y-1">
                         <span className="block font-medium">
+                          {t("dev.opponentLotsStreetFilterLabel")}
+                        </span>
+                        <select
+                          aria-label={t("dev.opponentLotsStreetFilterLabel")}
+                          data-testid="dev-opponent-lots-street-filter"
+                          className="h-10 w-full max-w-full rounded-md border border-input bg-background px-3 text-foreground"
+                          value={selectedOpponentStreet}
+                          onChange={(event) => {
+                            const id = event.target.value;
+                            setSelectedOpponentStreetId(
+                              id === "" || cityBoard.streets.some(street => street.id === id)
+                                ? id : "");
+                            onTacticalFocus(null);
+                          }}
+                        >
+                          <option value="">{t("dev.opponentLotsAllStreets")}</option>
+                          {cityBoard.streets.map(street => (
+                            <option key={street.id} value={street.id}>{street.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="block font-medium">
                           {t("dev.opponentLotsPostureFilterLabel")}
                         </span>
                         <select
@@ -2336,6 +2367,11 @@ export function DevelopmentMatchLab({
                         }}>
                         {t("dev.opponentLotsNearbyToggle")}
                       </Button>
+                      {selectedOpponentStreet && (
+                        <p data-testid="dev-opponent-lots-street-filtered-count" aria-live="polite">
+                          {t("dev.opponentLotsStreetFilteredCount", { count: visibleOpponentLots.length })}
+                        </p>
+                      )}
                       {selectedOpponentPosture !== "all" && (
                         <p data-testid="dev-opponent-lots-posture-filtered-count" aria-live="polite">
                           {t("dev.opponentLotsPostureFilteredCount", { count: visibleOpponentLots.length })}

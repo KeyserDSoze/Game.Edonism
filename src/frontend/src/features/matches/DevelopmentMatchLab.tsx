@@ -566,6 +566,18 @@ export function DevelopmentMatchLab({
     && (!nearbyOpponentLotsOnly || route.streetSteps <= 1)
     && (selectedOpponentPosture === "all"
       || route.posture === (selectedOpponentPosture === "standing" ? 0 : 1))) ?? [];
+  // #97: full, *unfiltered* public distribution across all seven canonical
+  // board streets. Counts cannot survive an invalid, stale or revoked #88 view.
+  const rivalLotStreetDistribution = opponentLots ? cityBoard.streets.map(street => {
+    const onStreet = opponentLots.routes.filter(route => route.streetId === street.id);
+    return {
+      streetId: street.id,
+      name: street.name,
+      total: onStreet.length,
+      standing: onStreet.filter(route => route.posture === 0).length,
+      fallen: onStreet.filter(route => route.posture === 1).length,
+    };
+  }) : null;
   const activeOpponentLotFilters = [
     selectedOpponentOwner ? t("dev.opponentLotsActiveOwner", { owner: selectedOpponentOwner }) : null,
     selectedOpponentStreet ? t("dev.opponentLotsActiveStreet", {
@@ -2301,6 +2313,51 @@ export function DevelopmentMatchLab({
                       <p data-testid="dev-opponent-lots-count" aria-live="polite">
                         {t("dev.opponentLotsCount", { count: opponentLots.routes.length })}
                       </p>
+                      {rivalLotStreetDistribution && (
+                        <div className="space-y-2" data-testid="dev-opponent-street-distribution">
+                          <p className="font-semibold">{t("dev.opponentStreetDistributionTitle")}</p>
+                          <p className="text-muted-foreground">
+                            {t("dev.opponentStreetDistributionNote")}
+                          </p>
+                          <ol className="grid gap-2 sm:grid-cols-2"
+                            data-testid="dev-opponent-street-distribution-list">
+                            {rivalLotStreetDistribution.map(street => (
+                              <li key={street.streetId}
+                                data-testid={`dev-opponent-street-row-${street.streetId}`}
+                                data-total={street.total}
+                                data-standing={street.standing}
+                                data-fallen={street.fallen}
+                                className="min-w-0">
+                                <Button type="button" size="sm" variant="outline"
+                                  className="h-auto min-h-10 w-full min-w-0 justify-start whitespace-normal p-2 text-left"
+                                  data-testid={`dev-opponent-street-select-${street.streetId}`}
+                                  aria-pressed={selectedOpponentStreet === street.streetId}
+                                  aria-label={t("dev.opponentStreetDistributionSelect", {
+                                    street: street.name, count: street.total,
+                                    standing: street.standing, fallen: street.fallen,
+                                  })}
+                                  onClick={() => {
+                                    setSelectedOpponentStreetId(previous =>
+                                      previous === street.streetId ? "" : street.streetId);
+                                    onTacticalFocus(null);
+                                  }}>
+                                  <span className="min-w-0">
+                                    <span className="block font-semibold">{street.name}</span>
+                                    <span className="block text-muted-foreground">
+                                      {t("dev.opponentStreetDistributionLots", {
+                                        count: street.total,
+                                      })} · {t("dev.opponentStreetDistributionPostures", {
+                                        standing: street.standing, fallen: street.fallen,
+                                      })}
+                                    </span>
+                                  </span>
+                                </Button>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
+
                       <label className="block space-y-1">
                         <span className="block font-medium">
                           {t("dev.opponentLotsOwnerFilterLabel")}

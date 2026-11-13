@@ -20,6 +20,7 @@ import {
   type PublicAuditChangedField,
 } from "./comparePublicAudits";
 import { verifiedPublicHistory, type PublicHistory } from "./verifiedPublicHistory";
+import { selectPublicScoutingView } from "./publicScoutingSelectors";
 
 type DemoCredential = Readonly<{ playerId: string; token: string }>;
 type DemoPlayer = Readonly<{
@@ -549,47 +550,22 @@ export function DevelopmentMatchLab({
   const uncontrolledRoutes = tactical?.uncontrolled ?? null;
   const otherSeatRoutes = tactical?.otherPlayers ?? null;
   const opponentLots = tactical?.opponentControlledLots ?? null;
-  // #89: allow a controller ONLY if listed by the same fully validated,
-  // atomic actor/revision/token-scoped #88 other-seat projection. The two
-  // client-side predicates compose; no new HTTP or gameplay permission.
-  const knownOpponentOwners = new Set(
-    otherSeatRoutes?.others.map(other => other.otherPlayerId) ?? []);
-  const selectedOpponentOwner = knownOpponentOwners.has(selectedOpponentOwnerId)
-    ? selectedOpponentOwnerId : "";
-  // #94: a board street selector never trusts street names or frontend geometry
-  // for routing. Matched routes must be from the verified #88 public projection.
-  const selectedOpponentStreet = cityBoard.streets.some(street =>
-    street.id === selectedOpponentStreetId) ? selectedOpponentStreetId : "";
-  const visibleOpponentLots = opponentLots?.routes.filter(route =>
-    (!selectedOpponentOwner || route.ownerPlayerId === selectedOpponentOwner)
-    && (!selectedOpponentStreet || route.streetId === selectedOpponentStreet)
-    && (!nearbyOpponentLotsOnly || route.streetSteps <= 1)
-    && (selectedOpponentPosture === "all"
-      || route.posture === (selectedOpponentPosture === "standing" ? 0 : 1))) ?? [];
-  // #97: full, *unfiltered* public distribution across all seven canonical
-  // board streets. Counts cannot survive an invalid, stale or revoked #88 view.
-  const rivalLotStreetDistribution = opponentLots ? cityBoard.streets.map(street => {
-    const onStreet = opponentLots.routes.filter(route => route.streetId === street.id);
-    return {
-      streetId: street.id,
-      name: street.name,
-      total: onStreet.length,
-      standing: onStreet.filter(route => route.posture === 0).length,
-      fallen: onStreet.filter(route => route.posture === 1).length,
-      // #98: preserve the server-verified public rival roster's canonical
-      // order. Only other players with actual public lots are shown.
-      owners: (otherSeatRoutes?.others ?? []).map(other => {
-        const held = onStreet.filter(route =>
-          route.ownerPlayerId === other.otherPlayerId);
-        return {
-          ownerId: other.otherPlayerId,
-          total: held.length,
-          standing: held.filter(route => route.posture === 0).length,
-          fallen: held.filter(route => route.posture === 1).length,
-        };
-      }).filter(owner => owner.total > 0),
-    };
-  }) : null;
+  // #99: the full #88 capability/actor/revision guard above must succeed
+  // before pure, deterministic display selectors may read PUBLIC tactical data.
+  // No HTTP, tokens, React state or client movement authority enters this module.
+  const publicScoutingView = tactical
+    ? selectPublicScoutingView(tactical.otherPlayers.others,
+      tactical.opponentControlledLots.routes, cityBoard.streets, {
+        ownerId: selectedOpponentOwnerId,
+        streetId: selectedOpponentStreetId,
+        nearbyOnly: nearbyOpponentLotsOnly,
+        posture: selectedOpponentPosture,
+      })
+    : null;
+  const selectedOpponentOwner = publicScoutingView?.selectedOpponentOwner ?? "";
+  const selectedOpponentStreet = publicScoutingView?.selectedOpponentStreet ?? "";
+  const visibleOpponentLots = publicScoutingView?.visibleOpponentLots ?? [];
+  const rivalLotStreetDistribution = publicScoutingView?.rivalLotStreetDistribution ?? null;
   const activeOpponentLotFilters = [
     selectedOpponentOwner ? t("dev.opponentLotsActiveOwner", { owner: selectedOpponentOwner }) : null,
     selectedOpponentStreet ? t("dev.opponentLotsActiveStreet", {
@@ -602,18 +578,9 @@ export function DevelopmentMatchLab({
     }) : null,
   ].filter((label): label is string => label !== null);
   // #95: only view preferences can be reset, not audited tactical authority.
-  // #90: stable server tie-break has already been verified for all routes by
-  // #88. The first *visible* controlled lot per authenticated public rival
-  // is therefore the canonical closest one, or null after #89/#85 filters.
-  // In particular, empty rivals have NO target and never a synthetic path.
-  const nearestVisibleLotByRival = otherSeatRoutes && opponentLots
-    ? otherSeatRoutes.others.map(other => ({
-      otherPlayerId: other.otherPlayerId,
-      playerRoute: other, // #92: audited same-revision other-seat route
-      route: visibleOpponentLots.find(lot =>
-        lot.ownerPlayerId === other.otherPlayerId) ?? null,
-    }))
-    : [];
+  // Preserve the backend-verified route order, and the independent #92
+  // public rival position even when all rival-owned lots are filtered away.
+  const nearestVisibleLotByRival = publicScoutingView?.nearestVisibleLotByRival ?? [];
   const turnProgress = turnProgressLease && token
     && turnProgressLease.token === token
     && turnProgressLease.data.matchId === session?.matchId

@@ -3468,3 +3468,123 @@ test("#88: eight-seat preview uses one actor-scoped atomic request", async ({ pa
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);
 });
+
+test("#89: public controller filter composes with nearby and never fetches or commands", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const owner = page.getByTestId("dev-opponent-lots-owner-filter");
+  await expect(owner).toHaveValue("");
+  await expect(owner.locator("option")).toHaveCount(2);
+  await expect(owner.locator('option[value="alice"]')).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  const tactical = () => observedHeaders.filter(e => e.path.endsWith("/tactical-overview"));
+  const commands = () => observedHeaders.filter(e =>
+    /\/(free-move|end-turn)$/.test(e.path));
+  expect(tactical()).toHaveLength(1);
+  expect(commands()).toHaveLength(0);
+  await owner.focus();
+  await expect(owner).toBeFocused();
+  await owner.selectOption("bob");
+  await expect(page.getByTestId("dev-opponent-lots-owner-filtered-count"))
+    .toContainText("1 lotti visibili di bob");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toHaveAttribute("data-owner", "bob");
+  await page.getByTestId("dev-focus-opponent-lot-S-01").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  const nearby = page.getByTestId("dev-opponent-lots-nearby-toggle");
+  await nearby.click();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lots-no-owner"))
+    .toContainText("Nessun lotto di bob");
+  await nearby.click();
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await page.getByTestId("dev-focus-opponent-lot-S-01").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await owner.selectOption("");
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lots-owner-filtered-count")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  expect(tactical()).toHaveLength(1);
+  expect(commands()).toHaveLength(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("#89: eight seats offer only verified other players, including public empty owners", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { playerCount: 8 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  await page.getByTestId("dev-create").click();
+  const filter = page.getByTestId("dev-opponent-lots-owner-filter");
+  await expect(filter.locator("option")).toHaveCount(8);
+  await expect(filter.locator('option[value="alice"]')).toHaveCount(0);
+  await filter.selectOption("heidi");
+  await expect(page.getByTestId("dev-opponent-lots-no-owner"))
+    .toContainText("Nessun lotto di heidi");
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(0);
+  await filter.selectOption("bob");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toHaveCount(0);
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(page.getByRole("combobox", {
+    name: "Filter by player controlling the lot",
+  })).toHaveValue("bob");
+  await expect(page.getByTestId("dev-opponent-lots-owner-filtered-count"))
+    .toContainText("1 visible lots controlled by bob");
+  await page.getByTestId("dev-seat-heidi").click();
+  await expect(filter).toHaveValue("");
+  await expect(filter.locator('option[value="heidi"]')).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toHaveAttribute("data-owner", "alice");
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toHaveAttribute("data-owner", "bob");
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(2);
+  const tactical = observedHeaders.filter(e => e.path.endsWith("/tactical-overview"));
+  expect(tactical).toHaveLength(2);
+  expect(tactical[0].token).toBe("a".repeat(64));
+  expect(tactical[1].token).toBe("h".repeat(64));
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("#89: owner preference resets on token rotation and cannot retain revoked owners", async ({ page }) => {
+  const { observedHeaders, revokeSeat } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const owner = page.getByTestId("dev-opponent-lots-owner-filter");
+  await owner.selectOption("bob");
+  await page.getByTestId("dev-opponent-lots-nearby-toggle").click();
+  await expect(page.getByTestId("dev-opponent-lots-no-owner")).toBeVisible();
+  await page.getByTestId("dev-rotate-token").click();
+  await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await expect(owner).toHaveValue("");
+  await expect(page.getByTestId("dev-opponent-lots-nearby-toggle"))
+    .toHaveAttribute("aria-pressed", "false");
+  const firstReads = observedHeaders.filter(x => x.path.endsWith("/tactical-overview"));
+  expect(firstReads).toHaveLength(2);
+  expect(firstReads[0].token).not.toBe(firstReads[1].token);
+  await owner.selectOption("bob");
+  revokeSeat("alice");
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByTestId("dev-seat-alice")).toHaveCount(0, { timeout: 12000 });
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(owner).toHaveValue("");
+  await expect(owner.locator('option[value="bob"]')).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-opponent-lots")).toHaveCount(0);
+});
+
+test("#89: forged atomic projection never offers a rival owner filter", async ({ page }) => {
+  await mockMatchApi(page, { invalidTacticalOverview: "nested-origin" });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-opponent-lots-unavailable")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveCount(0);
+  await expect(page.getByTestId("dev-focus-opponent-lot-S-01")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+});

@@ -566,6 +566,18 @@ export function DevelopmentMatchLab({
     && (!nearbyOpponentLotsOnly || route.streetSteps <= 1)
     && (selectedOpponentPosture === "all"
       || route.posture === (selectedOpponentPosture === "standing" ? 0 : 1))) ?? [];
+  const activeOpponentLotFilters = [
+    selectedOpponentOwner ? t("dev.opponentLotsActiveOwner", { owner: selectedOpponentOwner }) : null,
+    selectedOpponentStreet ? t("dev.opponentLotsActiveStreet", {
+      street: streetById(selectedOpponentStreet)?.name ?? selectedOpponentStreet,
+    }) : null,
+    nearbyOpponentLotsOnly ? t("dev.opponentLotsActiveNearby") : null,
+    selectedOpponentPosture !== "all" ? t("dev.opponentLotsActivePosture", {
+      posture: t(selectedOpponentPosture === "standing"
+        ? "dev.opponentLotsPostureStanding" : "dev.opponentLotsPostureFallen"),
+    }) : null,
+  ].filter((label): label is string => label !== null);
+  // #95: only view preferences can be reset, not audited tactical authority.
   // #90: stable server tie-break has already been verified for all routes by
   // #88. The first *visible* controlled lot per authenticated public rival
   // is therefore the canonical closest one, or null after #89/#85 filters.
@@ -2367,6 +2379,30 @@ export function DevelopmentMatchLab({
                         }}>
                         {t("dev.opponentLotsNearbyToggle")}
                       </Button>
+                      {activeOpponentLotFilters.length > 0 && (
+                        <div className="space-y-2" data-testid="dev-opponent-lots-active-filters">
+                          <p className="break-words text-muted-foreground" aria-live="polite"
+                            data-testid="dev-opponent-lots-active-filter-summary">
+                            {t("dev.opponentLotsActiveFilterCount", {
+                              count: activeOpponentLotFilters.length,
+                            })}: {activeOpponentLotFilters.join(" · ")}
+                          </p>
+                          <Button type="button" size="sm" variant="outline"
+                            data-testid="dev-opponent-lots-reset-filters"
+                            aria-label={t("dev.opponentLotsResetFilters")}
+                            className="h-10 w-full"
+                            onClick={() => {
+                              setSelectedOpponentOwnerId("");
+                              setSelectedOpponentStreetId("");
+                              setNearbyOpponentLotsOnly(false);
+                              setSelectedOpponentPosture("all");
+                              // A reset does not authorize any old public map focus.
+                              onTacticalFocus(null);
+                            }}>
+                            {t("dev.opponentLotsResetFilters")}
+                          </Button>
+                        </div>
+                      )}
                       {selectedOpponentStreet && (
                         <p data-testid="dev-opponent-lots-street-filtered-count" aria-live="polite">
                           {t("dev.opponentLotsStreetFilteredCount", { count: visibleOpponentLots.length })}

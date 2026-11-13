@@ -3225,6 +3225,19 @@ test("English mobile tactical focus remains accessible when WebGL is unavailable
   await expect(page.getByText("3D is not available on this device.", { exact: false }))
     .toBeVisible();
   await page.getByTestId("dev-create").click();
+  // #92: the paired player focus must also be a DOM-only control when
+  // WebGL is disabled, without authorizing a command or new API read.
+  const publicRival = page.getByTestId("dev-focus-rival-player-bob");
+  await expect(publicRival).toHaveAttribute("aria-label",
+    "View bob's verified public position on map");
+  await publicRival.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("city-tactical-target"))
+    .toContainText("Observed player: bob");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute(
+    "data-focus-path", "gauss>main-square>einstein");
+  await page.getByTestId("city-clear-tactical-focus").click();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
   const button = page.getByTestId("dev-focus-player-bob");
   await expect(button).toHaveAttribute("aria-label", "View bob on map");
   await button.click();
@@ -3266,6 +3279,7 @@ test("forged and stale player/lot projections never enable tactical focus", asyn
   await expect(page.getByTestId("dev-other-seats-unavailable")).toBeVisible();
   await expect(page.getByTestId("dev-routes-unavailable")).toBeVisible();
   await expect(page.getByTestId("dev-focus-player-bob")).toHaveCount(0);
+  await expect(page.getByTestId("dev-focus-rival-player-bob")).toHaveCount(0);
   await expect(page.getByTestId("dev-focus-activity-S-02")).toHaveCount(0);
   await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
   await expect(page.getByTestId("dev-end-turn")).toBeEnabled();

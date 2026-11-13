@@ -3236,7 +3236,7 @@ test("English mobile tactical focus remains accessible when WebGL is unavailable
   await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
   await expect(page.getByTestId("dev-opponent-lots-street-filter")).toHaveValue("");
   // #97: public per-street counts and quick selection remain DOM-only.
-  await expect(page.getByTestId("dev-opponent-street-distribution-list").locator("li"))
+  await expect(page.getByTestId("dev-opponent-street-distribution-list").locator(":scope > li"))
     .toHaveCount(7);
   const fallbackStreet = page.getByTestId("dev-opponent-street-select-einstein");
   await fallbackStreet.focus();
@@ -4159,7 +4159,7 @@ test("#97: two-seat canonical street counts and keyboard quick selection on mobi
   await page.goto("/");
   await page.getByTestId("dev-create").click();
   const summary = page.getByTestId("dev-opponent-street-distribution");
-  const rows = page.getByTestId("dev-opponent-street-distribution-list").locator("li");
+  const rows = page.getByTestId("dev-opponent-street-distribution-list").locator(":scope > li");
   const street = page.getByTestId("dev-opponent-lots-street-filter");
   await expect(summary).toContainText("Distribuzione dei lotti rivali");
   await expect(rows).toHaveCount(7);
@@ -4223,7 +4223,7 @@ test("#97: eight-seat public street totals follow verified actor and token isola
   const gauss = page.getByTestId("dev-opponent-street-row-gauss");
   const einstein = page.getByTestId("dev-opponent-street-row-einstein");
   await expect(roster.locator("li")).toHaveCount(7);
-  await expect(page.getByTestId("dev-opponent-street-distribution-list").locator("li"))
+  await expect(page.getByTestId("dev-opponent-street-distribution-list").locator(":scope > li"))
     .toHaveCount(7);
   await expect(einstein).toHaveAttribute("data-total", "1");
   await expect(gauss).toHaveAttribute("data-total", "0");

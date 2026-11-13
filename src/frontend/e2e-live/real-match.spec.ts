@@ -3018,7 +3018,7 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
     await expect(row).toHaveAttribute("data-fallen",
       String(routes.filter(route => route.posture === 1).length));
   }
-  await expect(page.getByTestId("dev-opponent-street-distribution-list").locator("li"))
+  await expect(page.getByTestId("dev-opponent-street-distribution-list").locator(":scope > li"))
     .toHaveCount(7);
   const nearestBob = aliceTactical.opponentControlledLots.routes
     .filter(lot => lot.ownerPlayerId === "bob")[0];

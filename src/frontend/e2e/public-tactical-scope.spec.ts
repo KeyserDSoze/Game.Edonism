@@ -78,7 +78,7 @@ test("#100: null, primitive, array and missing nested objects fail closed withou
       snapshot[part] = raw;
       expect(hasAtomicPublicTacticalScope(snapshot, expected)).toBe(false);
     }
-    const missing = verifiedSnapshot();
+    const missing: Record<string, unknown> = { ...verifiedSnapshot() };
     delete missing[part];
     expect(hasAtomicPublicTacticalScope(missing, expected)).toBe(false);
   }

@@ -137,4 +137,60 @@ public sealed class OpponentControlledLotsTests
         Assert.Equal(movedCheckpoint, JsonSerializer.Serialize(match.CaptureCheckpoint()));
         Assert.True(match.VerifyPublicAudit().IsValid);
     }
+    // #89: a browser owner filter is only a grouping of audited PUBLIC
+    // owner/slot/path projections, never a permission to attack or purchase.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void EveryRivalOwnerGroupAndNearbyIntersectionMatchTheAuthoritativePublicBoard(int count)
+    {
+        var match = FullMatch(count);
+        var state = match.Snapshot();
+        var board = BoardCatalog.LoadDefault();
+        var checkpoint = JsonSerializer.Serialize(match.CaptureCheckpoint());
+
+        foreach (var actor in state.Players)
+        {
+            var overview = match.VerifiedTacticalOverviewForActor(actor.PlayerId)!;
+            Assert.Equal(state.Revision, overview.VerifiedRevision);
+            var knownOwners = overview.OtherPlayers.Others
+                .Select(other => other.OtherPlayerId).ToHashSet(StringComparer.Ordinal);
+            Assert.Equal(count - 1, knownOwners.Count);
+            Assert.DoesNotContain(actor.PlayerId, knownOwners);
+
+            var lots = overview.OpponentControlledLots.Routes;
+            Assert.All(lots, lot => Assert.Contains(lot.OwnerPlayerId, knownOwners));
+            foreach (var rival in knownOwners)
+            {
+                var all = lots.Where(lot => lot.OwnerPlayerId == rival).ToArray();
+                var expected = state.ControlledActivities
+                    .Where(lot => lot.OwnerPlayerId == rival)
+                    .Select(lot => lot.SlotId).OrderBy(id => id, StringComparer.Ordinal).ToArray();
+                Assert.Equal(expected,
+                    all.Select(lot => lot.SlotId).OrderBy(id => id, StringComparer.Ordinal));
+                foreach (var lot in all)
+                {
+                    Assert.Equal(board.ShortestStreetPath(actor.StreetId, lot.StreetId),
+                        lot.StreetPath);
+                    Assert.Equal(lot.StreetPath.Count - 1, lot.StreetSteps);
+                    Assert.Contains(state.ControlledActivities,
+                        controlled => controlled.SlotId == lot.SlotId
+                            && controlled.OwnerPlayerId == rival
+                            && controlled.Posture == lot.Posture);
+                }
+
+                // Intersect the two independent browser display predicates;
+                // filtering must never change order, state, or audit.
+                var near = lots.Where(lot => lot.OwnerPlayerId == rival
+                    && lot.StreetSteps <= 1).ToArray();
+                Assert.Equal(all.Where(lot => lot.StreetSteps <= 1), near);
+                Assert.All(near, lot => Assert.InRange(lot.StreetSteps, 0, 1));
+            }
+        }
+
+        Assert.Equal(checkpoint, JsonSerializer.Serialize(match.CaptureCheckpoint()));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
 }

@@ -2869,3 +2869,89 @@ test("#88: two real browser seats use one atomic tactical GET per revision and r
     await secondContext.close();
   }
 });
+
+test("#89: real .NET owner and nearby tactical filters are browser-only across token rotation",
+  async ({ page, request }) => {
+  const tacticalReads: { token: string | undefined; path: string }[] = [];
+  page.on("request", req => {
+    if (req.method() !== "GET") return;
+    const path = new URL(req.url()).pathname;
+    if (path.endsWith("/tactical-overview"))
+      tacticalReads.push({ token: req.headers()["x-edonism-dev-token"], path });
+  });
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const alice = tokenFor(created, "alice");
+  const bob = tokenFor(created, "bob");
+  const url = `http://127.0.0.1:5080/api/dev/matches/${id}`;
+  const first = await request.get(url, { headers: auth(alice) });
+  const auditFirst = await request.get(`${url}/audit`, { headers: auth(alice) });
+  expect(first.status()).toBe(200);
+  expect(auditFirst.status()).toBe(200);
+  const publicBefore = await first.json() as PublicMatch;
+  const auditBefore = await auditFirst.json();
+
+  const response = await request.get(`${url}/tactical-overview`, { headers: auth(alice) });
+  expect(response.status()).toBe(200);
+  const overview = await response.json() as {
+    playerId: string;
+    verifiedRevision: number;
+    otherPlayers: { others: { otherPlayerId: string }[] };
+    opponentControlledLots: { routes: {
+      slotId: string; ownerPlayerId: string; streetSteps: number; streetPath: string[];
+    }[] };
+  };
+  expect(overview.playerId).toBe("alice");
+  expect(overview.verifiedRevision).toBe(0);
+  expect(overview.otherPlayers.others.map(x => x.otherPlayerId)).toEqual(["bob"]);
+  expect(overview.opponentControlledLots.routes).toHaveLength(1);
+  const bobLot = overview.opponentControlledLots.routes[0];
+  expect(bobLot.ownerPlayerId).toBe("bob");
+
+  const filter = page.getByTestId("dev-opponent-lots-owner-filter");
+  await expect(filter).toHaveValue("");
+  await expect(filter.locator('option[value="alice"]')).toHaveCount(0);
+  await expect(page.getByTestId(`dev-opponent-lot-${bobLot.slotId}`)).toBeVisible();
+  expect(tacticalReads).toHaveLength(1);
+  await filter.selectOption("bob");
+  await expect(page.getByTestId("dev-opponent-lots-owner-filtered-count"))
+    .toContainText("bob");
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(1);
+  await page.getByTestId(`dev-focus-opponent-lot-${bobLot.slotId}`).click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+
+  const nearby = page.getByTestId("dev-opponent-lots-nearby-toggle");
+  await nearby.click();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li"))
+    .toHaveCount(bobLot.streetSteps <= 1 ? 1 : 0);
+  if (bobLot.streetSteps > 1)
+    await expect(page.getByTestId("dev-opponent-lots-no-owner")).toBeVisible();
+  await nearby.click();
+  await expect(page.getByTestId(`dev-opponent-lot-${bobLot.slotId}`)).toBeVisible();
+  await filter.selectOption("");
+  await expect(filter).toHaveValue("");
+  expect(tacticalReads).toHaveLength(1);
+
+  await page.getByTestId("dev-rotate-token").click();
+  await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+  await expect(page.getByTestId(`dev-opponent-lot-${bobLot.slotId}`)).toBeVisible();
+  await expect(filter).toHaveValue("");
+  await expect(nearby).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(() => tacticalReads.length).toBe(2);
+  const newToken = tacticalReads[1].token;
+  expect(newToken).toMatch(/^[A-F0-9]{64}$/i);
+  expect(newToken).not.toBe(alice);
+  expect(newToken).not.toBe(bob);
+
+  const previous = await request.get(`${url}/tactical-overview`, { headers: auth(alice) });
+  expect(previous.status()).toBe(404);
+  expect(previous.headers()["cache-control"]).toBe("no-store");
+  const after = await request.get(url, { headers: auth(newToken!) });
+  const auditAfter = await request.get(`${url}/audit`, { headers: auth(newToken!) });
+  expect(after.status()).toBe(200);
+  expect(auditAfter.status()).toBe(200);
+  expect(await after.json()).toEqual(publicBefore);
+  expect(await auditAfter.json()).toEqual(auditBefore);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+});

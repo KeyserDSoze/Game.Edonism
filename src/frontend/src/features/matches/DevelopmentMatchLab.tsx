@@ -21,6 +21,7 @@ import {
 } from "./comparePublicAudits";
 import { verifiedPublicHistory, type PublicHistory } from "./verifiedPublicHistory";
 import { selectPublicScoutingView } from "./publicScoutingSelectors";
+import { hasAtomicPublicTacticalScope } from "./publicTacticalScope";
 
 type DemoCredential = Readonly<{ playerId: string; token: string }>;
 type DemoPlayer = Readonly<{
@@ -903,20 +904,12 @@ export function DevelopmentMatchLab({
           || scope.seatId !== seatId || scope.token !== actorToken
           || currentRevision.current !== revision) return;
         const origin = state.players.find(p => p.playerId === seatId)?.streetId;
-        // No nested object may be rendered unless the top-level and ALL
-        // nested scopes match the exact current public revision and seat.
-        const sameScope = (view: UncontrolledRoutes | OtherSeatRoutes
-          | OpponentControlledLotRoutes | null | undefined): boolean =>
-          Boolean(view && view.matchId === matchId && view.playerId === seatId
-            && view.round === state.round && view.verifiedRevision === revision
-            && view.fromStreetId === origin);
-        if (!origin || !overview || overview.matchId !== matchId
-          || overview.playerId !== seatId || overview.round !== state.round
-          || overview.verifiedRevision !== revision
-          || overview.fromStreetId !== origin
-          || !sameScope(overview.uncontrolled)
-          || !sameScope(overview.otherPlayers)
-          || !sameScope(overview.opponentControlledLots)) {
+        // #100: validate one atomic public scope before ANY nested route data.
+        // The bearer/revision race guard above must run before this pure gate.
+        if (!origin || !hasAtomicPublicTacticalScope(overview, {
+          matchId, playerId: seatId, round: state.round,
+          verifiedRevision: revision, fromStreetId: origin,
+        })) {
           onTacticalFocus(null);
           return;
         }

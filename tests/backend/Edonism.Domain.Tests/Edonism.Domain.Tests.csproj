@@ -15,4 +15,8 @@
     <ProjectReference Include="../../../src/backend/infrastructure/Edonism.Infrastructure/Edonism.Infrastructure.csproj" />
     <ProjectReference Include="../../../src/backend/applications/Edonism.Api/Edonism.Api.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="../../../src/shared/board/canonical-street-paths.v1.json"
+          Link="canonical-street-paths.v1.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

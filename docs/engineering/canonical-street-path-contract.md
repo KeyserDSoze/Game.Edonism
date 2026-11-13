@@ -1,0 +1,9 @@
+# Seven-street cross-language canonical route contract (#86)
+
+The file `src/shared/board/canonical-street-paths.v1.json` pins a **versioned, reviewed test oracle** for the *current Development* graph in `edonism-board.v1.json`: all **7 × 7 = 49 ordered source/destination paths**, including zero-edge self paths, shortest canonical edges and deterministic ordinal tie-breaks.
+
+The fixture is **not** computed dynamically by either tested implementation. `BoardDefinition.ShortestStreetPath` (authoritative .NET) and `shortestStreetPath` (read-only browser guard) independently compare their complete results against the pinned arrays. A route implementation, graph or tie-break regression fails the tests rather than silently allowing a client/server interpretation mismatch. .NET xUnit additionally permutes input street and neighbor ordering; Playwright validates each public graph edge. The Development full-stack Playwright suite authenticates two distinct seats to the .NET `opponent-controlled-routes` endpoint and checks each returned path against the same pinned contract, generic unauthorized 404/no-store, and unchanged public state.
+
+The fixture must be updated **only with an explicit board-version/topology review**; a changed route should not be silently regenerated to satisfy a failing test. This version freezes the proposed **Development** topology, not new printed game mechanics. Five image-inferred street connections still require game-designer confirmation in [board-topology-v1](../game-design/board-topology-v1.md) / #4. Nothing in this contract permits buying, attacking, walking multiple edges in one turn, or deploying the match engine in Production.
+
+Target 0.0.2; issue [#86](https://github.com/KeyserDSoze/Game.Edonism/issues/86). Closure requires all 3 CI gates on exact final `main` SHA.

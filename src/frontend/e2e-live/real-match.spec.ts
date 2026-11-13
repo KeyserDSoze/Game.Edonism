@@ -1,3 +1,4 @@
+import canonicalRoutes from "../../shared/board/canonical-street-paths.v1.json";
 import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -2656,4 +2657,49 @@ test("real .NET: nearby rival-lot filter leaves authorized state and audit uncha
   const unchanged = await request.get(endpoint, { headers: auth(aliceToken) });
   expect(unchanged.status()).toBe(200);
   expect(await unchanged.json()).toEqual(before);
+});
+
+
+test("real .NET: both authenticated seats' rival-lot paths match all pinned street pairs",
+  async ({ page, request }) => {
+  const created = await startRealMatch(page);
+  const url = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`;
+  const golden = new Map(canonicalRoutes.paths.map(route => [
+    `${route.from}:${route.to}`, route.path,
+  ]));
+  expect(golden.size).toBe(49);
+  const unauthorized = await request.get(`${url}/opponent-controlled-routes`);
+  expect(unauthorized.status()).toBe(404);
+  expect(unauthorized.headers()["cache-control"]).toBe("no-store");
+
+  const firstToken = tokenFor(created, created.state.players[0].playerId);
+  const before = await request.get(url, { headers: auth(firstToken) });
+  expect(before.status()).toBe(200);
+  const snapshot = await before.json() as PublicMatch;
+  for (const seat of created.state.players) {
+    const response = await request.get(`${url}/opponent-controlled-routes`, {
+      headers: auth(tokenFor(created, seat.playerId)),
+    });
+    expect(response.status()).toBe(200);
+    expect(response.headers()["cache-control"]).toBe("no-store");
+    const projection = await response.json() as {
+      playerId: string; fromStreetId: string; verifiedRevision: number;
+      routes: { ownerPlayerId: string; slotId: string; streetId: string;
+        streetPath: string[]; streetSteps: number }[];
+    };
+    expect(projection.playerId).toBe(seat.playerId);
+    expect(projection.fromStreetId).toBe(seat.streetId);
+    expect(projection.verifiedRevision).toBe(snapshot.revision);
+    expect(projection.routes).toHaveLength(created.state.players.length - 1);
+    for (const route of projection.routes) {
+      expect(route.ownerPlayerId).not.toBe(seat.playerId);
+      const expected = golden.get(`${seat.streetId}:${route.streetId}`);
+      expect(expected).toBeDefined();
+      expect(route.streetPath).toEqual(expected);
+      expect(route.streetSteps).toBe(expected!.length - 1);
+    }
+  }
+  const after = await request.get(url, { headers: auth(firstToken) });
+  expect(after.status()).toBe(200);
+  expect(await after.json()).toEqual(snapshot);
 });

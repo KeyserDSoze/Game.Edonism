@@ -1,0 +1,417 @@
+{
+  "format": "edonism-canonical-street-paths-v1",
+  "boardVersion": "edonism-streets-v1",
+  "paths": [
+    {
+      "from": "boson",
+      "to": "boson",
+      "path": [
+        "boson"
+      ]
+    },
+    {
+      "from": "boson",
+      "to": "einstein",
+      "path": [
+        "boson",
+        "main-square",
+        "einstein"
+      ]
+    },
+    {
+      "from": "boson",
+      "to": "gauss",
+      "path": [
+        "boson",
+        "main-square",
+        "gauss"
+      ]
+    },
+    {
+      "from": "boson",
+      "to": "main-square",
+      "path": [
+        "boson",
+        "main-square"
+      ]
+    },
+    {
+      "from": "boson",
+      "to": "meson",
+      "path": [
+        "boson",
+        "main-square",
+        "meson"
+      ]
+    },
+    {
+      "from": "boson",
+      "to": "newton",
+      "path": [
+        "boson",
+        "newton"
+      ]
+    },
+    {
+      "from": "boson",
+      "to": "planck",
+      "path": [
+        "boson",
+        "main-square",
+        "einstein",
+        "planck"
+      ]
+    },
+    {
+      "from": "einstein",
+      "to": "boson",
+      "path": [
+        "einstein",
+        "main-square",
+        "boson"
+      ]
+    },
+    {
+      "from": "einstein",
+      "to": "einstein",
+      "path": [
+        "einstein"
+      ]
+    },
+    {
+      "from": "einstein",
+      "to": "gauss",
+      "path": [
+        "einstein",
+        "main-square",
+        "gauss"
+      ]
+    },
+    {
+      "from": "einstein",
+      "to": "main-square",
+      "path": [
+        "einstein",
+        "main-square"
+      ]
+    },
+    {
+      "from": "einstein",
+      "to": "meson",
+      "path": [
+        "einstein",
+        "main-square",
+        "meson"
+      ]
+    },
+    {
+      "from": "einstein",
+      "to": "newton",
+      "path": [
+        "einstein",
+        "newton"
+      ]
+    },
+    {
+      "from": "einstein",
+      "to": "planck",
+      "path": [
+        "einstein",
+        "planck"
+      ]
+    },
+    {
+      "from": "gauss",
+      "to": "boson",
+      "path": [
+        "gauss",
+        "main-square",
+        "boson"
+      ]
+    },
+    {
+      "from": "gauss",
+      "to": "einstein",
+      "path": [
+        "gauss",
+        "main-square",
+        "einstein"
+      ]
+    },
+    {
+      "from": "gauss",
+      "to": "gauss",
+      "path": [
+        "gauss"
+      ]
+    },
+    {
+      "from": "gauss",
+      "to": "main-square",
+      "path": [
+        "gauss",
+        "main-square"
+      ]
+    },
+    {
+      "from": "gauss",
+      "to": "meson",
+      "path": [
+        "gauss",
+        "main-square",
+        "meson"
+      ]
+    },
+    {
+      "from": "gauss",
+      "to": "newton",
+      "path": [
+        "gauss",
+        "newton"
+      ]
+    },
+    {
+      "from": "gauss",
+      "to": "planck",
+      "path": [
+        "gauss",
+        "planck"
+      ]
+    },
+    {
+      "from": "main-square",
+      "to": "boson",
+      "path": [
+        "main-square",
+        "boson"
+      ]
+    },
+    {
+      "from": "main-square",
+      "to": "einstein",
+      "path": [
+        "main-square",
+        "einstein"
+      ]
+    },
+    {
+      "from": "main-square",
+      "to": "gauss",
+      "path": [
+        "main-square",
+        "gauss"
+      ]
+    },
+    {
+      "from": "main-square",
+      "to": "main-square",
+      "path": [
+        "main-square"
+      ]
+    },
+    {
+      "from": "main-square",
+      "to": "meson",
+      "path": [
+        "main-square",
+        "meson"
+      ]
+    },
+    {
+      "from": "main-square",
+      "to": "newton",
+      "path": [
+        "main-square",
+        "boson",
+        "newton"
+      ]
+    },
+    {
+      "from": "main-square",
+      "to": "planck",
+      "path": [
+        "main-square",
+        "einstein",
+        "planck"
+      ]
+    },
+    {
+      "from": "meson",
+      "to": "boson",
+      "path": [
+        "meson",
+        "main-square",
+        "boson"
+      ]
+    },
+    {
+      "from": "meson",
+      "to": "einstein",
+      "path": [
+        "meson",
+        "main-square",
+        "einstein"
+      ]
+    },
+    {
+      "from": "meson",
+      "to": "gauss",
+      "path": [
+        "meson",
+        "main-square",
+        "gauss"
+      ]
+    },
+    {
+      "from": "meson",
+      "to": "main-square",
+      "path": [
+        "meson",
+        "main-square"
+      ]
+    },
+    {
+      "from": "meson",
+      "to": "meson",
+      "path": [
+        "meson"
+      ]
+    },
+    {
+      "from": "meson",
+      "to": "newton",
+      "path": [
+        "meson",
+        "main-square",
+        "boson",
+        "newton"
+      ]
+    },
+    {
+      "from": "meson",
+      "to": "planck",
+      "path": [
+        "meson",
+        "planck"
+      ]
+    },
+    {
+      "from": "newton",
+      "to": "boson",
+      "path": [
+        "newton",
+        "boson"
+      ]
+    },
+    {
+      "from": "newton",
+      "to": "einstein",
+      "path": [
+        "newton",
+        "einstein"
+      ]
+    },
+    {
+      "from": "newton",
+      "to": "gauss",
+      "path": [
+        "newton",
+        "gauss"
+      ]
+    },
+    {
+      "from": "newton",
+      "to": "main-square",
+      "path": [
+        "newton",
+        "boson",
+        "main-square"
+      ]
+    },
+    {
+      "from": "newton",
+      "to": "meson",
+      "path": [
+        "newton",
+        "boson",
+        "main-square",
+        "meson"
+      ]
+    },
+    {
+      "from": "newton",
+      "to": "newton",
+      "path": [
+        "newton"
+      ]
+    },
+    {
+      "from": "newton",
+      "to": "planck",
+      "path": [
+        "newton",
+        "einstein",
+        "planck"
+      ]
+    },
+    {
+      "from": "planck",
+      "to": "boson",
+      "path": [
+        "planck",
+        "einstein",
+        "main-square",
+        "boson"
+      ]
+    },
+    {
+      "from": "planck",
+      "to": "einstein",
+      "path": [
+        "planck",
+        "einstein"
+      ]
+    },
+    {
+      "from": "planck",
+      "to": "gauss",
+      "path": [
+        "planck",
+        "gauss"
+      ]
+    },
+    {
+      "from": "planck",
+      "to": "main-square",
+      "path": [
+        "planck",
+        "einstein",
+        "main-square"
+      ]
+    },
+    {
+      "from": "planck",
+      "to": "meson",
+      "path": [
+        "planck",
+        "meson"
+      ]
+    },
+    {
+      "from": "planck",
+      "to": "newton",
+      "path": [
+        "planck",
+        "einstein",
+        "newton"
+      ]
+    },
+    {
+      "from": "planck",
+      "to": "planck",
+      "path": [
+        "planck"
+      ]
+    }
+  ]
+}

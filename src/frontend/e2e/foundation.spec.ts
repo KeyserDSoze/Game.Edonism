@@ -1,3 +1,5 @@
+import { cityBoard, isAdjacentStreet, shortestStreetPath } from "../src/features/city/board";
+import canonicalRoutes from "../../shared/board/canonical-street-paths.v1.json";
 import { expect, test } from "@playwright/test";
 
 test("original city board loads with 30 spaces and selectable streets", async ({ page }) => {
@@ -70,4 +72,32 @@ test("mobile layout keeps the board and accessible space picker usable without h
   await expect(page.getByTestId("selected-slot")).toHaveText("W-02");
   const overflows = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2);
   expect(overflows).toBe(false);
+});
+
+
+test("all 49 Development street paths match the pinned cross-language contract", () => {
+  expect(canonicalRoutes.format).toBe("edonism-canonical-street-paths-v1");
+  expect(canonicalRoutes.boardVersion).toBe(cityBoard.version);
+  expect(canonicalRoutes.paths).toHaveLength(49);
+  const known = cityBoard.streets.map(street => street.id);
+  const pairs = new Set<string>();
+  for (const route of canonicalRoutes.paths) {
+    pairs.add(`${route.from}:${route.to}`);
+    const actual = shortestStreetPath(route.from, route.to);
+    expect(actual, `${route.from} -> ${route.to}`).toEqual(route.path);
+    expect(route.path[0]).toBe(route.from);
+    expect(route.path.at(-1)).toBe(route.to);
+    expect(new Set(route.path).size).toBe(route.path.length);
+    for (let i = 1; i < route.path.length; i++)
+      expect(isAdjacentStreet(route.path[i - 1], route.path[i])).toBe(true);
+  }
+  expect(pairs.size).toBe(49);
+  expect(pairs).toEqual(new Set(known.flatMap(from =>
+    known.map(to => `${from}:${to}`))));
+  expect(shortestStreetPath("gauss", "einstein"))
+    .toEqual(["gauss", "main-square", "einstein"]);
+  expect(shortestStreetPath("newton", "planck"))
+    .toEqual(["newton", "einstein", "planck"]);
+  expect(shortestStreetPath("invalid", "gauss")).toBeNull();
+  expect(shortestStreetPath("gauss", "invalid")).toBeNull();
 });

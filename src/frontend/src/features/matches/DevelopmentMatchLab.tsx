@@ -560,6 +560,7 @@ export function DevelopmentMatchLab({
   const nearestVisibleLotByRival = otherSeatRoutes && opponentLots
     ? otherSeatRoutes.others.map(other => ({
       otherPlayerId: other.otherPlayerId,
+      playerRoute: other, // #92: audited same-revision other-seat route
       route: visibleOpponentLots.find(lot =>
         lot.ownerPlayerId === other.otherPlayerId) ?? null,
     }))
@@ -2333,13 +2334,36 @@ export function DevelopmentMatchLab({
                         <p className="font-semibold">{t("dev.rivalNearestTitle")}</p>
                         <ol data-testid="dev-rival-nearest-list"
                           className="grid gap-2 sm:grid-cols-2">
-                          {nearestVisibleLotByRival.map(({ otherPlayerId, route }) => (
+                          {nearestVisibleLotByRival.map(({ otherPlayerId, playerRoute, route }) => (
                             <li key={otherPlayerId}
                               data-testid={`dev-rival-nearest-${otherPlayerId}`}
                               data-steps={route?.streetSteps ?? ""}
                               data-slot={route?.slotId ?? ""}
                               className="min-w-0 space-y-1 rounded-md border border-border p-2">
                               <span className="block font-semibold">{otherPlayerId}</span>
+                              <span className="block text-muted-foreground"
+                                data-testid={`dev-rival-public-player-${otherPlayerId}`}
+                                data-steps={playerRoute.streetSteps}
+                                data-path={playerRoute.streetPath.join(">")}>
+                                {t("dev.rivalPublicPosition", {
+                                  street: streetById(playerRoute.streetId)?.name ?? playerRoute.streetId,
+                                  steps: t("dev.routeSteps", { count: playerRoute.streetSteps }),
+                                })}
+                              </span>
+                              <Button type="button" size="sm" variant="outline"
+                                className="h-8 w-full"
+                                data-testid={`dev-focus-rival-player-${otherPlayerId}`}
+                                aria-label={t("dev.focusRivalPlayer", { player: otherPlayerId })}
+                                onClick={() => onTacticalFocus({
+                                  kind: "player",
+                                  matchId: session.matchId,
+                                  revision: session.state.revision,
+                                  actorId,
+                                  targetId: otherPlayerId,
+                                  streetPath: [...playerRoute.streetPath],
+                                })}>
+                                {t("dev.viewRivalPlayer")}
+                              </Button>
                               {route ? (
                                 <>
                                   <span className="block text-muted-foreground">
@@ -2362,7 +2386,7 @@ export function DevelopmentMatchLab({
                                       targetId: route.slotId,
                                       streetPath: [...route.streetPath],
                                     })}>
-                                    {t("dev.focusOnMap")}
+                                    {t("dev.viewRivalLot")}
                                   </Button>
                                 </>
                               ) : (

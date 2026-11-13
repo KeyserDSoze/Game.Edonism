@@ -72,6 +72,8 @@ type MockOptions = {
   delayFirstAliceOtherSeatRoutes?: boolean;
   invalidOpponentLots?: "revision" | "owner" | "path" | "posture" | "count" | "steps";
   delayFirstAliceOpponentLots?: boolean;
+  invalidTacticalOverview?: "outer-revision" | "outer-player" | "nested-origin"
+    | "missing-uncontrolled" | "missing-other" | "missing-lots";
   delayRotationAcknowledgement?: boolean;
 };
 
@@ -331,6 +333,109 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           playerId: options.invalidPresence && id === "bob" ? "intruder" : id,
           isActive: presentSeats.has(id),
         })),
+      } });
+    }
+
+    // #88: one atomic, bearer-bound tactical snapshot replaces three client
+    // GETs. Retain legacy mocked paths below for explicit API compatibility.
+    if (path.endsWith("/tactical-overview")) {
+      const state = snapshot();
+      const origin = streets[seat];
+      const fields = {
+        matchId: state.matchId, playerId: seat, round: state.round,
+        verifiedRevision: revision, fromStreetId: origin,
+      };
+      const opponentRoutes = state.controlledActivities
+        .filter(lot => lot.ownerPlayerId !== seat)
+        .map(lot => {
+          const streetId = lot.slotId.startsWith("N-") ? "gauss" : "einstein";
+          const streetPath = shortestStreetPath(origin, streetId) ?? [];
+          return {
+            slotId: lot.slotId, ownerPlayerId: lot.ownerPlayerId,
+            posture: lot.posture, streetId, streetSteps: streetPath.length - 1,
+            streetPath,
+          };
+        }).sort((a, b) => a.streetSteps - b.streetSteps
+          || a.ownerPlayerId.localeCompare(b.ownerPlayerId)
+          || a.slotId.localeCompare(b.slotId));
+      if (opponentRoutes.length && options.invalidOpponentLots) {
+        const first = opponentRoutes[0];
+        if (options.invalidOpponentLots === "owner") first.ownerPlayerId = seat;
+        if (options.invalidOpponentLots === "path") first.streetPath = [origin, "main-square"];
+        if (options.invalidOpponentLots === "posture") first.posture = 99;
+        if (options.invalidOpponentLots === "steps") first.streetSteps++;
+        if (options.invalidOpponentLots === "count") opponentRoutes.pop();
+      }
+
+      const otherPlayers = seats.filter(id => id !== seat).map(id => {
+        const streetId = streets[id];
+        const streetPath = shortestStreetPath(origin, streetId) ?? [];
+        const controls = state.controlledActivities.filter(c => c.ownerPlayerId === id);
+        return {
+          otherPlayerId: id, streetId, streetSteps: streetPath.length - 1,
+          streetPath, controlledActivities: controls.length,
+          standingHenchmen: controls.filter(c => c.posture === 0).length,
+        };
+      }).sort((a, b) => a.streetSteps - b.streetSteps
+        || a.otherPlayerId.localeCompare(b.otherPlayerId));
+      if (otherPlayers.length && options.invalidOtherSeatRoutes) {
+        const first = otherPlayers[0];
+        if (options.invalidOtherSeatRoutes === "path") first.streetPath = [origin, "main-square"];
+        if (options.invalidOtherSeatRoutes === "steps") first.streetSteps++;
+        if (options.invalidOtherSeatRoutes === "count") first.controlledActivities++;
+        if (options.invalidOtherSeatRoutes === "identity") first.otherPlayerId = "intruder";
+      }
+
+      const unowned = state.boardActivities.filter(card =>
+        !state.controlledActivities.some(c => c.slotId === card.slotId));
+      const uncontrolledRoutes = unowned.map(card => {
+        const streetId = card.slotId.startsWith("N-") ? "gauss" : "einstein";
+        const streetPath = shortestStreetPath(origin, streetId) ?? [];
+        const streetSteps = streetPath.length - 1
+          + (options.invalidRouteSteps && card.slotId === "S-02" ? 1 : 0);
+        return {
+          ...card, streetId, streetSteps,
+          streetPath: options.invalidRoutePath && card.slotId === "S-02"
+            ? [origin, streetId] : streetPath,
+        };
+      }).sort((a, b) => a.streetSteps - b.streetSteps
+        || a.slotId.localeCompare(b.slotId));
+
+      // Snapshot is captured BEFORE any delayed response: the old actor's
+      // result can never be relabeled with a newer seat/revision.
+      if (seat === "alice" && (
+        (options.delayFirstAliceRoutes && !delayedAliceRoutes)
+        || (options.delayFirstAliceOtherSeatRoutes && !delayedAliceOtherSeats)
+        || (options.delayFirstAliceOpponentLots && !delayedAliceOpponentLots)
+      )) {
+        delayedAliceRoutes = true;
+        delayedAliceOtherSeats = true;
+        delayedAliceOpponentLots = true;
+        await new Promise(resolve => setTimeout(resolve, 900));
+      }
+      const defect = options.invalidTacticalOverview;
+      return reply({ status: 200, json: {
+        ...fields,
+        playerId: defect === "outer-player" ? "intruder" : seat,
+        verifiedRevision: defect === "outer-revision" ? revision + 1 : revision,
+        uncontrolled: defect === "missing-uncontrolled" ? null : {
+          ...fields,
+          verifiedRevision: options.invalidRoutePlanner ? revision + 5 : revision,
+          routes: uncontrolledRoutes,
+        },
+        otherPlayers: defect === "missing-other" ? null : {
+          ...fields,
+          verifiedRevision: options.invalidOtherSeatRoutes === "revision"
+            ? revision + 99 : revision,
+          fromStreetId: defect === "nested-origin" ? "invalid-street" : origin,
+          others: otherPlayers,
+        },
+        opponentControlledLots: defect === "missing-lots" ? null : {
+          ...fields,
+          verifiedRevision: options.invalidOpponentLots === "revision"
+            ? revision + 99 : revision,
+          routes: opponentRoutes,
+        },
       } });
     }
 
@@ -2846,7 +2951,7 @@ test("late previous-seat route response cannot overwrite current actor", async (
   await page.goto("/");
   await page.getByTestId("dev-create").click();
   await expect.poll(() => observedHeaders.some(({ path, token }) =>
-    path.endsWith("/uncontrolled-routes") && token === "a".repeat(64))).toBe(true);
+    path.endsWith("/tactical-overview") && token === "a".repeat(64))).toBe(true);
   await page.getByTestId("dev-seat-bob").click();
   await expect(page.getByTestId("dev-route-S-02")).toHaveAttribute("data-steps", "0");
   await page.waitForTimeout(1100);
@@ -2932,7 +3037,7 @@ test("late old-seat public opponent routes cannot replace the newly selected sea
   await page.goto("/");
   await page.getByTestId("dev-create").click();
   await expect.poll(() => observedHeaders.some(({ path, token }) =>
-    path.endsWith("/other-player-routes") && token === "a".repeat(64))).toBe(true);
+    path.endsWith("/tactical-overview") && token === "a".repeat(64))).toBe(true);
   await page.getByTestId("dev-seat-bob").click();
   await expect(page.getByTestId("dev-other-seat-alice"))
     .toHaveAttribute("data-path", "einstein>main-square>gauss");
@@ -3271,7 +3376,7 @@ test("nearby opponent-lot filter is public-only and resets when switching seats"
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
 });
 
-test("legacy tactical panels remain public and actor-scoped before atomic overview UI migration", async ({ page }) => {
+test("all three tactical panels preserve public actor scope after atomic overview migration", async ({ page }) => {
   await mockMatchApi(page, { routePlannerWithFreeCards: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
@@ -3288,4 +3393,78 @@ test("legacy tactical panels remain public and actor-scoped before atomic overvi
   await expect(page.getByTestId("dev-other-seats")).toHaveCount(0);
   await expect(page.getByTestId("dev-opponent-lots")).toHaveCount(0);
   await expect(page.getByTestId("dev-route-planner")).toHaveCount(0);
+});
+
+test("#88: one tactical GET per seat/revision, no legacy route GETs", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { routePlannerWithFreeCards: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-other-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await expect(page.getByTestId("dev-route-N-02")).toBeVisible();
+  const tactical = () => observedHeaders.filter(x => x.path.endsWith("/tactical-overview"));
+  const legacy = () => observedHeaders.filter(x =>
+    /\/(uncontrolled-routes|other-player-routes|opponent-controlled-routes)$/.test(x.path));
+  expect(tactical()).toHaveLength(1);
+  expect(tactical()[0].token).toBe("a".repeat(64));
+  expect(legacy()).toHaveLength(0);
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-other-seat-alice")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
+  await expect(page.getByTestId("dev-route-S-02")).toBeVisible();
+  expect(tactical()).toHaveLength(2);
+  expect(tactical()[1].token).toBe("b".repeat(64));
+  await page.getByTestId("dev-seat-alice").click();
+  await expect(page.getByTestId("dev-other-seat-bob")).toBeVisible();
+  expect(tactical()).toHaveLength(3);
+  await page.locator('[data-testid^="dev-move-"]:not([disabled])').first().click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-other-seat-bob")).toBeVisible();
+  expect(tactical()).toHaveLength(4);
+  expect(legacy()).toHaveLength(0);
+});
+
+for (const defect of ["outer-revision", "outer-player", "nested-origin",
+  "missing-uncontrolled", "missing-other", "missing-lots"] as const) {
+  test(`#88: corrupt atomic envelope ${defect} hides ALL tactical panels`, async ({ page }) => {
+    await mockMatchApi(page, { routePlannerWithFreeCards: true, invalidTacticalOverview: defect });
+    await page.goto("/");
+    await page.getByTestId("dev-create").click();
+    await expect(page.getByTestId("dev-other-seats-unavailable")).toBeVisible();
+    await expect(page.getByTestId("dev-routes-unavailable")).toBeVisible();
+    await expect(page.getByTestId("dev-opponent-lots-unavailable")).toBeVisible();
+    await expect(page.getByTestId("dev-focus-player-bob")).toHaveCount(0);
+    await expect(page.getByTestId("dev-focus-opponent-lot-S-01")).toHaveCount(0);
+    await expect(page.getByTestId("dev-focus-activity-N-02")).toHaveCount(0);
+    await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+    await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  });
+}
+
+test("#88: forged nested other-player path blocks ALL three tactical views", async ({ page }) => {
+  await mockMatchApi(page, { routePlannerWithFreeCards: true, invalidOtherSeatRoutes: "path" });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  for (const id of ["dev-other-seats-unavailable", "dev-routes-unavailable",
+    "dev-opponent-lots-unavailable"]) await expect(page.getByTestId(id)).toBeVisible();
+  await expect(page.getByTestId("dev-focus-activity-N-02")).toHaveCount(0);
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+});
+
+test("#88: eight-seat preview uses one actor-scoped atomic request", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { playerCount: 8 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-other-seats-list").locator("li")).toHaveCount(7);
+  expect(observedHeaders.filter(e => e.path.endsWith("/tactical-overview"))).toHaveLength(1);
+  await page.getByTestId("dev-seat-heidi").click();
+  await expect(page.getByTestId("dev-other-seat-alice")).toHaveAttribute("data-steps", "0");
+  const tactical = observedHeaders.filter(e => e.path.endsWith("/tactical-overview"));
+  expect(tactical).toHaveLength(2);
+  expect(tactical[1].token).toBe("h".repeat(64));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
 });

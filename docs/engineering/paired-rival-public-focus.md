@@ -11,7 +11,7 @@ The existing independent `verifiedTacticalFocus` validator checks the player or 
 IT/EN visible labels distinguish **View player** and **View lot**; each has an actor-specific accessible name. DOM positions include public street and canonical edge count, supporting keyboard, mobile and non-WebGL devices.
 
 - xUnit [2,4,8]: every other player's canonical public path and nearest controlled-lot path from one verified overview, stable nearest order, unchanged checkpoint and valid audit.
-- Mocked Playwright [2,8]: filter/empty-lot behavior and independent player focus, keyboard, narrow mobile and IT/EN, forged atomic-scope rejection, seat/token rotation and no extra tactical reads.
+- Mocked Playwright [2,8]: filter/empty-lot behavior and independent player focus, keyboard, narrow mobile and IT/EN, forged atomic-scope rejection, seat/token rotation and no extra tactical reads. The existing English mobile WebGL-disabled fallback test now also exercises this paired player button and asserts that forged other-seat paths cannot render it.
 - Live Playwright: two real .NET seat credentials, paired player/lot paths independently matched to bearer-scoped server projection, no additional tactical reads, unchanged public revision/audit.
 
 This does not resolve game rules #4, PvP engine #6 or Production identity #13. Close [#92](https://github.com/KeyserDSoze/Game.Edonism/issues/92) only after three green CI jobs on the exact final `main` SHA.

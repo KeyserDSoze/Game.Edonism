@@ -3651,7 +3651,8 @@ test("#90: nearest rival summary includes empty owners across eight authenticate
   await page.getByTestId("dev-opponent-lots-owner-filter").selectOption("heidi");
   await expect(list.locator("li")).toHaveCount(7);
   await expect(page.getByTestId("dev-focus-rival-nearest-bob")).toHaveCount(0);
-  await expect(list.locator("button")).toHaveCount(0);
+  await expect(list.locator('[data-testid^="dev-focus-rival-nearest-"]')).toHaveCount(0);
+  await expect(list.locator('[data-testid^="dev-focus-rival-player-"]')).toHaveCount(7);
   await page.getByTestId("dev-opponent-lots-owner-filter").selectOption("bob");
   await expect(page.getByTestId("dev-rival-nearest-bob")).toHaveAttribute("data-slot", "S-01");
   await page.getByTestId("dev-seat-heidi").click();
@@ -3680,6 +3681,7 @@ test("#90: forged atomic tactical data never produces nearest rival map focus", 
   await expect(page.getByTestId("dev-opponent-lots-unavailable")).toBeVisible();
   await expect(page.getByTestId("dev-rival-nearest-summary")).toHaveCount(0);
   await expect(page.getByTestId("dev-focus-rival-nearest-bob")).toHaveCount(0);
+  await expect(page.getByTestId("dev-focus-rival-player-bob")).toHaveCount(0);
   await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
 });
 
@@ -3704,4 +3706,77 @@ test("#90: nearest-rival focus never survives seat switch, token rotation or loc
   await expect(page.getByTestId("dev-rival-nearest-summary")).toHaveCount(0);
   expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview")))
     .toHaveLength(3);
+});
+
+
+test("#92: public rival and nearest held lot have distinct mobile IT/EN keyboard focus",
+  async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const other = page.getByTestId("dev-rival-public-player-bob");
+  const playerButton = page.getByTestId("dev-focus-rival-player-bob");
+  const lotButton = page.getByTestId("dev-focus-rival-nearest-bob");
+  const verifiedPath = await page.getByTestId("dev-other-seat-bob").getAttribute("data-path");
+  expect(verifiedPath).toBeTruthy();
+  await expect(other).toHaveAttribute("data-path", verifiedPath!);
+  await expect(other).toContainText("Posizione pubblica:");
+  await playerButton.focus();
+  await expect(playerButton).toBeFocused();
+  await playerButton.press("Enter");
+  await expect(page.getByTestId("city-tactical-target")).toContainText("bob");
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute(
+    "data-focus-path", verifiedPath!);
+  await lotButton.click();
+  await expect(page.getByTestId("city-tactical-target")).toContainText("S-01");
+  await page.getByTestId("dev-opponent-lots-nearby-toggle").click();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(lotButton).toHaveCount(0);
+  await expect(playerButton).toBeVisible();
+  await playerButton.click();
+  await expect(page.getByTestId("city-tactical-target")).toContainText("bob");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(other).toContainText("Public player position:");
+  await expect(playerButton).toHaveAttribute("aria-label",
+    "View bob's verified public position on map");
+  await expect(playerButton).toContainText("View player");
+  await page.getByTestId("dev-opponent-lots-owner-filter").selectOption("bob");
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(playerButton).toBeVisible();
+  expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview")))
+    .toHaveLength(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("#92: eight-seat owner focus survives empty-lot filters, not token/seat switch",
+  async ({ page }) => {
+  test.setTimeout(60_000);
+  const { observedHeaders } = await mockMatchApi(page, { playerCount: 8 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  await page.getByTestId("dev-create").click();
+  const list = page.getByTestId("dev-rival-nearest-list");
+  await expect(list.locator('[data-testid^="dev-focus-rival-player-"]')).toHaveCount(7);
+  await expect(page.getByTestId("dev-focus-rival-player-alice")).toHaveCount(0);
+  await page.getByTestId("dev-opponent-lots-owner-filter").selectOption("heidi");
+  await expect(page.getByTestId("dev-rival-nearest-empty-heidi")).toBeVisible();
+  await expect(list.locator('[data-testid^="dev-focus-rival-nearest-"]')).toHaveCount(0);
+  const verifiedPath = await page.getByTestId("dev-other-seat-heidi").getAttribute("data-path");
+  expect(verifiedPath).toBeTruthy();
+  await page.getByTestId("dev-focus-rival-player-heidi").click();
+  await expect(page.getByTestId("city-renderer")).toHaveAttribute(
+    "data-focus-path", verifiedPath!);
+  await page.getByTestId("dev-rotate-token").click();
+  await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await page.getByTestId("dev-seat-heidi").click();
+  await expect(page.getByTestId("dev-focus-rival-player-heidi")).toHaveCount(0);
+  await expect(page.getByTestId("dev-focus-rival-player-alice")).toBeVisible();
+  expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview")))
+    .toHaveLength(3);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
 });

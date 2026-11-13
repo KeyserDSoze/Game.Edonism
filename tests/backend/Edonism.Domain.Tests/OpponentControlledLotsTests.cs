@@ -400,7 +400,7 @@ public sealed class OpponentControlledLotsTests
                 }
             }
             // The city hall/main square has no activity slots to control.
-            Assert.Empty(all.Where(route => route.StreetId == "main-square"));
+            Assert.DoesNotContain(all, route => route.StreetId == "main-square");
             Assert.DoesNotContain(all, route => route.StreetId == "unmapped-road");
         }
         Assert.Equal(before, JsonSerializer.Serialize(match.CaptureCheckpoint()));

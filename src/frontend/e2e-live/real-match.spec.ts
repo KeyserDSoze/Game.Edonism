@@ -3039,6 +3039,27 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
   await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
   await expect(page.getByTestId("dev-focus-rival-player-bob")).toBeVisible();
   await streetFilter.selectOption("");
+  // #95: a reset remains a pure browser interaction for the authenticated
+  // Alice bearer; no additional tactical-overview GET or match revision.
+  const aliceOwner = page.getByTestId("dev-opponent-lots-owner-filter");
+  await aliceOwner.selectOption("bob");
+  await streetFilter.selectOption(nearestBob.streetId);
+  await postureFilter.selectOption(nearestBob.posture === 0 ? "standing" : "fallen");
+  const aliceNearby = page.getByTestId("dev-opponent-lots-nearby-toggle");
+  await aliceNearby.click();
+  await expect(page.getByTestId("dev-opponent-lots-active-filter-summary"))
+    .toContainText("4 filtri attivi");
+  await page.getByTestId("dev-focus-rival-player-bob").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+  await page.getByTestId("dev-opponent-lots-reset-filters").click();
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(aliceOwner).toHaveValue("");
+  await expect(streetFilter).toHaveValue("");
+  await expect(postureFilter).toHaveValue("all");
+  await expect(aliceNearby).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("dev-opponent-lots-active-filter-summary")).toHaveCount(0);
+  await expect(page.getByTestId("dev-rival-nearest-bob"))
+    .toHaveAttribute("data-slot", nearestBob.slotId);
   await expect(page.getByTestId("dev-opponent-lot-posture-" + nearestBob.slotId))
     .toBeVisible();
   expect(readPaths).toHaveLength(1);
@@ -3103,6 +3124,27 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
     await expect(bobPage.getByTestId("dev-rival-nearest-empty-alice")).toBeVisible();
     await expect(bobPage.getByTestId("dev-focus-rival-player-alice")).toBeVisible();
     await bobStreetFilter.selectOption("");
+    // #95: an independent real Bob bearer can clear the same four local view
+    // preferences without disclosing Alice's token or changing shared state.
+    const bobOwner = bobPage.getByTestId("dev-opponent-lots-owner-filter");
+    await bobOwner.selectOption("alice");
+    await bobStreetFilter.selectOption(nearestAlice.streetId);
+    await bobPostureFilter.selectOption(nearestAlice.posture === 0 ? "standing" : "fallen");
+    const bobNearby = bobPage.getByTestId("dev-opponent-lots-nearby-toggle");
+    await bobNearby.click();
+    await expect(bobPage.getByTestId("dev-opponent-lots-active-filter-summary"))
+      .toContainText("4 filtri attivi");
+    await bobPage.getByTestId("dev-focus-rival-player-alice").click();
+    await expect(bobPage.getByTestId("city-tactical-focus")).toBeVisible();
+    await bobPage.getByTestId("dev-opponent-lots-reset-filters").click();
+    await expect(bobPage.getByTestId("city-tactical-focus")).toHaveCount(0);
+    await expect(bobOwner).toHaveValue("");
+    await expect(bobStreetFilter).toHaveValue("");
+    await expect(bobPostureFilter).toHaveValue("all");
+    await expect(bobNearby).toHaveAttribute("aria-pressed", "false");
+    await expect(bobPage.getByTestId("dev-rival-nearest-alice"))
+      .toHaveAttribute("data-slot", nearestAlice.slotId);
+    await expect(bobPage.getByTestId("dev-opponent-lots-active-filter-summary")).toHaveCount(0);
 
     await expect(bobPage.getByTestId("dev-rival-nearest-bob")).toHaveCount(0);
     expect(bobBrowserReads).toEqual([bobToken]);

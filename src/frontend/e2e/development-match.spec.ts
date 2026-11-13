@@ -3245,6 +3245,17 @@ test("English mobile tactical focus remains accessible when WebGL is unavailable
   await postureFallback.selectOption("standing");
   await expect(page.getByTestId("dev-rival-nearest-bob")).toHaveAttribute("data-slot", "S-01");
   await postureFallback.selectOption("all");
+  // #95: all active predicates can be cleared with Enter without a 3D renderer.
+  await streetFallback.selectOption("gauss");
+  await postureFallback.selectOption("fallen");
+  await expect(page.getByTestId("dev-opponent-lots-active-filter-summary"))
+    .toContainText("2 active filters");
+  const resetFallback = page.getByTestId("dev-opponent-lots-reset-filters");
+  await resetFallback.focus();
+  await page.keyboard.press("Enter");
+  await expect(streetFallback).toHaveValue("");
+  await expect(postureFallback).toHaveValue("all");
+  await expect(page.getByTestId("dev-opponent-lots-active-filters")).toHaveCount(0);
   // #92: the paired player focus must also be a DOM-only control when
   // WebGL is disabled, without authorizing a command or new API read.
   const publicRival = page.getByTestId("dev-focus-rival-player-bob");
@@ -4010,7 +4021,112 @@ test("#94: forged public lot street ID makes all rival filters unavailable", asy
   await page.getByTestId("dev-create").click();
   await expect(page.getByTestId("dev-opponent-lots-unavailable")).toBeVisible();
   await expect(page.getByTestId("dev-opponent-lots-street-filter")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lots-reset-filters")).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lots-active-filter-summary")).toHaveCount(0);
   await expect(page.getByTestId("dev-rival-nearest-summary")).toHaveCount(0);
   await expect(page.getByTestId("dev-focus-opponent-lot-S-01")).toHaveCount(0);
   await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+});
+
+
+test("#95: four filters are summarized and cleared atomically via keyboard on mobile IT/EN",
+  async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { fallenHenchman: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  const owner = page.getByTestId("dev-opponent-lots-owner-filter");
+  const street = page.getByTestId("dev-opponent-lots-street-filter");
+  const posture = page.getByTestId("dev-opponent-lots-posture-filter");
+  const nearby = page.getByTestId("dev-opponent-lots-nearby-toggle");
+  const summary = page.getByTestId("dev-opponent-lots-active-filter-summary");
+  const reset = page.getByTestId("dev-opponent-lots-reset-filters");
+  await expect(reset).toHaveCount(0);
+  await owner.selectOption("bob");
+  await street.selectOption("einstein");
+  await posture.selectOption("fallen");
+  await nearby.click();
+  await expect(summary).toContainText("4 filtri attivi");
+  await expect(summary).toContainText("Giocatore: bob");
+  await expect(summary).toContainText("Strada: Einstein Avenue");
+  await expect(summary).toContainText("Solo vicini");
+  await expect(summary).toContainText("Postura: Solo atterrati");
+  await expect(page.getByTestId("dev-rival-nearest-empty-bob")).toBeVisible();
+  await page.getByTestId("dev-focus-rival-player-bob").click();
+  await expect(page.getByTestId("city-tactical-focus")).toBeVisible();
+
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await expect(summary).toContainText("4 active filters");
+  await expect(summary).toContainText("Player: bob");
+  await expect(summary).toContainText("Street: Einstein Avenue");
+  await expect(reset).toHaveAttribute("aria-label", "Clear all filters");
+  await reset.focus();
+  await expect(reset).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("city-tactical-focus")).toHaveCount(0);
+  await expect(owner).toHaveValue("");
+  await expect(street).toHaveValue("");
+  await expect(posture).toHaveValue("all");
+  await expect(nearby).toHaveAttribute("aria-pressed", "false");
+  await expect(summary).toHaveCount(0);
+  await expect(reset).toHaveCount(0);
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toHaveAttribute("data-posture", "1");
+  await expect(page.getByTestId("dev-rival-nearest-bob")).toHaveAttribute("data-slot", "S-01");
+  expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview"))).toHaveLength(1);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+});
+
+test("#95: eight-seat reset preserves verified roster and actor/token capability isolation",
+  async ({ page }) => {
+  test.setTimeout(60_000);
+  const { observedHeaders } = await mockMatchApi(page, { playerCount: 8 });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  await page.getByTestId("dev-create").click();
+  const owner = page.getByTestId("dev-opponent-lots-owner-filter");
+  const street = page.getByTestId("dev-opponent-lots-street-filter");
+  const posture = page.getByTestId("dev-opponent-lots-posture-filter");
+  const nearby = page.getByTestId("dev-opponent-lots-nearby-toggle");
+  const reset = page.getByTestId("dev-opponent-lots-reset-filters");
+  const summary = page.getByTestId("dev-opponent-lots-active-filter-summary");
+  await expect(page.getByTestId("dev-rival-nearest-list").locator("li")).toHaveCount(7);
+  await owner.selectOption("heidi");
+  await street.selectOption("gauss");
+  await posture.selectOption("fallen");
+  await nearby.click();
+  await expect(summary).toContainText("4 filtri attivi");
+  await expect(page.getByTestId("dev-rival-nearest-empty-heidi")).toBeVisible();
+  await expect(page.getByTestId("dev-focus-rival-player-heidi")).toBeVisible();
+  await reset.click();
+  await expect(reset).toHaveCount(0);
+  await expect(page.getByTestId("dev-rival-nearest-list").locator("li")).toHaveCount(7);
+  await expect(page.getByTestId("dev-opponent-lot-S-01")).toBeVisible();
+  await expect(owner).toHaveValue("");
+  await expect(street).toHaveValue("");
+  await expect(posture).toHaveValue("all");
+  await expect(nearby).toHaveAttribute("aria-pressed", "false");
+  await street.selectOption("einstein");
+  await posture.selectOption("standing");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(summary).toHaveCount(0);
+  await expect(owner).toHaveValue("");
+  await expect(street).toHaveValue("");
+  await expect(posture).toHaveValue("all");
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
+  await owner.selectOption("alice");
+  await street.selectOption("gauss");
+  await expect(summary).toContainText("2 filtri attivi");
+  await page.getByTestId("dev-rotate-token").click();
+  await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+  await expect(reset).toHaveCount(0);
+  await expect(owner).toHaveValue("");
+  await expect(street).toHaveValue("");
+  await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
+  expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview"))).toHaveLength(3);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
 });

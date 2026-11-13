@@ -181,4 +181,56 @@ public sealed class OtherPlayerRoutesTests
         Assert.Equal(match.PrivateHandForActor("player-2")!.CardIds,
             restored.PrivateHandForActor("player-2")!.CardIds);
     }
+
+    // #92: Both public target types originate from the same audited actor-scoped overview.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void PairedRivalAndNearestOwnedLotPathsAreCanonicalAndNonMutating(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = FullMatch(count);
+        var snapshot = match.Snapshot();
+        var checkpoint = JsonSerializer.Serialize(match.CaptureCheckpoint());
+
+        foreach (var actor in snapshot.Players)
+        {
+            var overview = match.VerifiedTacticalOverviewForActor(actor.PlayerId)!;
+            Assert.Equal(snapshot.Revision, overview.VerifiedRevision);
+            Assert.Equal(count - 1, overview.OtherPlayers.Others.Count);
+            Assert.Equal(overview.VerifiedRevision,
+                overview.OpponentControlledLots.VerifiedRevision);
+            Assert.DoesNotContain(overview.OtherPlayers.Others,
+                other => other.OtherPlayerId == actor.PlayerId);
+
+            foreach (var other in overview.OtherPlayers.Others)
+            {
+                var target = Assert.Single(snapshot.Players,
+                    player => player.PlayerId == other.OtherPlayerId);
+                Assert.Equal(board.ShortestStreetPath(actor.StreetId, target.StreetId),
+                    other.StreetPath);
+                Assert.Equal(board.ShortestStreetDistance(actor.StreetId, target.StreetId),
+                    other.StreetSteps);
+
+                var owned = overview.OpponentControlledLots.Routes
+                    .Where(route => route.OwnerPlayerId == other.OtherPlayerId).ToArray();
+                if (owned.Length == 0)
+                    continue; // The player remains a valid read-only target.
+                var nearest = owned[0];
+                var street = Assert.Single(board.Slots,
+                    slot => slot.Id == nearest.SlotId).StreetId;
+                Assert.Equal(board.ShortestStreetPath(actor.StreetId, street),
+                    nearest.StreetPath);
+                Assert.Equal(board.ShortestStreetDistance(actor.StreetId, street),
+                    nearest.StreetSteps);
+                Assert.Equal(owned.OrderBy(route => route.StreetSteps)
+                    .ThenBy(route => route.SlotId, StringComparer.Ordinal), owned);
+            }
+        }
+
+        Assert.Equal(checkpoint, JsonSerializer.Serialize(match.CaptureCheckpoint()));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
 }

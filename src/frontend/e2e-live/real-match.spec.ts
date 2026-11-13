@@ -2963,7 +2963,7 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
     streetPath: string[] };
   type Tactical = {
     playerId: string; verifiedRevision: number;
-    otherPlayers: { others: { otherPlayerId: string }[] };
+    otherPlayers: { others: { otherPlayerId: string; streetSteps: number; streetPath: string[] }[] };
     opponentControlledLots: { routes: Lot[] };
   };
   const readPaths: string[] = [];
@@ -2995,6 +2995,14 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
   expect(bobTactical.playerId).toBe("bob");
   const aliceOther = aliceTactical.otherPlayers.others[0];
   expect(aliceOther.otherPlayerId).toBe("bob");
+  await expect(page.getByTestId("dev-rival-public-player-bob"))
+    .toHaveAttribute("data-path", aliceOther.streetPath.join(">"));
+  await expect(page.getByTestId("dev-rival-public-player-bob"))
+    .toHaveAttribute("data-steps", String(aliceOther.streetSteps));
+  await page.getByTestId("dev-focus-rival-player-bob").click();
+  await expect(page.getByTestId("city-renderer"))
+    .toHaveAttribute("data-focus-path", aliceOther.streetPath.join(">"));
+  await expect(page.getByTestId("city-tactical-target")).toContainText("bob");
   const nearestBob = aliceTactical.opponentControlledLots.routes
     .filter(lot => lot.ownerPlayerId === "bob")[0];
   expect(nearestBob).toBeDefined();
@@ -3042,6 +3050,13 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
     await expect(bobPage.getByTestId("dev-rival-nearest-bob")).toHaveCount(0);
     expect(bobBrowserReads).toEqual([bobToken]);
     expect(readPaths).toEqual([aliceToken]);
+    const bobOther = bobTactical.otherPlayers.others[0];
+    expect(bobOther.otherPlayerId).toBe("alice");
+    await expect(bobPage.getByTestId("dev-rival-public-player-alice"))
+      .toHaveAttribute("data-path", bobOther.streetPath.join(">"));
+    await bobPage.getByTestId("dev-focus-rival-player-alice").click();
+    await expect(bobPage.getByTestId("city-renderer"))
+      .toHaveAttribute("data-focus-path", bobOther.streetPath.join(">"));
     await bobPage.getByTestId("dev-focus-rival-nearest-alice").click();
     await expect(bobPage.getByTestId("city-renderer"))
       .toHaveAttribute("data-focus-path", nearestAlice.streetPath.join(">"));

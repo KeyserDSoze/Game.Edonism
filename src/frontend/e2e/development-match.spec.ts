@@ -4192,7 +4192,7 @@ test("#97: two-seat canonical street counts and keyboard quick selection on mobi
   await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
   await expect(summary).toContainText("Rival-held lots by public street");
   await expect(chooseEinstein).toHaveAttribute("aria-label",
-    "Filter Einstein Avenue: 1 rival lots, 0 standing and 1 fallen");
+    "Filter Einstein Avenue: 1 rival lot, 0 standing and 1 fallen");
   expect(observedHeaders.filter(x => x.path.endsWith("/tactical-overview")))
     .toHaveLength(1);
   await expect(page.getByTestId("dev-revision")).toHaveText("0");

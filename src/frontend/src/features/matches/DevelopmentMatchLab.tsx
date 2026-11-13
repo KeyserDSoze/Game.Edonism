@@ -576,6 +576,18 @@ export function DevelopmentMatchLab({
       total: onStreet.length,
       standing: onStreet.filter(route => route.posture === 0).length,
       fallen: onStreet.filter(route => route.posture === 1).length,
+      // #98: preserve the server-verified public rival roster's canonical
+      // order. Only other players with actual public lots are shown.
+      owners: (otherSeatRoutes?.others ?? []).map(other => {
+        const held = onStreet.filter(route =>
+          route.ownerPlayerId === other.otherPlayerId);
+        return {
+          ownerId: other.otherPlayerId,
+          total: held.length,
+          standing: held.filter(route => route.posture === 0).length,
+          fallen: held.filter(route => route.posture === 1).length,
+        };
+      }).filter(owner => owner.total > 0),
     };
   }) : null;
   const activeOpponentLotFilters = [
@@ -2352,6 +2364,54 @@ export function DevelopmentMatchLab({
                                     </span>
                                   </span>
                                 </Button>
+                                {street.owners.length > 0 ? (
+                                  <ol data-testid={`dev-opponent-street-owners-${street.streetId}`}
+                                    className="mt-2 space-y-1 pl-2">
+                                    {street.owners.map(owner => (
+                                      <li key={owner.ownerId}
+                                        data-testid={`dev-opponent-street-owner-row-${street.streetId}-${owner.ownerId}`}
+                                        data-total={owner.total}
+                                        data-standing={owner.standing}
+                                        data-fallen={owner.fallen}>
+                                        <Button type="button" size="sm" variant="outline"
+                                          className="h-auto min-h-10 w-full min-w-0 justify-start whitespace-normal p-2 text-left"
+                                          data-testid={`dev-opponent-street-owner-select-${street.streetId}-${owner.ownerId}`}
+                                          aria-pressed={selectedOpponentStreet === street.streetId
+                                            && selectedOpponentOwner === owner.ownerId}
+                                          aria-label={t("dev.opponentStreetOwnerSelect", {
+                                            owner: owner.ownerId,
+                                            street: street.name,
+                                            count: owner.total,
+                                            standing: owner.standing, fallen: owner.fallen,
+                                          })}
+                                          onClick={() => {
+                                            const pairActive = selectedOpponentStreet === street.streetId
+                                              && selectedOpponentOwner === owner.ownerId;
+                                            setSelectedOpponentStreetId(pairActive ? "" : street.streetId);
+                                            setSelectedOpponentOwnerId(pairActive ? "" : owner.ownerId);
+                                            // Pair selection is only display; stale map focus is invalid.
+                                            onTacticalFocus(null);
+                                          }}>
+                                          <span className="min-w-0">
+                                            <span className="block font-semibold">{owner.ownerId}</span>
+                                            <span className="block text-muted-foreground">
+                                              {t("dev.opponentStreetDistributionLots", { count: owner.total })}
+                                              {" · "}
+                                              {t("dev.opponentStreetDistributionPostures", {
+                                                standing: owner.standing, fallen: owner.fallen,
+                                              })}
+                                            </span>
+                                          </span>
+                                        </Button>
+                                      </li>
+                                    ))}
+                                  </ol>
+                                ) : (
+                                  <p className="mt-1 text-muted-foreground"
+                                    data-testid={`dev-opponent-street-no-owners-${street.streetId}`}>
+                                    {t("dev.opponentStreetNoOwners")}
+                                  </p>
+                                )}
                               </li>
                             ))}
                           </ol>

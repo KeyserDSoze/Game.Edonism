@@ -2773,3 +2773,99 @@ test("real .NET: tactical overview bundles all three scoped read-only public pro
   expect(finalResponse.status()).toBe(200);
   expect(await finalResponse.json()).toEqual(baseline);
 });
+
+test("#88: two real browser seats use one atomic tactical GET per revision and rotation",
+  async ({ page, browser, request }) => {
+  type Read = { path: string; token: string | undefined };
+  const aliceReads: Read[] = [];
+  const track = (reads: Read[], browserPage: Page) => {
+    browserPage.on("request", req => {
+      if (req.method() !== "GET") return;
+      const path = new URL(req.url()).pathname;
+      if (/\/(tactical-overview|uncontrolled-routes|other-player-routes|opponent-controlled-routes)$/.test(path))
+        reads.push({ path, token: req.headers()["x-edonism-dev-token"] });
+    });
+  };
+  const tactical = (reads: Read[]) => reads.filter(r => r.path.endsWith("/tactical-overview"));
+  const legacy = (reads: Read[]) => reads.filter(r =>
+    /\/(uncontrolled-routes|other-player-routes|opponent-controlled-routes)$/.test(r.path));
+  track(aliceReads, page);
+  const created = await startRealMatch(page);
+  const id = created.matchId;
+  const aliceToken = tokenFor(created, "alice");
+  const bobToken = tokenFor(created, "bob");
+  const url = `http://127.0.0.1:5080/api/dev/matches/${id}`;
+  await expect(page.getByTestId("dev-other-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("dev-routes-count")).toBeVisible();
+  await expect.poll(() => tactical(aliceReads).length).toBe(1);
+  expect(tactical(aliceReads)[0].token).toBe(aliceToken);
+  expect(legacy(aliceReads)).toHaveLength(0);
+
+  const secondContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const bobPage = await secondContext.newPage();
+    const bobReads: Read[] = [];
+    track(bobReads, bobPage);
+    await bobPage.goto("/");
+    await bobPage.getByTestId("dev-join-id").fill(id);
+    await bobPage.getByTestId("dev-join-token").fill(bobToken);
+    await bobPage.getByTestId("dev-join").click();
+    await expect(bobPage.getByTestId("dev-seat-bob")).toBeVisible();
+    await expect(bobPage.getByTestId("dev-other-seat-alice")).toBeVisible();
+    await expect(bobPage.getByTestId("dev-opponent-lots-list").locator("li")).toHaveCount(1);
+    await expect(bobPage.getByTestId("dev-routes-count")).toBeVisible();
+    await expect.poll(() => tactical(bobReads).length).toBe(1);
+    expect(tactical(bobReads)[0].token).toBe(bobToken);
+    expect(legacy(bobReads)).toHaveLength(0);
+
+    // Real .NET match mutation updates both independently authenticated
+    // browsers, but must yield only one new atomic tactical view each.
+    await page.locator('[data-testid^="dev-move-"]:not([disabled])').first().click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(bobPage.getByTestId("dev-revision")).toHaveText("1", { timeout: 12000 });
+    await expect(page.getByTestId("dev-other-seat-bob")).toBeVisible();
+    await expect(bobPage.getByTestId("dev-other-seat-alice")).toBeVisible();
+    await expect.poll(() => tactical(aliceReads).length).toBe(2);
+    await expect.poll(() => tactical(bobReads).length).toBe(2);
+    expect(legacy(aliceReads)).toHaveLength(0);
+    expect(legacy(bobReads)).toHaveLength(0);
+
+    const before = await request.get(url, { headers: auth(aliceToken) });
+    expect(before.status()).toBe(200);
+    const matchBeforeRotation = await before.json() as PublicMatch;
+    const auditBefore = await request.get(`${url}/audit`, { headers: auth(aliceToken) });
+    expect(auditBefore.status()).toBe(200);
+    const auditProof = await auditBefore.json();
+
+    await page.getByTestId("dev-rotate-token").click();
+    await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+    await expect(page.getByTestId("dev-other-seat-bob")).toBeVisible();
+    await expect.poll(() => tactical(aliceReads).length).toBe(3);
+    const rotatedToken = tactical(aliceReads)[2].token;
+    expect(rotatedToken).toMatch(/^[A-F0-9]{64}$/i);
+    expect(rotatedToken).not.toBe(aliceToken);
+    expect(tactical(bobReads)).toHaveLength(2);
+    expect(legacy(aliceReads)).toHaveLength(0);
+    expect(legacy(bobReads)).toHaveLength(0);
+
+    const old = await request.get(`${url}/tactical-overview`, {
+      headers: auth(aliceToken),
+    });
+    expect(old.status()).toBe(404);
+    expect(old.headers()["cache-control"]).toBe("no-store");
+    const rotatedOverview = await request.get(`${url}/tactical-overview`, {
+      headers: auth(rotatedToken!),
+    });
+    expect(rotatedOverview.status()).toBe(200);
+    expect((await rotatedOverview.json()).verifiedRevision).toBe(1);
+    const after = await request.get(url, { headers: auth(rotatedToken!) });
+    expect(after.status()).toBe(200);
+    expect(await after.json()).toEqual(matchBeforeRotation);
+    const auditAfter = await request.get(`${url}/audit`, { headers: auth(rotatedToken!) });
+    expect(auditAfter.status()).toBe(200);
+    expect(await auditAfter.json()).toEqual(auditProof);
+  } finally {
+    await secondContext.close();
+  }
+});

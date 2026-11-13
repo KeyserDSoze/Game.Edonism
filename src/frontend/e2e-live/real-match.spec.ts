@@ -1544,6 +1544,10 @@ test("real .NET: verified first-round audit exports only public events and posit
 test("real .NET: two browsers inspect verified first-round history without changing live moves", async ({
   page, browser, request,
 }) => {
+  // #102: this integration checks two live browsers, polled history, focus,
+  // rotation and revoked bearer access. Keep per-check timeouts and every
+  // assertion; allow a slower CI runner to finish the full scenario.
+  test.setTimeout(90_000);
   const match = await startRealMatch(page);
   const id = match.matchId;
   const aliceToken = tokenFor(match, "alice");

@@ -13,6 +13,7 @@ import { hasValidDevelopmentPublicEnvelope } from "./verifiedDevelopmentPublicEn
 import { hasValidDevelopmentCreatorResponse } from "./verifiedDevelopmentCreatorResponse";
 import { hasValidDevelopmentRotatedCredential } from "./verifiedDevelopmentRotatedCredential";
 import { hasValidDevelopmentTurnOptions } from "./verifiedDevelopmentTurnOptions";
+import { hasValidDevelopmentFirstRoundHand } from "./verifiedDevelopmentFirstRoundHand";
 import { buildVerifiedPublicAuditExport } from "./publicAuditExport";
 import {
   MaxPublicAuditImportBytes, buildOfflinePublicAuditReview,
@@ -770,9 +771,8 @@ export function DevelopmentMatchLab({
         // local exit, token rotation or a switch to another seat.
         if (!controller.signal.aborted && active?.matchId === matchId
           && active.seatId === seatId && active.token === actorToken
-          && result.matchId === matchId && result.playerId === seatId
-          && Array.isArray(result.cardIds)
-          && result.cardIds.every(id => typeof id === "string"))
+          // #118: never display a forged duplicate/short/blank card hand.
+          && hasValidDevelopmentFirstRoundHand(result, matchId, seatId))
           setHand(result);
       })
       .catch(() => {
@@ -1331,12 +1331,11 @@ export function DevelopmentMatchLab({
         || !hasValidDevelopmentTurnOptions(options, actor, state)
         || bootstrap.matchId.toLowerCase() !== id || state.matchId.toLowerCase() !== id
         || privateHand.matchId.toLowerCase() !== id || options.matchId.toLowerCase() !== id
-        || privateHand.playerId !== actor || options.playerId !== actor
+        || !hasValidDevelopmentFirstRoundHand(privateHand, id, actor)
+        || options.playerId !== actor
         || !state.players.some((p) => p.playerId === actor)
         || !Number.isInteger(state.revision) || state.revision < 0
         || options.revision !== state.revision || typeof options.canEndTurn !== "boolean"
-        || !Array.isArray(privateHand.cardIds)
-        || !privateHand.cardIds.every((card) => typeof card === "string")
         || !Array.isArray(options.freeMoveStreetIds)
         || !options.freeMoveStreetIds.every((street) => typeof street === "string"))
         throw new Error("invalid_seat_bootstrap");

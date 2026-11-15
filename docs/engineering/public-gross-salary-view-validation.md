@@ -34,3 +34,7 @@ bearer sessions must stay green. Close #105 only on **3/3 completed/success on
 the exact latest main HEAD**.
 
 [Issue #105](https://github.com/KeyserDSoze/Game.Edonism/issues/105)
+
+## Functional validation result
+
+[CI #43700125397](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43700125397) on implementation SHA `05074908588d8b7d0d2d3c3eabfb30278de9837e` completed **all 3/3 jobs successfully**: **665/665 xUnit**, **186/186 mocked Playwright** (6.4 minutes; seven #105 pure cases + one #105 mocked UI), and **40/40 live Playwright against real .NET** (8.3 minutes), **891/891** tests total. No skipped tests, no change to Production API, private card/token storage or server wallet rules. Issue closure still requires another 3/3 run on the final documentation-only HEAD.

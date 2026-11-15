@@ -55,6 +55,7 @@ type MockOptions = {
   missingGrossQuote?: boolean; // #107: a forged incomplete public quote set.
   forgedHigherRevisionSnapshot?: boolean; // #112: corrupt first public poll, never a real command.
   forgedNullAuditEventSnapshot?: boolean; // #113: corrupt first poll with events:[null].
+  forgedPhaseActorMismatchSnapshot?: boolean; // #116: phase1 with active Alice in forged poll.
   badControlSlot?: boolean;
   unknownOwner?: boolean;
   missingBoardCard?: boolean;
@@ -699,10 +700,12 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         return reply({ status: 503, json: { code: "temporarily_unavailable" } });
       }
       const supplied = request.headers()["if-none-match"] ?? null;
-      if ((options.forgedHigherRevisionSnapshot || options.forgedNullAuditEventSnapshot)
+      if ((options.forgedHigherRevisionSnapshot || options.forgedNullAuditEventSnapshot
+        || options.forgedPhaseActorMismatchSnapshot)
         && !forgedHigherRevisionSent) {
         forgedHigherRevisionSent = true;
-        const forgedRevision = options.forgedNullAuditEventSnapshot ? 98 : 99;
+        const forgedRevision = options.forgedPhaseActorMismatchSnapshot ? 97
+          : options.forgedNullAuditEventSnapshot ? 98 : 99;
         const invalidEtag = `W/"edonism-revision-${forgedRevision}"`;
         observedPolls.push({
           status: 200, supplied, etag: invalidEtag,
@@ -710,9 +713,11 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         });
         return reply({
           status: 200, headers: { ETag: invalidEtag, "Cache-Control": "no-store" },
-          json: options.forgedNullAuditEventSnapshot
-            ? { ...snapshot(), revision: forgedRevision, events: [null] }
-            : { ...snapshot(), revision: forgedRevision, players: null },
+          json: options.forgedPhaseActorMismatchSnapshot
+            ? { ...snapshot(), revision: forgedRevision, phase: 1, activePlayerId: "alice" }
+            : options.forgedNullAuditEventSnapshot
+              ? { ...snapshot(), revision: forgedRevision, events: [null] }
+              : { ...snapshot(), revision: forgedRevision, players: null },
         });
       }
       if (options.overloadFirstConditionalWait && !firstOverloadedPoll
@@ -1133,6 +1138,44 @@ test("#113: forged higher revision with null audit event cannot poison actor or 
   await expect(page.getByTestId("dev-revision")).toHaveText("1");
   await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
   expect(observedPolls.some(p => p.supplied === 'W/"edonism-revision-98"')).toBe(false);
+  expect(observedHeaders.filter(e => e.path.endsWith("/end-turn"))).toHaveLength(1);
+});
+
+test("#116: forged phase1 with active player cannot poison revision, token or turn controls",
+  async ({ page }) => {
+  // The test targets the public JSON ingress, not WebGL availability.
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: function (this: HTMLCanvasElement, kind: string, ...args: unknown[]) {
+        if (kind === "webgl" || kind === "webgl2" || kind === "experimental-webgl")
+          return null;
+        return Reflect.apply(original, this, [kind, ...args]);
+      },
+    });
+  });
+  const { observedPolls, observedHeaders } = await mockMatchApi(page,
+    { forgedPhaseActorMismatchSnapshot: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect.poll(() => observedPolls.some(p =>
+    p.status === 200 && p.etag === 'W/"edonism-revision-97"')).toBe(true);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  expect(observedHeaders.filter(e =>
+    e.path.endsWith("/end-turn") || e.path.endsWith("/free-move"))).toHaveLength(0);
+
+  // Real mock server still has phase=0 and revision=0. Rejecting fabricated
+  // phase=1/active Alice must not block a genuine revision-one command.
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  expect(observedPolls.some(p => p.supplied === 'W/"edonism-revision-97"')).toBe(false);
   expect(observedHeaders.filter(e => e.path.endsWith("/end-turn"))).toHaveLength(1);
 });
 

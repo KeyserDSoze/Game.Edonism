@@ -59,6 +59,7 @@ type MockOptions = {
   forgedHigherRevisionSnapshot?: boolean; // #112: corrupt first public poll, never a real command.
   forgedNullAuditEventSnapshot?: boolean; // #113: corrupt first poll with events:[null].
   forgedForeignAuditStreetOnce?: boolean; // #125: plausible public 200 with foreign audit road.
+  forgedForeignAuditActorOnce?: boolean; // #126: plausible public 200 with foreign actor.
   forgedPhaseActorMismatchSnapshot?: boolean; // #116: phase1 with active Alice in forged poll.
   forgedAuditChronologySnapshot?: boolean; // #119: high revision with genesis only.
   forgedPublicTurnOrderOnce?: boolean; // #120: coherent next revision but false order.
@@ -134,6 +135,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayedAliceOptions = false;
   let forgedSecondMoveIssued = false;
   let forgedForeignAuditIssued = false;
+  let forgedForeignActorIssued = false;
   let forgedUnknownStreetIssued = false;
   let forgedJoinedHandIssued = false;
   let forgedBobHandIssued = false;
@@ -799,6 +801,25 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       // #125: a well-typed forged event can claim a foreign street while
       // advertising a plausible next revision and ETag. Ignore the entire
       // response before changing session state or the conditional cache.
+      // #126: A well-shaped newer event from an outsider cannot be
+      // accepted as an authentic public match revision or cached ETag.
+      if (options.forgedForeignAuditActorOnce && !forgedForeignActorIssued) {
+        forgedForeignActorIssued = true;
+        const nextRevision = revision + 1;
+        const bogusTag = `W/"edonism-revision-${nextRevision}"`;
+        observedPolls.push({ status: 200, supplied, etag: bogusTag,
+          prefer: request.headers()["prefer"] ?? null });
+        return reply({ status: 200,
+          headers: { ETag: bogusTag, "Cache-Control": "no-store" },
+          json: {
+            ...snapshot(), revision: nextRevision,
+            events: [...auditEvents, {
+              revision: nextRevision, round: 1, kind: "future-public-kind",
+              actorId: "outsider", fromStreetId: null, toStreetId: null,
+            }],
+          },
+        });
+      }
       if (options.forgedForeignAuditStreetOnce && !forgedForeignAuditIssued) {
         forgedForeignAuditIssued = true;
         const foreignRevision = revision + 1;
@@ -1401,6 +1422,35 @@ test("#119: forged high-revision HTTP 200 with gapped audit cannot poison the ac
   await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
   expect(observedHeaders.filter(e => e.path.endsWith("/end-turn"))).toHaveLength(1);
   expect(observedPolls.some(p => p.supplied === 'W/"edonism-revision-96"')).toBe(false);
+});
+
+test("#126: outsider audit actor cannot poison revision, ETag or genuine commands", async ({ page }) => {
+  const { observedHeaders, observedPolls } = await mockMatchApi(page,
+    { forgedForeignAuditActorOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  const forgedTag = 'W/"edonism-revision-1"';
+  await expect.poll(() => observedPolls.some(p =>
+    p.status === 200 && p.etag === forgedTag)).toBe(true);
+
+  // Only the public event actorId is invalid: matching revision, roster,
+  // board version and future public kind are otherwise transport-shaped.
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(2);
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  expect(observedPolls.some(p => p.supplied === forgedTag)).toBe(false);
+  expect(observedHeaders.filter(x => x.path.endsWith("/end-turn"))).toHaveLength(0);
+
+  // The genuine next command uses the actual revision, never the forged one.
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("dev-audit-event-1")).toHaveAttribute("data-event-kind", "turn-ended");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+  expect(observedHeaders.filter(x => x.path.endsWith("/end-turn"))).toHaveLength(1);
 });
 
 test("#125: forged public audit road cannot advance match revision or poison ETag", async ({ page }) => {

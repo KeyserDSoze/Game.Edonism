@@ -100,6 +100,12 @@ export function hasValidDevelopmentPublicEnvelope(
   if (!sameSeatSet(value.turnOrder)
     || !sameSeatSet(value.proposedNextRoundOrder)) return false;
 
+  // #126: An audit event must identify a participant in this SAME roster,
+  // or the reserved system actor. This does not replay event/turn legality.
+  if (!value.events.every(event => isPublicMatchEventRecord(event)
+    && (event.actorId === "system" || ids.has(event.actorId))))
+    return false;
+
   // #120: The .NET first-round Snapshot() publishes players in immutable
   // TurnOrder and a PROPOSED last-to-first next-round order. A permutation
   // alone is not enough: forged HTTP 200 projections must not display an

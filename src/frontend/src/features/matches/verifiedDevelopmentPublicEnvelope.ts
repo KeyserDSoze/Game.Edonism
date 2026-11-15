@@ -45,7 +45,12 @@ export function hasValidDevelopmentPublicEnvelope(
     || typeof value.round !== "number"
     || !Number.isSafeInteger(value.round) || value.round < 1
     || (value.phase !== 0 && value.phase !== 1)
-    || (value.activePlayerId !== null && typeof value.activePlayerId !== "string")
+    // #116: In .NET GameMatch the only PlayerTurns (0) state always has
+    // an active seat, while pending first-round settlement (1) has none.
+    // Reject contradictory public JSON BEFORE revision/session/ETag mutation.
+    || (value.phase === 0
+      && (typeof value.activePlayerId !== "string" || !value.activePlayerId.trim()))
+    || (value.phase === 1 && value.activePlayerId !== null)
     || !Array.isArray(value.players)
     || value.players.length < 2 || value.players.length > 8
     || !Array.isArray(value.turnOrder)

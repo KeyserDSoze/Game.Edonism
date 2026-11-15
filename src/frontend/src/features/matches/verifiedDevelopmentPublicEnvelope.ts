@@ -1,4 +1,5 @@
 import { isPublicMatchEventRecord } from "./publicAudit";
+import canonicalBoard from "../../../../shared/board/edonism-board.v1.json";
 
 /**
  * #112: a deliberately NARROW public Development snapshot envelope guard.
@@ -19,6 +20,7 @@ type PublicSeatEnvelope = Readonly<{
 }>;
 type PublicDevelopmentSnapshotEnvelope = Readonly<{
   matchId: string;
+  boardVersion: string;
   revision: number;
   round: number;
   phase: number;
@@ -40,6 +42,10 @@ export function hasValidDevelopmentPublicEnvelope(
 ): value is PublicDevelopmentSnapshotEnvelope {
   if (!isRecord(value) || typeof expectedMatchId !== "string"
     || value.matchId !== expectedMatchId
+    // #122: Never present a foreign or missing public board as the local
+    // Edonism city. Use the ONE shared versioned board source, not a copied
+    // hard-coded client constant. This is transport compatibility only.
+    || value.boardVersion !== canonicalBoard.version
     || typeof value.revision !== "number"
     || !Number.isSafeInteger(value.revision) || value.revision < 0
     || typeof value.round !== "number"

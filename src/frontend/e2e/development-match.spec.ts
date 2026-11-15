@@ -51,6 +51,7 @@ type MockOptions = {
   badControlSlot?: boolean;
   unknownOwner?: boolean;
   missingBoardCard?: boolean;
+  malformedPublicCardId?: boolean; // #108: wire-format cardId is JSON number.
   unknownSecretEvent?: boolean;
   playerCount?: number;
   brokenSeatBootstrap?: "wrong-player" | "wrong-revision";
@@ -163,7 +164,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       ] : []),
       ...(options.missingBoardCard
         ? []
-        : [{ slotId: bobLotSlot, cardId: "demo:activity:einstein", category: "transport" }]),
+        : [{ slotId: bobLotSlot, cardId: options.malformedPublicCardId
+          ? (42 as unknown as string) : "demo:activity:einstein", category: "transport" }]),
     ],
     controlledActivities: [
       { slotId: "N-01", ownerPlayerId: "alice", posture: 0 },
@@ -1076,6 +1078,38 @@ test("#107: an omitted eight-seat gross quote hides all wage rows without removi
     await expect(page.getByTestId(`gross-salary-${player}`)).toHaveCount(0);
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
   await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+});
+
+
+test("#108: malformed public card ID never crashes the city or invents a controlled lot",
+  async ({ page }) => {
+  // DOM fallback prevents unnecessary 3D work in this snapshot integrity test.
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: function (this: HTMLCanvasElement, kind: string, ...args: unknown[]) {
+        if (kind === "webgl" || kind === "webgl2" || kind === "experimental-webgl")
+          return null;
+        return Reflect.apply(original, this, [kind, ...args]);
+      },
+    });
+  });
+  const { observedHeaders } = await mockMatchApi(page, { malformedPublicCardId: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("city-renderer")).toBeVisible();
+  await expect(page.getByTestId("city-renderer").getByRole("status"))
+    .toContainText("3D non è disponibile");
+  await expect(page.getByTestId("match-activity-roster")).toBeVisible();
+  await expect(page.getByTestId("controlled-lot-N-01")).toBeVisible();
+  await expect(page.getByTestId("controlled-lot-S-01")).toHaveCount(0);
+  await expect(page.getByTestId("gross-salary-alice")).toHaveCount(0);
+  await expect(page.getByTestId("gross-salary-bob")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  expect(observedHeaders.filter(event => event.path.endsWith("/end-turn")
+    || event.path.endsWith("/free-move"))).toHaveLength(0);
 });
 
 test("fallen henchmen show explicit posture and gross quotes are not wallet credits", async ({ page }) => {

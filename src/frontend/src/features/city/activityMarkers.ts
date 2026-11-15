@@ -49,6 +49,11 @@ export type ControlledLotMarker = Readonly<{
  * x/z are geometry ONLY and never sent to .NET as game coordinates.
  */
 export function controlledLotMarkers(state: PublicMatchSceneState): ControlledLotMarker[] {
+  // #108: a malformed public container or unlocatable record must not
+  // escape as a React render-time exception or a genuine controlled lot.
+  if (!state || !Array.isArray(state.players)
+    || !Array.isArray(state.boardActivities)
+    || !Array.isArray(state.controlledActivities)) return [];
   const owners = new Map(
     playerMarkerPlacements(state.players, state.activePlayerId)
       .map((player) => [player.playerId, player.color] as const),
@@ -57,11 +62,15 @@ export function controlledLotMarkers(state: PublicMatchSceneState): ControlledLo
   const groupedControls = new Map<string, PublicControlledActivity[]>();
 
   for (const card of state.boardActivities) {
+    if (!card || typeof card !== "object"
+      || typeof card.slotId !== "string" || !card.slotId.trim()) return [];
     const group = groupedCards.get(card.slotId) ?? [];
     group.push(card);
     groupedCards.set(card.slotId, group);
   }
   for (const control of state.controlledActivities) {
+    if (!control || typeof control !== "object"
+      || typeof control.slotId !== "string" || !control.slotId.trim()) return [];
     const group = groupedControls.get(control.slotId) ?? [];
     group.push(control);
     groupedControls.set(control.slotId, group);
@@ -74,8 +83,10 @@ export function controlledLotMarkers(state: PublicMatchSceneState): ControlledLo
 
     const [card] = cards;
     const [control] = controls;
-    const color = owners.get(control.ownerPlayerId);
-    if (!color || !card.cardId?.trim() || !card.category?.trim()
+    const color = typeof control.ownerPlayerId === "string"
+      ? owners.get(control.ownerPlayerId) : undefined;
+    if (!color || typeof card.cardId !== "string" || !card.cardId.trim()
+      || typeof card.category !== "string" || !card.category.trim()
       || (control.posture !== 0 && control.posture !== 1)) return [];
 
     const [x, z] = toScene(slot.center);

@@ -31,10 +31,15 @@ export function playerMarkerPlacements(
   players: readonly PublicPlayerPosition[],
   activePlayerId: string | null,
 ): PlayerMarkerPlacement[] {
+  // #108: public JSON types are not enforced by TypeScript at runtime.
+  // Skip malformed/unknown positions instead of breaking the entire city.
+  if (!Array.isArray(players)) return [];
   const uniqueIds = new Set<string>();
   const knownPlayers = [...players]
-    .filter((player) => player.playerId.trim().length > 0 &&
-      cityBoard.roads.some((road) => road.streetId === player.streetId))
+    .filter((player) => !!player && typeof player === "object"
+      && typeof player.playerId === "string" && player.playerId.trim().length > 0
+      && typeof player.streetId === "string"
+      && cityBoard.roads.some((road) => road.streetId === player.streetId))
     .sort((a, b) => a.playerId < b.playerId ? -1 : a.playerId > b.playerId ? 1 : 0)
     .filter((player) => {
       if (uniqueIds.has(player.playerId)) return false;

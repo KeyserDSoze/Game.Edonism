@@ -14,6 +14,7 @@ import { hasValidDevelopmentCreatorResponse } from "./verifiedDevelopmentCreator
 import { hasValidDevelopmentRotatedCredential } from "./verifiedDevelopmentRotatedCredential";
 import { hasValidDevelopmentTurnOptions } from "./verifiedDevelopmentTurnOptions";
 import { hasValidDevelopmentFirstRoundHand } from "./verifiedDevelopmentFirstRoundHand";
+import { hasValidDevelopmentPublicAuditChronology } from "./verifiedDevelopmentPublicAuditChronology";
 import { buildVerifiedPublicAuditExport } from "./publicAuditExport";
 import {
   MaxPublicAuditImportBytes, buildOfflinePublicAuditReview,
@@ -682,6 +683,7 @@ export function DevelopmentMatchLab({
   function acceptServerState(next: DemoMatch, matchId: string): boolean {
     if (currentMatchId.current !== matchId
       || !hasValidDevelopmentPublicEnvelope(next, matchId)
+      || !hasValidDevelopmentPublicAuditChronology(next, matchId)
       || next.revision <= currentRevision.current)
       return false;
     currentRevision.current = next.revision;
@@ -1164,6 +1166,9 @@ export function DevelopmentMatchLab({
           if (!controller.signal.aborted && !pendingRequest?.signal.aborted
             && !commandInFlight.current && currentMatchId.current === matchId
             && hasValidDevelopmentPublicEnvelope(next, matchId)
+            // #119: A same-revision 200 may update the ETag only when
+            // its entire public first-round event sequence is coherent.
+            && hasValidDevelopmentPublicAuditChronology(next, matchId)
             && next.revision >= currentRevision.current) {
             // Even a same-revision 200 is safe to ETag-cache only after
             // validating its public envelope; a forged revision-99 snapshot
@@ -1326,6 +1331,7 @@ export function DevelopmentMatchLab({
       const { state, hand: privateHand, turnOptions: options } = bootstrap;
       const actor = bootstrap.playerId;
       if (!hasValidDevelopmentPublicEnvelope(state, id)
+        || !hasValidDevelopmentPublicAuditChronology(state, id)
         // The atomic /seat response is one coherent server projection:
         // reject contradictory turn claims before binding hand or capability.
         || !hasValidDevelopmentTurnOptions(options, actor, state)

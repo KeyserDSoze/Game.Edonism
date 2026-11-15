@@ -10,6 +10,7 @@ import type { HistoricalStreetFocus } from "@/features/city/historicalStreetFocu
 import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
 import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
 import { hasValidDevelopmentPublicEnvelope } from "./verifiedDevelopmentPublicEnvelope";
+import { hasValidDevelopmentCreatorResponse } from "./verifiedDevelopmentCreatorResponse";
 import { buildVerifiedPublicAuditExport } from "./publicAuditExport";
 import {
   MaxPublicAuditImportBytes, buildOfflinePublicAuditReview,
@@ -1261,13 +1262,10 @@ export function DevelopmentMatchLab({
       }
       const created = await responseJson<DemoSession>(response);
       const playerIds = demoSeatIds.slice(0, playerCount);
-      if (!created || !hasValidDevelopmentPublicEnvelope(created.state, created.matchId)
-        || !Array.isArray(created.credentials)
-        || created.credentials.length !== playerCount || created.state.players.length !== playerCount
-        || !playerIds.every((id) => created.credentials.some((seat) => seat.playerId === id)
-          && created.state.players.some((seat) => seat.playerId === id))) {
+      // Never bind unverified credentials into currentActorScope or the
+      // in-memory session, even if the public match envelope is valid.
+      if (!hasValidDevelopmentCreatorResponse(created, playerIds))
         throw new Error("invalid_dev_fixture");
-      }
       currentMatchId.current = created.matchId;
       currentRevision.current = created.state.revision;
       currentActorScope.current = {

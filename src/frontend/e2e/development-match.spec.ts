@@ -40,9 +40,13 @@ function shortestStreetPath(from: string, to: string): string[] | null {
 
 type Seat = string;
 const demoSeats = ["alice", "bob", "charlie", "diana", "eve", "frank", "grace", "heidi"] as const;
+// #114: All synthetic 2–8 seat bearers must obey the same 64-hex format
+// as the real server and the Development join/rotation controls.
+const mockSeatToken = (index: number) => "abcdef01".charAt(index).repeat(64);
 type MockOptions = {
   conflictOnFirstMove?: boolean;
   creationFails?: boolean;
+  creatorCredentialFaultOnce?: "duplicate-token" | "short-token" | "null-token" | "wrong-seat";
   sameStreet?: boolean;
   unknownStreet?: boolean;
   fallenHenchman?: boolean;
@@ -93,7 +97,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   const seats = demoSeats.slice(0, options.playerCount ?? 2);
   const bobLotSlot = options.bobLotOnSecondSlot ? "S-02" : "S-01";
   const tokenToSeat = new Map(seats.map((seat, index) =>
-    [String.fromCharCode(97 + index).repeat(64), seat]));
+    [mockSeatToken(index), seat]));
   const mockStreets = ["gauss", "einstein", "planck", "newton", "meson", "boson", "main-square", "gauss"];
   const streets: Record<Seat, string> = Object.fromEntries(seats.map((id, index) => [
     id, index === 1 && options.unknownStreet ? "unmapped-road"
@@ -114,6 +118,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let firstHttp503 = false;
   let firstOverloadedPoll = false;
   let forgedHigherRevisionSent = false;
+  let creatorCredentialFaultIssued = false;
   let delayedAlicePresence = false;
   let delayedSettlement = false;
   let delayedAliceTurnProgress = false;
@@ -278,15 +283,22 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       expect(fixture.characters).toHaveLength(23);
       expect(fixture.actionCardIds).toHaveLength(58);
       expect(fixture.electionDayCardId).toBe("demo:election-day");
+      const credentials = seats.map((playerId, index) => ({
+        playerId, token: mockSeatToken(index),
+      }));
+      if (options.creatorCredentialFaultOnce && !creatorCredentialFaultIssued) {
+        creatorCredentialFaultIssued = true;
+        switch (options.creatorCredentialFaultOnce) {
+          case "duplicate-token": credentials[1].token = credentials[0].token; break;
+          case "short-token": credentials[0].token = "abc"; break;
+          case "null-token":
+            credentials[0].token = null as unknown as string; break;
+          case "wrong-seat": credentials[1].playerId = "intruder"; break;
+        }
+      }
       return reply({
         status: 201,
-        json: {
-          matchId: snapshot().matchId,
-          state: snapshot(),
-          credentials: seats.map((playerId, index) => ({
-            playerId, token: String.fromCharCode(97 + index).repeat(64),
-          })),
-        },
+        json: { matchId: snapshot().matchId, state: snapshot(), credentials },
       });
     }
 
@@ -903,6 +915,48 @@ test("the lab displays a safe API-unavailable state without a backend", async ({
   await expect(page.getByTestId("dev-create")).toBeEnabled();
 });
 
+
+test("#114: creator duplicate seat bearer is rejected before session, then valid eight-seat create works",
+  async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: function (this: HTMLCanvasElement, kind: string, ...args: unknown[]) {
+        if (kind === "webgl" || kind === "webgl2" || kind === "experimental-webgl")
+          return null;
+        return Reflect.apply(original, this, [kind, ...args]);
+      },
+    });
+  });
+  const { observedHeaders } = await mockMatchApi(page,
+    { playerCount: 8, creatorCredentialFaultOnce: "duplicate-token" });
+  await page.goto("/");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-error")).toContainText("Impossibile avviare");
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveCount(0);
+  await expect(page.getByTestId("match-player-legend")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+  await expect(page.getByTestId("dev-create")).toBeEnabled();
+  expect(observedHeaders.filter(e => e.path.endsWith("/hand")
+    || e.path.endsWith("/turn-options")
+    || e.path.endsWith("/end-turn"))).toHaveLength(0);
+
+  // Same server mock now returns eight correctly typed, unique hex tokens.
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(8);
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await page.getByTestId("dev-seat-heidi").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:45");
+  expect(observedHeaders.some(e =>
+    e.path.endsWith("/hand") && e.token === mockSeatToken(7))).toBe(true);
+  const visible = await page.locator("body").innerText();
+  for (let i = 0; i < 8; i++) expect(visible).not.toContain(mockSeatToken(i));
+});
+
 test("Development match HUD is accessible on mobile and translated to English", async ({ page }) => {
   await mockMatchApi(page);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -1470,13 +1524,13 @@ test("eight Development seats: quota-safe fixture, private actor switching, mobi
   await expect(page.getByTestId("dev-hand")).toContainText("demo:action:45");
   await expect(page.getByTestId("dev-hand")).not.toContainText("demo:action:01");
   expect(observedHeaders.some(({ path, token }) =>
-    path.endsWith("/hand") && token === "h".repeat(64))).toBe(true);
+    path.endsWith("/hand") && token === mockSeatToken(7))).toBe(true);
 
   const storage = await page.evaluate(() => ({
     local: Object.values(localStorage), session: Object.values(sessionStorage), url: location.href,
   }));
   for (let i = 0; i < 8; i++) {
-    const token = String.fromCharCode(97 + i).repeat(64);
+    const token = mockSeatToken(i);
     expect(JSON.stringify(storage)).not.toContain(token);
     expect(await page.locator("body").innerText()).not.toContain(token);
   }

@@ -48,6 +48,7 @@ type MockOptions = {
   creationFails?: boolean;
   creatorCredentialFaultOnce?: "duplicate-token" | "short-token" | "null-token" | "wrong-seat";
   forgedCreatorAuditChronologyOnce?: boolean; // #119: valid credentials, false public timeline.
+  forgedCreatorTurnOrderOnce?: boolean; // #120: correct credentials, false next-round order.
   rotationCredentialFaultOnce?: "other-seat" | "other-seat-uppercase"; // #115 fake 200, no backend rotation.
   sameStreet?: boolean;
   unknownStreet?: boolean;
@@ -58,6 +59,7 @@ type MockOptions = {
   forgedNullAuditEventSnapshot?: boolean; // #113: corrupt first poll with events:[null].
   forgedPhaseActorMismatchSnapshot?: boolean; // #116: phase1 with active Alice in forged poll.
   forgedAuditChronologySnapshot?: boolean; // #119: high revision with genesis only.
+  forgedPublicTurnOrderOnce?: boolean; // #120: coherent next revision but false order.
   badControlSlot?: boolean;
   unknownOwner?: boolean;
   missingBoardCard?: boolean;
@@ -66,6 +68,7 @@ type MockOptions = {
   playerCount?: number;
   brokenSeatBootstrap?: "wrong-player" | "wrong-revision";
   forgedJoinedAuditChronologyOnce?: boolean; // #119: false revision in atomic /seat.
+  forgedJoinedTurnOrderOnce?: boolean; // #120: coherent bootstrap except false preview.
   forgedJoinedHandOnce?: boolean; // #118: duplicate private cards in atomic /seat.
   forgedBobHandOnce?: boolean; // #118: malformed 200 /hand before later valid recovery.
   bootstrapUnavailable?: boolean;
@@ -132,8 +135,10 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let firstOverloadedPoll = false;
   let forgedHigherRevisionSent = false;
   let forgedJoinedAuditChronologySent = false;
+  let forgedJoinedTurnOrderSent = false;
   let creatorCredentialFaultIssued = false;
   let forgedCreatorAuditIssued = false;
+  let forgedCreatorTurnOrderSent = false;
   let delayedAlicePresence = false;
   let delayedSettlement = false;
   let delayedAliceTurnProgress = false;
@@ -317,8 +322,14 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       const forgedCreatorAudit = Boolean(options.forgedCreatorAuditChronologyOnce
         && !forgedCreatorAuditIssued);
       if (forgedCreatorAudit) forgedCreatorAuditIssued = true;
+      const forgedCreatorOrder = Boolean(options.forgedCreatorTurnOrderOnce
+        && !forgedCreatorTurnOrderSent);
+      if (forgedCreatorOrder) forgedCreatorTurnOrderSent = true;
       const createdState = forgedCreatorAudit
-        ? { ...snapshot(), revision: 43 } : snapshot();
+        ? { ...snapshot(), revision: 43 }
+        : forgedCreatorOrder
+          ? { ...snapshot(), proposedNextRoundOrder: [...seats] }
+          : snapshot();
       return reply({
         status: 201,
         json: { matchId: snapshot().matchId, state: createdState, credentials },
@@ -343,10 +354,16 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       const forgedJoinAudit = Boolean(options.forgedJoinedAuditChronologyOnce
         && !forgedJoinedAuditChronologySent && seat === "bob");
       if (forgedJoinAudit) forgedJoinedAuditChronologySent = true;
-      // The forged 200 preserves the actor, options and hand; only its public
-      // timeline is contradictory. No server-side revision is committed.
+      const forgedJoinOrder = Boolean(options.forgedJoinedTurnOrderOnce
+        && !forgedJoinedTurnOrderSent && seat === "bob");
+      if (forgedJoinOrder) forgedJoinedTurnOrderSent = true;
+      // Actor, options, hand, revision and public audit remain coherent.
+      // Only the displayed proposed round rotation is false in #120.
       const seatState = forgedJoinAudit
-        ? { ...snapshot(), revision: 42 } : snapshot();
+        ? { ...snapshot(), revision: 42 }
+        : forgedJoinOrder
+          ? { ...snapshot(), proposedNextRoundOrder: [...seats] }
+          : snapshot();
       const adjacent: Record<string, string[]> = {
         gauss: ["planck", "newton", "main-square"],
         planck: ["gauss", "einstein", "meson"],
@@ -749,10 +766,12 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       const supplied = request.headers()["if-none-match"] ?? null;
       if ((options.forgedHigherRevisionSnapshot || options.forgedNullAuditEventSnapshot
         || options.forgedPhaseActorMismatchSnapshot
-        || options.forgedAuditChronologySnapshot)
+        || options.forgedAuditChronologySnapshot
+        || options.forgedPublicTurnOrderOnce)
         && !forgedHigherRevisionSent) {
         forgedHigherRevisionSent = true;
-        const forgedRevision = options.forgedAuditChronologySnapshot ? 96
+        const forgedRevision = options.forgedPublicTurnOrderOnce ? revision + 1
+          : options.forgedAuditChronologySnapshot ? 96
           : options.forgedPhaseActorMismatchSnapshot ? 97
           : options.forgedNullAuditEventSnapshot ? 98 : 99;
         const invalidEtag = `W/"edonism-revision-${forgedRevision}"`;
@@ -762,9 +781,20 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         });
         return reply({
           status: 200, headers: { ETag: invalidEtag, "Cache-Control": "no-store" },
-          json: options.forgedAuditChronologySnapshot
-            ? { ...snapshot(), revision: forgedRevision, events: [...auditEvents] }
-            : options.forgedPhaseActorMismatchSnapshot
+          json: options.forgedPublicTurnOrderOnce
+            ? {
+                ...snapshot(),
+                revision: forgedRevision,
+                activePlayerId: seats[1],
+                proposedNextRoundOrder: [...seats],
+                events: [...auditEvents, {
+                  revision: forgedRevision, round: 1, kind: "turn-ended",
+                  actorId: seats[0], fromStreetId: null, toStreetId: null,
+                }],
+              }
+            : options.forgedAuditChronologySnapshot
+              ? { ...snapshot(), revision: forgedRevision, events: [...auditEvents] }
+              : options.forgedPhaseActorMismatchSnapshot
               ? { ...snapshot(), revision: forgedRevision, phase: 1, activePlayerId: "alice" }
               : options.forgedNullAuditEventSnapshot
                 ? { ...snapshot(), revision: forgedRevision, events: [null] }
@@ -1327,6 +1357,88 @@ test("#119: forged atomic /seat audit cannot mount Bob or hand; genuine retry jo
     session: Object.values(sessionStorage),
   }));
   expect(JSON.stringify(privacy)).not.toContain(mockSeatToken(1));
+});
+
+test("#120: forged future turn order on public poll cannot poison revision or next seat",
+  async ({ page }) => {
+  const { observedPolls, observedHeaders } = await mockMatchApi(page,
+    { forgedPublicTurnOrderOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  // The synthetic HTTP 200 has a perfectly consecutive 0..1 audit and
+  // plausible active Bob; ONLY the last-to-first rotation is false.
+  await expect.poll(() => observedPolls.some(p =>
+    p.status === 200 && p.etag === 'W/"edonism-revision-1"')).toBe(true);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("dev-next-order").locator("li"))
+    .toHaveText(["1.bob", "2.alice"]);
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  expect(observedPolls.some(p => p.supplied === 'W/"edonism-revision-1"')).toBe(false);
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("dev-next-order").locator("li"))
+    .toHaveText(["1.bob", "2.alice"]);
+  await expect(page.getByTestId("dev-audit-event-1"))
+    .toHaveAttribute("data-event-kind", "turn-ended");
+  expect(observedHeaders.filter(h => h.path.endsWith("/end-turn"))).toHaveLength(1);
+});
+
+test("#120: forged creator rotation does not bind credentials; valid retry creates match",
+  async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page,
+    { forgedCreatorTurnOrderOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-error")).toBeVisible();
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+  await expect(page.getByTestId("match-player-alice")).toHaveCount(0);
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-seat-alice")).toBeVisible();
+  await expect(page.getByTestId("dev-next-order").locator("li"))
+    .toHaveText(["1.bob", "2.alice"]);
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  expect(observedHeaders.filter(h => h.path.endsWith("/from-full-deck"))).toHaveLength(2);
+  const storage = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(storage)).not.toContain(mockSeatToken(0));
+  expect(JSON.stringify(storage)).not.toContain(mockSeatToken(1));
+});
+
+test("#120: joined seat rejects forged next-round rotation without mounting private hand",
+  async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page,
+    { forgedJoinedTurnOrderOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-join-id").fill("00000000-0000-0000-0000-000000000020");
+  await page.getByTestId("dev-join-token").fill(mockSeatToken(1));
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-error")).toBeVisible();
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+  await expect(page.getByTestId("match-player-bob")).toHaveCount(0);
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-seat-alice")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-next-order").locator("li"))
+    .toHaveText(["1.bob", "2.alice"]);
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+  expect(observedHeaders.filter(h => h.path.endsWith("/seat"))).toHaveLength(2);
+  const storage = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(storage)).not.toContain(mockSeatToken(1));
 });
 
 test("controlled lots, cards and standing henchmen stay server-owned after moves and seat switches", async ({ page }) => {

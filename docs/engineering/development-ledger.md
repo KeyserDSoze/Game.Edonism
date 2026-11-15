@@ -4,6 +4,7 @@ GitHub Issues are the detailed source of truth. Work is committed directly to `m
 
 | Issue | Version | Work | Status | Verification |
 |---|---|---|---|---|
+| [#123](https://github.com/KeyserDSoze/Game.Edonism/issues/123) | 0.0.2 | Validate canonical player streets at Development public snapshot ingress, prior to revision/session/ETag | In progress | Playwright 2/4/8 + xUnit canonical parity and exact-HEAD 3/3 CI pending |
 | [#1](https://github.com/KeyserDSoze/Game.Edonism/issues/1) | 0.0.1 | Foundation: React/Three.js, .NET 10, CI | Done | PR #2 merged, CI green |
 | [#4](https://github.com/KeyserDSoze/Game.Edonism/issues/4) | 0.0.2 | Printed rulebook baseline and unresolved design | In progress | Baseline merged #10; signoff and R-10 board inferred edges pending |
 | [#5](https://github.com/KeyserDSoze/Game.Edonism/issues/5) | 0.0.2 | 30-slot street graph, 3D viewer | Done | PR #11 merged, 28 xUnit + 5 Playwright |

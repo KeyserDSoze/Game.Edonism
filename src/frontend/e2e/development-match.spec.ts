@@ -1,5 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
+
+// #103: All mutable mock match/seat state and HTTP interception live inside
+// mockMatchApi(page), and every test has its own Playwright page/context.
+// Parallelize ONLY independent mocked browser tests in this file. The live
+// .NET two-browser suite stays strictly serial (workers: 1).
+test.describe.configure({ mode: "parallel" });
 // E2E mocks stay Node-compatible: do not import Vite's JSON-backed board
 // module here, because Node 24 requires a JSON import attribute at runtime.
 const mockStreetGraph: Record<string, readonly string[]> = {

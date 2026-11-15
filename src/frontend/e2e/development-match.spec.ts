@@ -47,6 +47,7 @@ type MockOptions = {
   conflictOnFirstMove?: boolean;
   creationFails?: boolean;
   creatorCredentialFaultOnce?: "duplicate-token" | "short-token" | "null-token" | "wrong-seat";
+  rotationCredentialFaultOnce?: "other-seat" | "other-seat-uppercase"; // #115 fake 200, no backend rotation.
   sameStreet?: boolean;
   unknownStreet?: boolean;
   fallenHenchman?: boolean;
@@ -110,6 +111,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let active: Seat | null = "alice";
   let conflictRaised = false;
   let rotationSequence = 0;
+  let rotationCredentialFaultIssued = false;
   let snapshotFailure = false;
   let delayRevokedResponse = false;
   let delayedRevokedResponse = false;
@@ -658,6 +660,20 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
 
 
     if (path.endsWith("/rotate-token") && request.method() === "POST") {
+      // #115: A forged HTTP 200 with a different local seat's bearer must NOT
+      // be treated as a successful server rotation. The mock does not revoke
+      // the old bearer for this malformed reply, allowing a real retry.
+      if (options.rotationCredentialFaultOnce && !rotationCredentialFaultIssued) {
+        rotationCredentialFaultIssued = true;
+        return reply({
+          status: 200,
+          json: {
+            playerId: seat,
+            token: options.rotationCredentialFaultOnce === "other-seat-uppercase"
+              ? mockSeatToken(0).toUpperCase() : mockSeatToken(0),
+          },
+        });
+      }
       rotationSequence++;
       const fresh = "F".repeat(62)
         + (seats.indexOf(seat) + 1).toString(16).toUpperCase()
@@ -1581,6 +1597,66 @@ test("Development seat rotation invalidates old capability without touching matc
   expect(JSON.stringify(storage)).not.toContain(changed.token);
   expect(await page.locator("body").innerText()).not.toContain(changed.token);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+});
+
+test("#115: colliding 200 rotation cannot impersonate Alice; Bob retries safely", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page,
+    { rotationCredentialFaultOnce: "other-seat-uppercase" });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-session")).toBeVisible();
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  const rotateResponse = () => page.waitForResponse(r =>
+    new URL(r.url()).pathname.endsWith("/rotate-token")
+      && r.request().method() === "POST");
+
+  const forged = rotateResponse();
+  await page.getByTestId("dev-rotate-token").click();
+  const forgedReply = await forged;
+  expect(forgedReply.status()).toBe(200);
+  expect(await forgedReply.json()).toEqual({
+    playerId: "bob", token: mockSeatToken(0).toUpperCase(),
+  });
+  await expect(page.getByTestId("dev-error")).toBeVisible();
+  await expect(page.getByTestId("dev-rotation-notice")).toHaveCount(0);
+  await expect(page.getByTestId("dev-session")).toBeVisible();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+
+  // Both locally held bearers remain independently bound after rejecting
+  // the malformed reply; neither secret becomes the other actor's credential.
+  await page.getByTestId("dev-seat-alice").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  expect(observedHeaders.some(e =>
+    e.path.endsWith("/hand") && e.token === mockSeatToken(1))).toBe(true);
+
+  const legitimate = rotateResponse();
+  await page.getByTestId("dev-rotate-token").click();
+  const success = await legitimate;
+  expect(success.status()).toBe(200);
+  const rotated = await success.json() as { playerId: string; token: string };
+  expect(rotated.playerId).toBe("bob");
+  expect(rotated.token).toMatch(/^[a-f0-9]{64}$/i);
+  expect(rotated.token.toLowerCase()).not.toBe(mockSeatToken(0));
+  expect(rotated.token.toLowerCase()).not.toBe(mockSeatToken(1));
+  await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(observedHeaders.some(e =>
+    e.path.endsWith("/hand") && e.token === rotated.token)).toBe(true);
+
+  const privacy = await page.evaluate(() => ({
+    url: location.href,
+    local: Object.values(localStorage), session: Object.values(sessionStorage),
+    text: document.body.innerText,
+  }));
+  for (const secret of [mockSeatToken(0), mockSeatToken(1), rotated.token])
+    expect(JSON.stringify(privacy)).not.toContain(secret);
 });
 
 test("Domain options are required: missing or wrong revision prevents browser commands", async ({ page }) => {

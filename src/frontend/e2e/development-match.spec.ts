@@ -1812,8 +1812,25 @@ test("offline public replay validates completed two-seat round but rejects prema
     // more expensive than ordinary single-page UI checks on shared CI runners.
     // Keep all checks and retries; only this test gets the two-browser budget.
     test.setTimeout(75_000);
+    // #106: this is a DOM-only offline audit integrity test, not a 3D test.
+    // Two full WebGL cities competing with another CI worker can starve the
+    // import/tamper checks. Keep 2D canvas and ALL replay assertions intact.
+    const disableOnlyWebGL = () => {
+      const original = HTMLCanvasElement.prototype.getContext;
+      Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+        configurable: true,
+        value: function (this: HTMLCanvasElement, type: string, ...args: unknown[]) {
+          if (type === "webgl" || type === "webgl2" || type === "experimental-webgl")
+            return null;
+          return Reflect.apply(original, this, [type, ...args]);
+        },
+      });
+    };
+    await page.addInitScript(disableOnlyWebGL);
     await mockMatchApi(page);
     await page.goto("/");
+    await expect(page.getByTestId("city-renderer").getByRole("status"))
+      .toContainText("3D non è disponibile");
     await page.getByTestId("dev-create").click();
     await page.getByTestId("dev-end-turn").click();
     await expect(page.getByTestId("dev-revision")).toHaveText("1");
@@ -1837,9 +1854,12 @@ test("offline public replay validates completed two-seat round but rejects prema
     expect(data.frames[2].phase).toBe(1);
 
     const context = await browser.newContext();
+    await context.addInitScript(disableOnlyWebGL);
     try {
       const offline = await context.newPage();
       await offline.goto("/");
+      await expect(offline.getByTestId("city-renderer").getByRole("status"))
+        .toContainText("3D non è disponibile");
       const fileInput = offline.getByTestId("dev-public-audit-import-file");
       const status = offline.getByTestId("dev-public-audit-import-status");
       await fileInput.setInputFiles({

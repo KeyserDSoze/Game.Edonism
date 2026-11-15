@@ -3888,7 +3888,7 @@ test("#88: eight-seat preview uses one actor-scoped atomic request", async ({ pa
   await expect(page.getByTestId("dev-other-seat-alice")).toHaveAttribute("data-steps", "0");
   const tactical = observedHeaders.filter(e => e.path.endsWith("/tactical-overview"));
   expect(tactical).toHaveLength(2);
-  expect(tactical[1].token).toBe("h".repeat(64));
+  expect(tactical[1].token).toBe(mockSeatToken(7));
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);
 });
@@ -3968,7 +3968,7 @@ test("#89: eight seats offer only verified other players, including public empty
   const tactical = observedHeaders.filter(e => e.path.endsWith("/tactical-overview"));
   expect(tactical).toHaveLength(2);
   expect(tactical[0].token).toBe("a".repeat(64));
-  expect(tactical[1].token).toBe("h".repeat(64));
+  expect(tactical[1].token).toBe(mockSeatToken(7));
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);
@@ -4089,7 +4089,7 @@ test("#90: nearest rival summary includes empty owners across eight authenticate
   const reads = observedHeaders.filter(x => x.path.endsWith("/tactical-overview"));
   expect(reads).toHaveLength(2);
   expect(reads[0].token).toBe("a".repeat(64));
-  expect(reads[1].token).toBe("h".repeat(64));
+  expect(reads[1].token).toBe(mockSeatToken(7));
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);
 });

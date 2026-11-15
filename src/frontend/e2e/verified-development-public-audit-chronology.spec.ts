@@ -8,6 +8,7 @@ type Count = 2 | 4 | 8;
 function genesis(count: Count) {
   const ids = playerIds.slice(0, count);
   return {
+    boardVersion: "edonism-streets-v1",
     matchId: "public-chronology",
     revision: 0, round: 1, phase: 0, activePlayerId: "alice" as string | null,
     players: ids.map((playerId, index) => ({

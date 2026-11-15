@@ -1164,7 +1164,7 @@ test("public match markers follow only server-confirmed streets, not local seat 
   await expect(bob).toContainText("In turno");
 });
 
-test("shared streets render distinct player entries and unknown street IDs have no invented marker", async ({ page }) => {
+test("#123: shared streets render both players; foreign street creator fails closed and recovers", async ({ page }) => {
   await mockMatchApi(page, { sameStreet: true });
   await page.goto("/");
   await page.getByTestId("dev-create").click();
@@ -1172,12 +1172,25 @@ test("shared streets render distinct player entries and unknown street IDs have 
   await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-street-id", "gauss");
   await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(2);
 
-  // A different fixture with a forged/unrecognised street must not render
-  // the unknown player at a guessed default location.
+  // #123: Unlike the old marker-only policy, the shared public ingress now
+  // rejects the ENTIRE untrusted creator snapshot with an unknown street.
+  // It must not retain a misleading half-valid match, hand or revision.
   await mockMatchApi(page, { unknownStreet: true });
   await page.getByTestId("dev-create").click();
-  await expect(page.getByTestId("match-player-alice")).toHaveCount(1);
+  await expect(page.getByTestId("dev-error")).toBeVisible();
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await expect(page.getByTestId("match-player-alice")).toHaveCount(0);
   await expect(page.getByTestId("match-player-bob")).toHaveCount(0);
+  await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+
+  // Recovery with a genuine canonical response must remain possible.
+  await mockMatchApi(page, { sameStreet: true });
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "gauss");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-street-id", "gauss");
+  await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(2);
 });
 
 test("WebGL fallback still exposes authoritative player streets and refresh on HTTP 409", async ({ page }) => {

@@ -47,6 +47,7 @@ type MockOptions = {
   conflictOnFirstMove?: boolean;
   creationFails?: boolean;
   creatorCredentialFaultOnce?: "duplicate-token" | "short-token" | "null-token" | "wrong-seat";
+  forgedCreatorAuditChronologyOnce?: boolean; // #119: valid credentials, false public timeline.
   rotationCredentialFaultOnce?: "other-seat" | "other-seat-uppercase"; // #115 fake 200, no backend rotation.
   sameStreet?: boolean;
   unknownStreet?: boolean;
@@ -132,6 +133,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let forgedHigherRevisionSent = false;
   let forgedJoinedAuditChronologySent = false;
   let creatorCredentialFaultIssued = false;
+  let forgedCreatorAuditIssued = false;
   let delayedAlicePresence = false;
   let delayedSettlement = false;
   let delayedAliceTurnProgress = false;
@@ -312,9 +314,14 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           case "wrong-seat": credentials[1].playerId = "intruder"; break;
         }
       }
+      const forgedCreatorAudit = Boolean(options.forgedCreatorAuditChronologyOnce
+        && !forgedCreatorAuditIssued);
+      if (forgedCreatorAudit) forgedCreatorAuditIssued = true;
+      const createdState = forgedCreatorAudit
+        ? { ...snapshot(), revision: 43 } : snapshot();
       return reply({
         status: 201,
-        json: { matchId: snapshot().matchId, state: snapshot(), credentials },
+        json: { matchId: snapshot().matchId, state: createdState, credentials },
       });
     }
 
@@ -1231,6 +1238,97 @@ test("#116: forged phase1 with active player cannot poison revision, token or tu
   expect(observedHeaders.filter(e => e.path.endsWith("/end-turn"))).toHaveLength(1);
 });
 
+test("#119: forged high-revision HTTP 200 with gapped audit cannot poison the actor, ETag or next turn",
+  async ({ page }) => {
+  // Public snapshot validation must work even when WebGL is unavailable.
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: function (this: HTMLCanvasElement, kind: string, ...args: unknown[]) {
+        if (kind === "webgl" || kind === "webgl2" || kind === "experimental-webgl")
+          return null;
+        return Reflect.apply(original, this, [kind, ...args]);
+      },
+    });
+  });
+  const { observedPolls, observedHeaders } = await mockMatchApi(page,
+    { forgedAuditChronologySnapshot: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect.poll(() => observedPolls.some(p =>
+    p.status === 200 && p.etag === 'W/"edonism-revision-96"')).toBe(true);
+  // All other JSON fields are well-typed; ONLY audit length vs revision
+  // is contradictory. Reject before public revision, cache or private UI.
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  expect(observedPolls.some(p => p.supplied === 'W/"edonism-revision-96"')).toBe(false);
+
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("dev-audit-event-1")).toHaveAttribute("data-event-kind", "turn-ended");
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  expect(observedHeaders.filter(e => e.path.endsWith("/end-turn"))).toHaveLength(1);
+  expect(observedPolls.some(p => p.supplied === 'W/"edonism-revision-96"')).toBe(false);
+});
+
+test("#119: malformed creator public chronology cannot bind all-seat capabilities; good retry works",
+  async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page,
+    { forgedCreatorAuditChronologyOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-error")).toBeVisible();
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+  await expect(page.getByTestId("match-player-alice")).toHaveCount(0);
+  // A genuine response carries genesis revision 0 and two distinct bearers.
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-seat-alice")).toBeVisible();
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  expect(observedHeaders.filter(e => e.path.endsWith("/from-full-deck"))).toHaveLength(2);
+  const privacy = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  for (const secret of [mockSeatToken(0), mockSeatToken(1)])
+    expect(JSON.stringify(privacy)).not.toContain(secret);
+});
+
+test("#119: forged atomic /seat audit cannot mount Bob or hand; genuine retry joins only Bob",
+  async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page,
+    { forgedJoinedAuditChronologyOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-join-id").fill("00000000-0000-0000-0000-000000000020");
+  await page.getByTestId("dev-join-token").fill(mockSeatToken(1));
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-error")).toBeVisible();
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+  await expect(page.getByTestId("match-player-bob")).toHaveCount(0);
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-seat-alice")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+  expect(observedHeaders.filter(e => e.path.endsWith("/seat"))).toHaveLength(2);
+  const privacy = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(privacy)).not.toContain(mockSeatToken(1));
+});
+
 test("controlled lots, cards and standing henchmen stay server-owned after moves and seat switches", async ({ page }) => {
   await mockMatchApi(page);
   await page.goto("/");
@@ -1509,11 +1607,11 @@ test("409 reconciliation shows only the concurrent server event without WebGL", 
   await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
   await expect(page.getByTestId("city-renderer").getByRole("status")).toContainText("3D is not available");
   await page.getByTestId("dev-create").click();
-  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(2);
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
   await page.getByTestId("dev-move-planck").click();
   await expect(page.getByTestId("dev-revision")).toHaveText("1");
   await expect(page.getByTestId("dev-error")).toContainText("state refreshed");
-  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(2);
   await expect(page.getByTestId("dev-audit-event-1")).toHaveAttribute("data-event-kind", "turn-ended");
   await expect(page.getByTestId("dev-next-order")).toContainText("bob");
   await expect(page.getByTestId("dev-audit-panel")).toContainText("no next round");

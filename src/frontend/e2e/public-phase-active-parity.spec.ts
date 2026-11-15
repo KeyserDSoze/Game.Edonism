@@ -8,6 +8,7 @@ const players = ["alice", "bob", "charlie", "diana", "eve", "frank", "grace", "h
 function snapshot(count: 2 | 4 | 8) {
   const ids = players.slice(0, count);
   return {
+    boardVersion: "edonism-streets-v1",
     matchId: "phase-actor-parity",
     revision: 3, round: 1, phase: 0, activePlayerId: "alice" as string | null,
     players: ids.map((playerId, index) => ({

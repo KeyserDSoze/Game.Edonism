@@ -33,6 +33,10 @@ type PublicDevelopmentSnapshotEnvelope = Readonly<{
   controlledActivities: readonly unknown[];
   grossSalaryQuotes: readonly unknown[];
 }>;
+// #123: Public street locations must belong to the same printed board.
+// This checks transport compatibility, NOT legal moves or gameplay authority.
+const canonicalStreetIds = new Set(canonicalBoard.streets.map(street => street.id));
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -73,6 +77,7 @@ export function hasValidDevelopmentPublicEnvelope(
       || !player.playerId.trim() || ids.has(player.playerId)
       || typeof player.streetId !== "string"
       || !player.streetId.trim()
+      || !canonicalStreetIds.has(player.streetId)
       || typeof player.freeMoveUsed !== "boolean") return false;
     ids.add(player.playerId);
   }

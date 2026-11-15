@@ -7,6 +7,7 @@ const names = ["alice", "bob", "charlie", "diana", "eve", "frank", "grace", "hei
 function fixture(count: 2 | 4 | 8) {
   const ids = names.slice(0, count);
   return {
+    boardVersion: "edonism-streets-v1",
     matchId: "actor-options-parity",
     revision: 2, round: 1, phase: 0,
     activePlayerId: "alice" as string | null,

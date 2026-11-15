@@ -1,5 +1,6 @@
 import { isPublicMatchEventRecord } from "./publicAudit";
 import canonicalBoard from "../../../../shared/board/edonism-board.v1.json";
+import { isValidDevelopmentTechnicalPlayerId } from "./verifiedDevelopmentTechnicalPlayerId";
 
 /**
  * #112: a deliberately NARROW public Development snapshot envelope guard.
@@ -78,8 +79,9 @@ export function hasValidDevelopmentPublicEnvelope(
 
   const ids = new Set<string>();
   for (const player of value.players) {
-    if (!isRecord(player) || typeof player.playerId !== "string"
-      || !player.playerId.trim() || ids.has(player.playerId)
+    if (!isRecord(player)
+      || !isValidDevelopmentTechnicalPlayerId(player.playerId)
+      || ids.has(player.playerId)
       || typeof player.streetId !== "string"
       || !player.streetId.trim()
       || !canonicalStreetIds.has(player.streetId)

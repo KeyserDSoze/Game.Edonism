@@ -60,6 +60,7 @@ type MockOptions = {
   forgedNullAuditEventSnapshot?: boolean; // #113: corrupt first poll with events:[null].
   forgedForeignAuditStreetOnce?: boolean; // #125: plausible public 200 with foreign audit road.
   forgedForeignAuditActorOnce?: boolean; // #126: plausible public 200 with foreign actor.
+  forgedUnicodePlayerIdOnce?: boolean; // #127: invisible bidi roster actor in otherwise coherent snapshot.
   forgedPhaseActorMismatchSnapshot?: boolean; // #116: phase1 with active Alice in forged poll.
   forgedAuditChronologySnapshot?: boolean; // #119: high revision with genesis only.
   forgedPublicTurnOrderOnce?: boolean; // #120: coherent next revision but false order.
@@ -136,6 +137,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let forgedSecondMoveIssued = false;
   let forgedForeignAuditIssued = false;
   let forgedForeignActorIssued = false;
+  let forgedUnicodePlayerIdIssued = false;
   let forgedUnknownStreetIssued = false;
   let forgedJoinedHandIssued = false;
   let forgedBobHandIssued = false;
@@ -803,6 +805,31 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       // response before changing session state or the conditional cache.
       // #126: A well-shaped newer event from an outsider cannot be
       // accepted as an authentic public match revision or cached ETag.
+      // #127: coherent roster/turn order/active actor and a public audit
+      // revision, but with an invalid invisible Unicode control in the ID.
+      if (options.forgedUnicodePlayerIdOnce && !forgedUnicodePlayerIdIssued) {
+        forgedUnicodePlayerIdIssued = true;
+        const badId = "al\u202Eice";
+        const nextRevision = revision + 1;
+        const badEtag = `W/"edonism-revision-${nextRevision}"`;
+        const honest = snapshot();
+        observedPolls.push({ status: 200, supplied, etag: badEtag,
+          prefer: request.headers()["prefer"] ?? null });
+        return reply({ status: 200,
+          headers: { ETag: badEtag, "Cache-Control": "no-store" },
+          json: {
+            ...honest, revision: nextRevision, activePlayerId: badId,
+            players: honest.players.map(p => p.playerId === "alice"
+              ? { ...p, playerId: badId } : p),
+            turnOrder: [badId, ...seats.slice(1)],
+            proposedNextRoundOrder: [...seats.slice(-1), badId, ...seats.slice(1, -1)],
+            events: [...auditEvents, {
+              revision: nextRevision, round: 1, kind: "future-public-kind",
+              actorId: badId, fromStreetId: null, toStreetId: null,
+            }],
+          },
+        });
+      }
       if (options.forgedForeignAuditActorOnce && !forgedForeignActorIssued) {
         forgedForeignActorIssued = true;
         const nextRevision = revision + 1;
@@ -1422,6 +1449,35 @@ test("#119: forged high-revision HTTP 200 with gapped audit cannot poison the ac
   await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
   expect(observedHeaders.filter(e => e.path.endsWith("/end-turn"))).toHaveLength(1);
   expect(observedPolls.some(p => p.supplied === 'W/"edonism-revision-96"')).toBe(false);
+});
+
+test("#127: invalid bidi roster ID cannot poison revision, ETag or private actor", async ({ page }) => {
+  const { observedHeaders, observedPolls } = await mockMatchApi(page,
+    { forgedUnicodePlayerIdOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  const badTag = 'W/"edonism-revision-1"';
+  await expect.poll(() => observedPolls.some(p =>
+    p.status === 200 && p.etag === badTag)).toBe(true);
+
+  // The forged next public revision is otherwise internally coherent:
+  // the same bogus ID occurs in the roster, order, active turn and audit.
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(2);
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  expect(observedPolls.some(p => p.supplied === badTag)).toBe(false);
+  expect(observedHeaders.filter(x => x.path.endsWith("/end-turn"))).toHaveLength(0);
+
+  // Genuine command still runs with an unmodified server-issued bearer.
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("dev-audit-event-1")).toHaveAttribute("data-event-kind", "turn-ended");
+  expect(observedHeaders.filter(x => x.path.endsWith("/end-turn"))).toHaveLength(1);
 });
 
 test("#126: outsider audit actor cannot poison revision, ETag or genuine commands", async ({ page }) => {

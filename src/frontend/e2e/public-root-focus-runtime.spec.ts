@@ -128,17 +128,17 @@ for (const count of [2, 4, 8] as const) {
       activityAlreadyControlled: { ...targets.activity, targetId: "S-01" },
     };
     await page.goto("/");
-    const result = await page.evaluate(async ({ cases, focusCases, state }) => {
+    const result = await page.evaluate(async ({ cases, focusCases, state, validLot }) => {
       const { verifiedTacticalFocus } =
         await import("/src/features/city/tacticalFocus.ts");
       const againstBadState = Object.fromEntries(Object.entries(cases)
         .map(([key, value]) => [key, verifiedTacticalFocus(value,
-          targets.lot as Parameters<typeof verifiedTacticalFocus>[1])]));
+          validLot as Parameters<typeof verifiedTacticalFocus>[1])]));
       const againstBadFocus = Object.fromEntries(Object.entries(focusCases)
         .map(([key, value]) => [key, verifiedTacticalFocus(state,
           value as Parameters<typeof verifiedTacticalFocus>[1])]));
       return { againstBadState, againstBadFocus };
-    }, { cases, focusCases: modifiedFocuses, state });
+    }, { cases, focusCases: modifiedFocuses, state, validLot: targets.lot });
     expect(Object.keys(result.againstBadState)).toEqual(Object.keys(cases));
     for (const [name, visible] of Object.entries(result.againstBadState))
       expect(visible, name).toBeNull();

@@ -10,7 +10,9 @@ const unsafeScalar = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 const whiteSpace = /\p{White_Space}/u;
 
 export function isValidDevelopmentTechnicalPlayerId(value: unknown): value is string {
-  if (typeof value !== "string" || value.length < 1 || value.length > 64
+  // #128: reserved genesis actor is not a real match seat (exact casing).
+  if (typeof value !== "string" || value === "system"
+    || value.length < 1 || value.length > 64
     || !value.trim() || value[0] === " " || value[value.length - 1] === " ")
     return false;
 

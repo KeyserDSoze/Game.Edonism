@@ -15,7 +15,9 @@ public static class MatchParticipantId
 
     public static bool IsValid(string? id)
     {
-        if (string.IsNullOrWhiteSpace(id) || id.Length > MaxLength
+        // #128: "system" is the fixed audit-genesis principal, never a seat.
+        // Keep all OTHER identifiers ordinal/case-sensitive (e.g. "System").
+        if (id is "system" || string.IsNullOrWhiteSpace(id) || id.Length > MaxLength
             || id[0] == ' ' || id[^1] == ' ')
             return false;
 

@@ -66,15 +66,19 @@ public sealed class DevelopmentParticipantIdEndpointTests
     [InlineData("slot", "length")]
     [InlineData("slot", "control")]
     [InlineData("slot", "bidi")]
+    [InlineData("slot", "reserved")]
     [InlineData("card", "length")]
     [InlineData("card", "control")]
     [InlineData("card", "bidi")]
+    [InlineData("card", "reserved")]
     [InlineData("character", "length")]
     [InlineData("character", "control")]
     [InlineData("character", "bidi")]
+    [InlineData("character", "reserved")]
     [InlineData("full", "length")]
     [InlineData("full", "control")]
     [InlineData("full", "bidi")]
+    [InlineData("full", "reserved")]
     public async Task EveryCreatorRejectsUnsafeIdWithoutIssuingAnySeat(
         string creator, string invalidKind)
     {
@@ -82,6 +86,7 @@ public sealed class DevelopmentParticipantIdEndpointTests
         {
             "length" => new string('A', MatchParticipantId.MaxLength + 1),
             "control" => "alice\nother",
+            "reserved" => "system",
             _ => "alice\u202Eother"
         };
         using var host = Host();

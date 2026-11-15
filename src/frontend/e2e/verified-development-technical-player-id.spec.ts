@@ -27,11 +27,11 @@ function replaceLastActor(s: ReturnType<typeof fixture>, id: unknown) {
   return copy;
 }
 const validValues = [
-  "Renée", "王小明", "Alpha Player", "Player🙂",
+  "Renée", "王小明", "Alpha Player", "Player🙂", "System", "SYSTEM",
   "A".repeat(64), "界".repeat(64), "🙂".repeat(32),
 ];
 const invalidValues: unknown[] = [
-  null, 5, false, "", " ", "  ", " alice", "alice ",
+  null, 5, false, "", " ", "  ", " alice", "alice ", "system",
   "A".repeat(65), "界".repeat(65), "🙂".repeat(33),
   "alice\nbob", "alice\tbob", "alice\u007fbob",
   "alice\u0085bob", "alice\u200B", "alice\u202Eevil",

@@ -47,6 +47,28 @@ type Hand = Readonly<{ matchId: string; playerId: Seat; cardIds: readonly string
  * The UI talks to the real ASP.NET Core Development API via the Vite proxy.
  * Run only after starting .NET on 127.0.0.1:5080.
  */
+
+// #128: Playwright integration against the REAL .NET Development creator,
+// not a mocked route. Invalid actor names must not allocate a match slot or
+// leak any bearer credentials. No valid fixture is created by this test.
+test("#128: real .NET creator rejects reserved system seat without credentials",
+  async ({ request }) => {
+  const endpoint = "http://127.0.0.1:5080/api/dev/matches/";
+  for (const seats of [
+    [{ playerId: "system", startingSlotId: "N-01" },
+      { playerId: "bob", startingSlotId: "S-01" }],
+    [{ playerId: "alice", startingSlotId: "N-01" },
+      { playerId: "system", startingSlotId: "S-01" }],
+  ]) {
+    const res = await request.post(endpoint, { data: { players: seats } });
+    expect(res.status()).toBe(400);
+    expect(res.headers()["cache-control"]).toContain("no-store");
+    const payload = await res.json() as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("credentials");
+    expect(payload).not.toHaveProperty("state");
+  }
+});
+
 async function startRealMatch(page: Page): Promise<CreatedMatch> {
   await page.goto("/");
   await expect(page.getByTestId("dev-match-lab")).toBeVisible();

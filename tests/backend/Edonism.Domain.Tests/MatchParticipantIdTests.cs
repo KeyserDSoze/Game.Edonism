@@ -13,6 +13,8 @@ public sealed class MatchParticipantIdTests
     [InlineData("王小明")]
     [InlineData("Alpha Player")]
     [InlineData("Player🙂")]
+    [InlineData("System")]
+    [InlineData("SYSTEM")]
     public void AcceptsOrdinaryPrintableTechnicalIdentifiers(string id)
     {
         Assert.True(MatchParticipantId.IsValid(id));
@@ -34,6 +36,7 @@ public sealed class MatchParticipantIdTests
     [InlineData("alice\u2029")]
     [InlineData("alice\u00a0bob")]
     [InlineData("alice\U000E0001other")]
+    [InlineData("system")]
     public void RejectsBlankInvisibleOrControlIdentifiers(string? id)
     {
         Assert.False(MatchParticipantId.IsValid(id));
@@ -91,6 +94,7 @@ public sealed class MatchParticipantIdTests
     [InlineData("control")]
     [InlineData("bidi")]
     [InlineData("surrogate")]
+    [InlineData("reserved")]
     public void EveryAuthoritativeCreationPathRejectsInvalidPlayerIds(string caseName)
     {
         var bad = caseName switch
@@ -98,6 +102,7 @@ public sealed class MatchParticipantIdTests
             "long" => new string('a', 65),
             "control" => "alice\nintruder",
             "surrogate" => "\ud800",
+            "reserved" => "system",
             _ => "alice\u202Eevil"
         };
         var board = BoardCatalog.LoadDefault();

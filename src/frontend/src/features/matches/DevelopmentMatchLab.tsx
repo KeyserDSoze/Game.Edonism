@@ -11,6 +11,7 @@ import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivi
 import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
 import { hasValidDevelopmentPublicEnvelope } from "./verifiedDevelopmentPublicEnvelope";
 import { hasValidDevelopmentCreatorResponse } from "./verifiedDevelopmentCreatorResponse";
+import { hasValidDevelopmentRotatedCredential } from "./verifiedDevelopmentRotatedCredential";
 import { buildVerifiedPublicAuditExport } from "./publicAuditExport";
 import {
   MaxPublicAuditImportBytes, buildOfflinePublicAuditReview,
@@ -1388,9 +1389,15 @@ export function DevelopmentMatchLab({
         return;
       }
       const result = await responseJson<DemoCredential>(response);
-      if (result.playerId !== seatId || !/^[A-F0-9]{64}$/i.test(result.token)
-        || result.token.toLowerCase() === token.toLowerCase()
-        || currentMatchId.current !== matchId)
+      // #115: A valid-looking rotated bearer must not impersonate another
+      // creator-held seat. Check the entire in-memory capability set BEFORE
+      // updating the actor scope, history, revision tag, private hand or UI.
+      if (!hasValidDevelopmentRotatedCredential(
+        result, seatId, previousToken, session.credentials)
+        || currentMatchId.current !== matchId
+        || currentActorScope.current?.matchId !== matchId
+        || currentActorScope.current?.seatId !== seatId
+        || currentActorScope.current?.token !== previousToken)
         throw new Error("invalid_rotated_credential");
       // No change to match, public audit or gameplay revision.
       // Update only the actor's in-memory seat secret.

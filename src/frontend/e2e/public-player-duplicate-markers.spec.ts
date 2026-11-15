@@ -68,16 +68,17 @@ for (const count of [2, 4, 8] as const) {
         [name, playerMarkerPlacements(people, "alice")]));
     }, cases);
     for (const [name, placements] of Object.entries(results)) {
-      const removed = name === "duplicatesTwoOwners" ? 2
-        : name === "unrecognizedDifferentId" || name === "malformedDifferentId"
-          ? 0 : 1;
-      const remaining = valid.slice(removed === 2 ? 2 : removed === 0 ? 0 : 1);
+      const removedIds = name === "duplicatesTwoOwners" ? ["alice", "bob"]
+        : name === "duplicateInactiveOwner" ? ["bob"]
+          : name === "unrecognizedDifferentId" || name === "malformedDifferentId"
+            ? [] : ["alice"];
+      const remaining = valid.filter(p => !removedIds.includes(p.playerId));
       expect(placements.map(p => p.playerId), name).toEqual(
-        [...remaining.map(p => p.playerId)].sort());
+        remaining.map(p => p.playerId).sort());
       expect(placements.every(p => Number.isFinite(p.x) && Number.isFinite(p.z)),
         name).toBe(true);
-      if (removed > 0) expect(placements.some(p => p.playerId ===
-        (name === "duplicateInactiveOwner" ? "bob" : "alice"))).toBe(false);
+      for (const duplicate of removedIds)
+        expect(placements.some(p => p.playerId === duplicate), name).toBe(false);
     }
     expect(JSON.stringify(cases)).toBe(before);
   });

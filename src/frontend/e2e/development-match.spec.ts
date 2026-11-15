@@ -56,6 +56,7 @@ type MockOptions = {
   forgedHigherRevisionSnapshot?: boolean; // #112: corrupt first public poll, never a real command.
   forgedNullAuditEventSnapshot?: boolean; // #113: corrupt first poll with events:[null].
   forgedPhaseActorMismatchSnapshot?: boolean; // #116: phase1 with active Alice in forged poll.
+  forgedAuditChronologySnapshot?: boolean; // #119: high revision with genesis only.
   badControlSlot?: boolean;
   unknownOwner?: boolean;
   missingBoardCard?: boolean;
@@ -63,6 +64,7 @@ type MockOptions = {
   unknownSecretEvent?: boolean;
   playerCount?: number;
   brokenSeatBootstrap?: "wrong-player" | "wrong-revision";
+  forgedJoinedAuditChronologyOnce?: boolean; // #119: false revision in atomic /seat.
   forgedJoinedHandOnce?: boolean; // #118: duplicate private cards in atomic /seat.
   forgedBobHandOnce?: boolean; // #118: malformed 200 /hand before later valid recovery.
   bootstrapUnavailable?: boolean;
@@ -128,6 +130,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let firstHttp503 = false;
   let firstOverloadedPoll = false;
   let forgedHigherRevisionSent = false;
+  let forgedJoinedAuditChronologySent = false;
   let creatorCredentialFaultIssued = false;
   let delayedAlicePresence = false;
   let delayedSettlement = false;
@@ -156,13 +159,15 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     matchId: "00000000-0000-0000-0000-000000000020",
     boardVersion: "edonism-streets-v1",
     round: 1,
-    revision,
+    // The synthetic unknown-kind privacy regression must keep a coherent
+    // public event count, even though .NET won't emit that kind yet.
+    revision: options.unknownSecretEvent ? revision + 1 : revision,
     phase,
     activePlayerId: active,
     turnOrder: [...seats],
     proposedNextRoundOrder: [...seats.slice(-1), ...seats.slice(0, -1)],
     events: options.unknownSecretEvent
-      ? [...auditEvents, { revision: 99, round: 1, kind: "private-action",
+      ? [...auditEvents, { revision: revision + 1, round: 1, kind: "private-action",
           actorId: "alice", fromStreetId: null, toStreetId: null }]
       : [...auditEvents],
     players: seats.map((playerId, index) => ({
@@ -328,6 +333,13 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       if (options.bootstrapUnavailable)
         return reply({ status: 503, json: { code: "unavailable" } });
       const seatHasTurn = phase === 0 && active === seat;
+      const forgedJoinAudit = Boolean(options.forgedJoinedAuditChronologyOnce
+        && !forgedJoinedAuditChronologySent && seat === "bob");
+      if (forgedJoinAudit) forgedJoinedAuditChronologySent = true;
+      // The forged 200 preserves the actor, options and hand; only its public
+      // timeline is contradictory. No server-side revision is committed.
+      const seatState = forgedJoinAudit
+        ? { ...snapshot(), revision: 42 } : snapshot();
       const adjacent: Record<string, string[]> = {
         gauss: ["planck", "newton", "main-square"],
         planck: ["gauss", "einstein", "meson"],
@@ -350,7 +362,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         json: {
           matchId: snapshot().matchId,
           playerId: options.brokenSeatBootstrap === "wrong-player" ? "alice" : seat,
-          state: snapshot(),
+          state: seatState,
           hand: {
             matchId: snapshot().matchId,
             playerId: seat,
@@ -359,7 +371,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           turnOptions: {
             matchId: snapshot().matchId,
             playerId: seat,
-            revision: options.brokenSeatBootstrap === "wrong-revision" ? revision + 1 : revision,
+            revision: options.brokenSeatBootstrap === "wrong-revision"
+              ? revision + 1 : seatState.revision,
             canEndTurn: seatHasTurn,
             freeMoveStreetIds: seatHasTurn && !moved[seat]
               ? adjacent[streets[seat]] ?? [] : [],
@@ -728,10 +741,12 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       }
       const supplied = request.headers()["if-none-match"] ?? null;
       if ((options.forgedHigherRevisionSnapshot || options.forgedNullAuditEventSnapshot
-        || options.forgedPhaseActorMismatchSnapshot)
+        || options.forgedPhaseActorMismatchSnapshot
+        || options.forgedAuditChronologySnapshot)
         && !forgedHigherRevisionSent) {
         forgedHigherRevisionSent = true;
-        const forgedRevision = options.forgedPhaseActorMismatchSnapshot ? 97
+        const forgedRevision = options.forgedAuditChronologySnapshot ? 96
+          : options.forgedPhaseActorMismatchSnapshot ? 97
           : options.forgedNullAuditEventSnapshot ? 98 : 99;
         const invalidEtag = `W/"edonism-revision-${forgedRevision}"`;
         observedPolls.push({
@@ -740,11 +755,13 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         });
         return reply({
           status: 200, headers: { ETag: invalidEtag, "Cache-Control": "no-store" },
-          json: options.forgedPhaseActorMismatchSnapshot
-            ? { ...snapshot(), revision: forgedRevision, phase: 1, activePlayerId: "alice" }
-            : options.forgedNullAuditEventSnapshot
-              ? { ...snapshot(), revision: forgedRevision, events: [null] }
-              : { ...snapshot(), revision: forgedRevision, players: null },
+          json: options.forgedAuditChronologySnapshot
+            ? { ...snapshot(), revision: forgedRevision, events: [...auditEvents] }
+            : options.forgedPhaseActorMismatchSnapshot
+              ? { ...snapshot(), revision: forgedRevision, phase: 1, activePlayerId: "alice" }
+              : options.forgedNullAuditEventSnapshot
+                ? { ...snapshot(), revision: forgedRevision, events: [null] }
+                : { ...snapshot(), revision: forgedRevision, players: null },
         });
       }
       if (options.overloadFirstConditionalWait && !firstOverloadedPoll
@@ -794,7 +811,13 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
 
     if (options.conflictOnFirstMove && path.endsWith("/free-move") && !conflictRaised) {
       conflictRaised = true;
-      revision = 3; // A competing actor/worker updated the server.
+      // A separate tab legitimately ended Alice's turn before her old 0
+      // revision move could commit. Keep the mock's public timeline identical
+      // to what the .NET Domain would emit, rather than inventing revision 3.
+      revision = 1;
+      active = seats[1];
+      auditEvents.push({ revision, round: 1, kind: "turn-ended",
+        actorId: "alice", fromStreetId: null, toStreetId: null });
       return reply({ status: 409, json: { code: "revision_conflict" } });
     }
 
@@ -952,7 +975,7 @@ test("HTTP 409 refreshes authoritative snapshot instead of guessing a move", asy
   await expect(page.getByTestId("dev-position")).toHaveText("Gauss Avenue");
   await page.getByTestId("dev-move-planck").click();
   await expect(page.getByTestId("dev-error")).toContainText("stato aggiornato");
-  await expect(page.getByTestId("dev-revision")).toHaveText("3");
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
   await expect(page.getByTestId("dev-position")).toHaveText("Gauss Avenue");
 });
 
@@ -1091,7 +1114,7 @@ test("WebGL fallback still exposes authoritative player streets and refresh on H
   await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "gauss");
   await page.getByTestId("dev-move-planck").click();
   await expect(page.getByTestId("dev-error")).toContainText("stato aggiornato");
-  await expect(page.getByTestId("dev-revision")).toHaveText("3");
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
   // Rejected move: roster and inspector remain on the server-confirmed street.
   await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "gauss");
   await expect(page.getByTestId("selected-street")).toHaveText("Gauss Avenue");
@@ -1423,7 +1446,7 @@ test("activity ownership survives 409 refresh and is accessible without WebGL on
   await page.getByTestId("dev-create").click();
   await expect(page.getByTestId("controlled-lot-S-01")).toHaveAttribute("data-owner-id", "bob");
   await page.getByTestId("dev-move-planck").click();
-  await expect(page.getByTestId("dev-revision")).toHaveText("3");
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
   await expect(page.getByTestId("controlled-lot-S-01")).toHaveAttribute("data-owner-id", "bob");
   await expect(page.getByTestId("controlled-lot-N-01")).toHaveAttribute("data-posture", "standing");
   await expect(page.getByTestId("match-activity-roster")).toContainText("Gross salary quotes");
@@ -1463,7 +1486,7 @@ test("unknown private audit event kinds never render, and revisions do not leak 
   await page.goto("/");
   await page.getByTestId("dev-create").click();
   await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
-  await expect(page.getByTestId("dev-audit-event-99")).toHaveCount(0);
+  await expect(page.getByTestId("dev-audit-event-1")).toHaveCount(0);
   await expect(page.getByTestId("dev-audit-list")).not.toContainText("private-action");
   const text = await page.getByTestId("dev-audit-panel").innerText();
   expect(text).not.toContain("demo:action:");
@@ -1471,7 +1494,7 @@ test("unknown private audit event kinds never render, and revisions do not leak 
   expect(text).not.toContain("b".repeat(64));
 });
 
-test("409 reconciliation does not invent audit events and works without WebGL in English", async ({ page }) => {
+test("409 reconciliation shows only the concurrent server event without WebGL", async ({ page }) => {
   await page.addInitScript(() => {
     const nativeGetContext = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = (function (
@@ -1486,11 +1509,12 @@ test("409 reconciliation does not invent audit events and works without WebGL in
   await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
   await expect(page.getByTestId("city-renderer").getByRole("status")).toContainText("3D is not available");
   await page.getByTestId("dev-create").click();
-  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(2);
   await page.getByTestId("dev-move-planck").click();
-  await expect(page.getByTestId("dev-revision")).toHaveText("3");
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
   await expect(page.getByTestId("dev-error")).toContainText("state refreshed");
   await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("dev-audit-event-1")).toHaveAttribute("data-event-kind", "turn-ended");
   await expect(page.getByTestId("dev-next-order")).toContainText("bob");
   await expect(page.getByTestId("dev-audit-panel")).toContainText("no next round");
 });

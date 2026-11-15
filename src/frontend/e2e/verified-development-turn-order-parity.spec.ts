@@ -8,6 +8,7 @@ type SeatCount = 2 | 4 | 8;
 function genesis(count: SeatCount) {
   const seats = names.slice(0, count);
   return {
+    boardVersion: "edonism-streets-v1",
     matchId: "verified-turn-order",
     round: 1, revision: 0, phase: 0, activePlayerId: seats[0] as string | null,
     players: seats.map((playerId, index) => ({

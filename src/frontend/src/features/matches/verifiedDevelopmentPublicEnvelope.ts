@@ -88,11 +88,14 @@ export function hasValidDevelopmentPublicEnvelope(
   // TurnOrder and a PROPOSED last-to-first next-round order. A permutation
   // alone is not enough: forged HTTP 200 projections must not display an
   // invented future PvP seating advantage. No gameplay action is derived.
-  const count = value.turnOrder.length;
+  // sameSeatSet has already checked every element's runtime string type.
+  // Keep the TypeScript narrowing local and AFTER that validation.
+  const turnOrder = value.turnOrder as readonly string[];
+  const count = turnOrder.length;
   return value.players.every((player, index) =>
-      player.playerId === value.turnOrder[index])
+      player.playerId === turnOrder[index])
     && value.proposedNextRoundOrder.every((id, index) =>
-      id === value.turnOrder[(index + count - 1) % count])
+      id === turnOrder[(index + count - 1) % count])
     && (value.activePlayerId === null || (typeof value.activePlayerId === "string"
       && ids.has(value.activePlayerId)));
 }

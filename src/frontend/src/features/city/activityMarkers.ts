@@ -113,6 +113,10 @@ export function publicGrossSalaryQuotes(state: PublicMatchSceneState): PublicGro
       knownOwners.add(player.playerId);
     }
 
+    // A forged omission must not look like a complete server quote set.
+    // Every public seat has one gross quote, including zero-standing seats.
+    if (state.grossSalaryQuotes.length !== knownOwners.size) return [];
+
     // This is the existing public renderer's fully checked slot/card/owner/
     // posture projection. If any controlled lot is unrenderable or duplicated,
     // its supposedly authoritative standing count cannot be trusted.

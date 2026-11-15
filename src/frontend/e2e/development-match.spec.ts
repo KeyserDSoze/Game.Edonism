@@ -47,6 +47,7 @@ type MockOptions = {
   unknownStreet?: boolean;
   fallenHenchman?: boolean;
   invalidGrossQuote?: boolean; // #105: forged public total, never server wallet state.
+  missingGrossQuote?: boolean; // #107: a forged incomplete public quote set.
   badControlSlot?: boolean;
   unknownOwner?: boolean;
   missingBoardCard?: boolean;
@@ -172,16 +173,18 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         posture: options.fallenHenchman ? 1 : 0,
       },
     ],
-    grossSalaryQuotes: [
-      { playerId: "alice", baseAtoms: 2, standingActivityAtoms: 1,
-        grossAtoms: options.invalidGrossQuote ? 999 : 3 },
-      {
-        playerId: "bob",
-        baseAtoms: 2,
-        standingActivityAtoms: options.fallenHenchman ? 0 : 1,
-        grossAtoms: options.fallenHenchman ? 2 : 3,
-      },
-    ],
+    // #107: one public read-only quote per synthetic seat, including
+    // additional seats without controlled activities (2 base / 0 standing).
+    // These values are *not* server-authored wallet credits.
+    grossSalaryQuotes: seats.map(playerId => {
+      const standingActivityAtoms = playerId === "alice"
+        || (playerId === "bob" && !options.fallenHenchman) ? 1 : 0;
+      return {
+        playerId, baseAtoms: 2, standingActivityAtoms,
+        grossAtoms: playerId === "alice" && options.invalidGrossQuote
+          ? 999 : 2 + standingActivityAtoms,
+      };
+    }).filter(quote => !options.missingGrossQuote || quote.playerId !== "bob"),
   });
 
   const verifiedHistory = () => {
@@ -1022,6 +1025,57 @@ test("#105: forged gross salary quote hides all public wage rows, not gameplay c
   await page.getByTestId("dev-end-turn").click();
   await expect(page.getByTestId("dev-revision")).toHaveText("1");
   await expect(page.getByTestId("gross-salary-alice")).toHaveCount(0);
+});
+
+
+/** #107: DOM-only gross quote tests don't require expensive 3D graphics. */
+async function disableWebGLForGrossSalaryTests(page: Page) {
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: function (this: HTMLCanvasElement, kind: string, ...args: unknown[]) {
+        if (kind === "webgl" || kind === "webgl2" || kind === "experimental-webgl")
+          return null;
+        return Reflect.apply(original, this, [kind, ...args]);
+      },
+    });
+  });
+}
+
+test("#107: eight-seat mocked public sidebar shows exactly one server-style gross quote per seat",
+  async ({ page }) => {
+  await disableWebGLForGrossSalaryTests(page);
+  await mockMatchApi(page, { playerCount: 8 });
+  await page.goto("/");
+  await expect(page.getByTestId("city-renderer").getByRole("status"))
+    .toContainText("3D non è disponibile");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  await page.getByTestId("dev-create").click();
+  for (const player of demoSeats) {
+    const expected = player === "alice" || player === "bob" ? "3" : "2";
+    await expect(page.getByTestId(`gross-salary-${player}`))
+      .toHaveAttribute("data-gross-atoms", expected);
+  }
+  await expect(page.getByTestId("match-activity-roster")).toBeVisible();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+});
+
+test("#107: an omitted eight-seat gross quote hides all wage rows without removing public lots",
+  async ({ page }) => {
+  await disableWebGLForGrossSalaryTests(page);
+  await mockMatchApi(page, { playerCount: 8, missingGrossQuote: true });
+  await page.goto("/");
+  await page.getByTestId("dev-player-count").selectOption("8");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("match-activity-roster")).toBeVisible();
+  await expect(page.getByTestId("controlled-lot-N-01")).toBeVisible();
+  await expect(page.getByTestId("controlled-lot-S-01")).toBeVisible();
+  for (const player of demoSeats)
+    await expect(page.getByTestId(`gross-salary-${player}`)).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
 });
 
 test("fallen henchmen show explicit posture and gross quotes are not wallet credits", async ({ page }) => {

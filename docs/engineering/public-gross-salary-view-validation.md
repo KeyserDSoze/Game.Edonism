@@ -38,3 +38,30 @@ the exact latest main HEAD**.
 ## Functional validation result
 
 [CI #43700125397](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43700125397) on implementation SHA `05074908588d8b7d0d2d3c3eabfb30278de9837e` completed **all 3/3 jobs successfully**: **665/665 xUnit**, **186/186 mocked Playwright** (6.4 minutes; seven #105 pure cases + one #105 mocked UI), and **40/40 live Playwright against real .NET** (8.3 minutes), **891/891** tests total. No skipped tests, no change to Production API, private card/token storage or server wallet rules. Issue closure still requires another 3/3 run on the final documentation-only HEAD.
+
+## #107 — Completeness of public per-seat gross salary quotes
+
+The #105 row validator protects against forged totals, unknown/duplicate owners,
+malformed lot cards and posture counts, but it must **also** reject omission:
+a public snapshot with eight players and only two salary rows is not complete
+even when those two numbers are internally consistent.
+
+The view now requires `grossSalaryQuotes.length === unique public player count`
+**before** evaluating each #105 row. Together with the #105 unique known owner
+check, this establishes an exact one-to-one public seat/quote mapping. Every
+player is represented, including a player with zero standing activities
+(`baseAtoms: 2`, `standingActivityAtoms: 0`, `grossAtoms: 2`). No quote
+is synthesized by this function and existing server row ordering is preserved.
+
+The mocked Development fixture now emits one synthetic quote for each of its
+2–8 public seats, derived solely from its already mocked publicly controlled
+activities, not from private cards or any command; old 2-seat behavior remains
+unchanged. Pure browser-loaded tests cover complete/missing/empty/reversed quote
+lists for 2/4/8 seats. Two full 8-seat mocked-browser tests check either
+the eight visible quotes or that one omitted quote hides **all** salary rows
+while public lots, private hand and server-confirmed command permissions stay
+independent. Both DOM tests explicitly use the supported 3D-unavailable
+fallback without changing global worker count, timeout, or other browser tests.
+
+[Issue #107](https://github.com/KeyserDSoze/Game.Edonism/issues/107).
+Final latest main SHA 3/3 CI gate required before issue closure.

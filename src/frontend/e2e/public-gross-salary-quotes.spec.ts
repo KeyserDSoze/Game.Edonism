@@ -96,6 +96,37 @@ for (const count of [2, 4, 8] as const) {
   });
 }
 
+
+for (const count of [2, 4, 8] as const) {
+  test(`#107: ${count}-seat missing/empty quotes fail closed, complete reverse order is preserved`,
+    async ({ page }) => {
+    const complete = fixture(count);
+    const missing = structuredClone(complete);
+    missing.grossSalaryQuotes.pop();
+    const empty = structuredClone(complete);
+    empty.grossSalaryQuotes.length = 0;
+    const reversed = structuredClone(complete);
+    reversed.grossSalaryQuotes.reverse();
+    const before = JSON.stringify({ complete, missing, empty, reversed });
+    await page.goto("/");
+    const projections = await page.evaluate(async states => {
+      const { publicGrossSalaryQuotes } =
+        await import("/src/features/city/activityMarkers.ts");
+      return {
+        complete: publicGrossSalaryQuotes(states.complete),
+        missing: publicGrossSalaryQuotes(states.missing),
+        empty: publicGrossSalaryQuotes(states.empty),
+        reversed: publicGrossSalaryQuotes(states.reversed),
+      };
+    }, { complete, missing, empty, reversed });
+    expect(projections.complete).toEqual(complete.grossSalaryQuotes);
+    expect(projections.missing).toEqual([]);
+    expect(projections.empty).toEqual([]);
+    expect(projections.reversed).toEqual(reversed.grossSalaryQuotes);
+    expect(JSON.stringify({ complete, missing, empty, reversed })).toBe(before);
+  });
+}
+
 test("#105: malformed public quote projections never throw or display gross values",
   async ({ page }) => {
   const state = fixture(2);

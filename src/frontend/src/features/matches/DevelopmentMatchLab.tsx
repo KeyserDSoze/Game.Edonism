@@ -15,6 +15,7 @@ import { hasValidDevelopmentRotatedCredential } from "./verifiedDevelopmentRotat
 import { hasValidDevelopmentTurnOptions } from "./verifiedDevelopmentTurnOptions";
 import { hasValidDevelopmentFirstRoundHand } from "./verifiedDevelopmentFirstRoundHand";
 import { hasValidDevelopmentPublicAuditChronology } from "./verifiedDevelopmentPublicAuditChronology";
+import { hasSameDevelopmentPublicSnapshotAtRevision } from "./verifiedDevelopmentSameRevisionSnapshot";
 import { buildVerifiedPublicAuditExport } from "./publicAuditExport";
 import {
   MaxPublicAuditImportBytes, buildOfflinePublicAuditReview,
@@ -314,6 +315,9 @@ export function DevelopmentMatchLab({
   // Monotonic authority guards: HTTP polling/commands may resolve out of order.
   const currentMatchId = useRef<string | null>(null);
   const currentRevision = useRef(-1);
+  // The latest verified public projection is held synchronously with its
+  // revision, so delayed HTTP 200 cannot prime an ETag on conflicting data.
+  const currentPublicSnapshot = useRef<DemoMatch | null>(null);
   const commandInFlight = useRef(false);
   // In-memory, actor-bound conditional HTTP tag. Never write credentials,
   // private cards or ETags to local/session storage.
@@ -662,6 +666,8 @@ export function DevelopmentMatchLab({
       currentActorScope.current = null;
       currentMatchId.current = null;
       currentRevision.current = -1;
+      currentPublicSnapshot.current = null;
+
       setSession(null);
       setActorId("");
       publishPublicPositions(null);
@@ -687,6 +693,7 @@ export function DevelopmentMatchLab({
       || next.revision <= currentRevision.current)
       return false;
     currentRevision.current = next.revision;
+    currentPublicSnapshot.current = next;
     setSession((previous) =>
       previous?.matchId === matchId ? { ...previous, state: next } : previous);
     publishPublicPositions(next);
@@ -1169,11 +1176,16 @@ export function DevelopmentMatchLab({
             // #119: A same-revision 200 may update the ETag only when
             // its entire public first-round event sequence is coherent.
             && hasValidDevelopmentPublicAuditChronology(next, matchId)
-            && next.revision >= currentRevision.current) {
-            // Even a same-revision 200 is safe to ETag-cache only after
-            // validating its public envelope; a forged revision-99 snapshot
-            // must NEVER become a cached conditional-poll tag.
-            acceptServerState(next, matchId);
+            && (next.revision > currentRevision.current
+              // #121: A 200 for the SAME revision may establish an ETag
+              // only when the complete public JSON projection is identical.
+              || (next.revision === currentRevision.current
+                && hasSameDevelopmentPublicSnapshotAtRevision(
+                  currentPublicSnapshot.current, next, matchId)))) {
+            // Only a NEWER revision changes React state. The identical
+            // same-revision projection may safely establish an HTTP tag.
+            if (next.revision > currentRevision.current
+              && !acceptServerState(next, matchId)) return;
             const value = response.headers.get("ETag");
             const expected = `W/"edonism-revision-${next.revision}"`;
             lastPublicTag.current = value === expected
@@ -1243,6 +1255,8 @@ export function DevelopmentMatchLab({
     currentActorScope.current = null;
     currentMatchId.current = null;
     currentRevision.current = -1;
+    currentPublicSnapshot.current = null;
+
     setSession(null);
     publishPublicPositions(null);
     try {
@@ -1277,6 +1291,7 @@ export function DevelopmentMatchLab({
         throw new Error("invalid_dev_fixture");
       currentMatchId.current = created.matchId;
       currentRevision.current = created.state.revision;
+      currentPublicSnapshot.current = created.state;
       currentActorScope.current = {
         matchId: created.matchId,
         seatId: created.credentials[0].playerId,
@@ -1319,6 +1334,8 @@ export function DevelopmentMatchLab({
     currentActorScope.current = null;
     currentMatchId.current = null;
     currentRevision.current = -1;
+    currentPublicSnapshot.current = null;
+
     setSession(null);
     publishPublicPositions(null);
     try {
@@ -1347,6 +1364,7 @@ export function DevelopmentMatchLab({
         throw new Error("invalid_seat_bootstrap");
       currentMatchId.current = state.matchId;
       currentRevision.current = state.revision;
+      currentPublicSnapshot.current = state;
       currentActorScope.current = { matchId: state.matchId, seatId: actor, token: secret };
       bootstrappedSeat.current = {
         matchId: state.matchId, seatId: actor, token: secret, revision: state.revision,
@@ -1546,6 +1564,8 @@ export function DevelopmentMatchLab({
     currentActorScope.current = null;
     currentMatchId.current = null;
     currentRevision.current = -1;
+    currentPublicSnapshot.current = null;
+
     lastPublicTag.current = null;
     bootstrappedSeat.current = null;
     setSession(null);

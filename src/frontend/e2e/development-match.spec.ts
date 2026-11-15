@@ -48,6 +48,7 @@ type MockOptions = {
   fallenHenchman?: boolean;
   invalidGrossQuote?: boolean; // #105: forged public total, never server wallet state.
   missingGrossQuote?: boolean; // #107: a forged incomplete public quote set.
+  forgedHigherRevisionSnapshot?: boolean; // #112: corrupt first public poll, never a real command.
   badControlSlot?: boolean;
   unknownOwner?: boolean;
   missingBoardCard?: boolean;
@@ -111,6 +112,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let firstResponseDropped = false;
   let firstHttp503 = false;
   let firstOverloadedPoll = false;
+  let forgedHigherRevisionSent = false;
   let delayedAlicePresence = false;
   let delayedSettlement = false;
   let delayedAliceTurnProgress = false;
@@ -668,6 +670,18 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         return reply({ status: 503, json: { code: "temporarily_unavailable" } });
       }
       const supplied = request.headers()["if-none-match"] ?? null;
+      if (options.forgedHigherRevisionSnapshot && !forgedHigherRevisionSent) {
+        forgedHigherRevisionSent = true;
+        const invalidEtag = 'W/"edonism-revision-99"';
+        observedPolls.push({
+          status: 200, supplied, etag: invalidEtag,
+          prefer: request.headers()["prefer"] ?? null,
+        });
+        return reply({
+          status: 200, headers: { ETag: invalidEtag, "Cache-Control": "no-store" },
+          json: { ...snapshot(), revision: 99, players: null },
+        });
+      }
       if (options.overloadFirstConditionalWait && !firstOverloadedPoll
         && supplied === etag && request.headers()["prefer"] === "wait=5") {
         firstOverloadedPoll = true;
@@ -972,6 +986,43 @@ test("WebGL fallback still exposes authoritative player streets and refresh on H
   // Rejected move: roster and inspector remain on the server-confirmed street.
   await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "gauss");
   await expect(page.getByTestId("selected-street")).toHaveText("Gauss Avenue");
+});
+
+
+test("#112: malformed higher-revision poll cannot poison actor state or block later valid commit",
+  async ({ page }) => {
+  // The test concerns public JSON acceptance, not the 3D city scene.
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: function (this: HTMLCanvasElement, kind: string, ...args: unknown[]) {
+        if (kind === "webgl" || kind === "webgl2" || kind === "experimental-webgl")
+          return null;
+        return Reflect.apply(original, this, [kind, ...args]);
+      },
+    });
+  });
+  const { observedPolls, observedHeaders } = await mockMatchApi(page,
+    { forgedHigherRevisionSnapshot: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect.poll(() => observedPolls.some(p =>
+    p.status === 200 && p.etag === 'W/"edonism-revision-99"')).toBe(true);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "gauss");
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  expect(observedHeaders.filter(e => e.path.endsWith("/end-turn")
+    || e.path.endsWith("/free-move"))).toHaveLength(0);
+
+  // A legitimate server command remains possible at revision zero and
+  // its confirmed revision one is accepted rather than shadowed by 99.
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+  expect(observedHeaders.filter(e => e.path.endsWith("/end-turn"))).toHaveLength(1);
 });
 
 test("controlled lots, cards and standing henchmen stay server-owned after moves and seat switches", async ({ page }) => {

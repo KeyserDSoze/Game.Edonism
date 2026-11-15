@@ -9,6 +9,7 @@ import type { TacticalFocus } from "@/features/city/tacticalFocus";
 import type { HistoricalStreetFocus } from "@/features/city/historicalStreetFocus";
 import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
 import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
+import { hasValidDevelopmentPublicEnvelope } from "./verifiedDevelopmentPublicEnvelope";
 import { buildVerifiedPublicAuditExport } from "./publicAuditExport";
 import {
   MaxPublicAuditImportBytes, buildOfflinePublicAuditReview,
@@ -675,8 +676,9 @@ export function DevelopmentMatchLab({
 
   /** Apply only a newer snapshot for the CURRENT match, never an old HTTP result. */
   function acceptServerState(next: DemoMatch, matchId: string): boolean {
-    if (currentMatchId.current !== matchId || next.matchId !== matchId
-      || !Number.isInteger(next.revision) || next.revision <= currentRevision.current)
+    if (currentMatchId.current !== matchId
+      || !hasValidDevelopmentPublicEnvelope(next, matchId)
+      || next.revision <= currentRevision.current)
       return false;
     currentRevision.current = next.revision;
     setSession((previous) =>
@@ -1256,7 +1258,9 @@ export function DevelopmentMatchLab({
       }
       const created = await responseJson<DemoSession>(response);
       const playerIds = demoSeatIds.slice(0, playerCount);
-      if (created.credentials.length !== playerCount || created.state.players.length !== playerCount
+      if (!created || !hasValidDevelopmentPublicEnvelope(created.state, created.matchId)
+        || !Array.isArray(created.credentials)
+        || created.credentials.length !== playerCount || created.state.players.length !== playerCount
         || !playerIds.every((id) => created.credentials.some((seat) => seat.playerId === id)
           && created.state.players.some((seat) => seat.playerId === id))) {
         throw new Error("invalid_dev_fixture");
@@ -1316,7 +1320,8 @@ export function DevelopmentMatchLab({
       ));
       const { state, hand: privateHand, turnOptions: options } = bootstrap;
       const actor = bootstrap.playerId;
-      if (bootstrap.matchId.toLowerCase() !== id || state.matchId.toLowerCase() !== id
+      if (!hasValidDevelopmentPublicEnvelope(state, id)
+        || bootstrap.matchId.toLowerCase() !== id || state.matchId.toLowerCase() !== id
         || privateHand.matchId.toLowerCase() !== id || options.matchId.toLowerCase() !== id
         || privateHand.playerId !== actor || options.playerId !== actor
         || !state.players.some((p) => p.playerId === actor)

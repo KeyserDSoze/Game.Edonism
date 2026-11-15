@@ -60,6 +60,7 @@ type MockOptions = {
   forgedPhaseActorMismatchSnapshot?: boolean; // #116: phase1 with active Alice in forged poll.
   forgedAuditChronologySnapshot?: boolean; // #119: high revision with genesis only.
   forgedPublicTurnOrderOnce?: boolean; // #120: coherent next revision but false order.
+  forgedSameRevisionOnce?: "street" | "quote"; // #121: valid 200, same revision but different public JSON.
   badControlSlot?: boolean;
   unknownOwner?: boolean;
   missingBoardCard?: boolean;
@@ -134,6 +135,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let firstHttp503 = false;
   let firstOverloadedPoll = false;
   let forgedHigherRevisionSent = false;
+  let forgedSameRevisionSent = false;
   let forgedJoinedAuditChronologySent = false;
   let forgedJoinedTurnOrderSent = false;
   let creatorCredentialFaultIssued = false;
@@ -764,6 +766,24 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         return reply({ status: 503, json: { code: "temporarily_unavailable" } });
       }
       const supplied = request.headers()["if-none-match"] ?? null;
+      if (options.forgedSameRevisionOnce && !forgedSameRevisionSent) {
+        forgedSameRevisionSent = true;
+        const base = snapshot();
+        // #121: HTTP 200 and ETag claim the CORRECT revision with an
+        // otherwise valid public envelope, chronology and turn order.
+        // The player street or gross quote silently disagrees with the
+        // already accepted creator snapshot: no command was committed.
+        const forged = options.forgedSameRevisionOnce === "street"
+          ? { ...base, players: base.players.map(player =>
+              player.playerId === "bob" ? { ...player, streetId: "boson" } : player) }
+          : { ...base, grossSalaryQuotes: base.grossSalaryQuotes.map(quote =>
+              quote.playerId === "alice" ? { ...quote, grossAtoms: 999 } : quote) };
+        observedPolls.push({
+          status: 200, supplied, etag, prefer: request.headers()["prefer"] ?? null,
+        });
+        return reply({ status: 200,
+          headers: { ETag: etag, "Cache-Control": "no-store" }, json: forged });
+      }
       if ((options.forgedHigherRevisionSnapshot || options.forgedNullAuditEventSnapshot
         || options.forgedPhaseActorMismatchSnapshot
         || options.forgedAuditChronologySnapshot
@@ -1440,6 +1460,51 @@ test("#120: joined seat rejects forged next-round rotation without mounting priv
   }));
   expect(JSON.stringify(storage)).not.toContain(mockSeatToken(1));
 });
+
+for (const corrupted of ["street", "quote"] as const) {
+  test(`#121: forged same-revision ${corrupted} HTTP 200 never primes ETag; valid poll recovers`,
+    async ({ page }) => {
+    const { observedPolls, observedHeaders } = await mockMatchApi(page,
+      { forgedSameRevisionOnce: corrupted });
+    await page.goto("/");
+    await page.getByTestId("dev-create").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+    await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+
+    // #121: Only the first 200 is a forged public projection. A refused
+    // same-revision response MUST NOT seed If-None-Match. A subsequent
+    // genuine 200 (still revision 0) safely enables conditional 304.
+    await expect.poll(() => observedPolls.filter(p =>
+      p.status === 200 && p.supplied === null).length,
+    { timeout: 10000 }).toBeGreaterThanOrEqual(2);
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    await expect(page.getByTestId("match-player-bob")).toHaveAttribute(
+      "data-street-id", "einstein");
+    await expect(page.getByTestId("dev-next-order").locator("li"))
+      .toHaveText(["1.bob", "2.alice"]);
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+    await expect.poll(() => observedPolls.some(p =>
+      p.status === 304 && p.supplied === 'W/"edonism-revision-0"'),
+    { timeout: 10000 }).toBe(true);
+
+    // The next accepted turn, not a forged 200, advances public revision.
+    await page.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("dev-audit-event-1"))
+      .toHaveAttribute("data-event-kind", "turn-ended");
+    expect(observedHeaders.filter(item => item.path.endsWith("/end-turn")))
+      .toHaveLength(1);
+
+    const privacy = await page.evaluate(() => ({
+      url: location.href, local: Object.values(localStorage),
+      session: Object.values(sessionStorage),
+    }));
+    for (const secret of [mockSeatToken(0), mockSeatToken(1)])
+      expect(JSON.stringify(privacy)).not.toContain(secret);
+  });
+}
 
 test("controlled lots, cards and standing henchmen stay server-owned after moves and seat switches", async ({ page }) => {
   await mockMatchApi(page);

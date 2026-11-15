@@ -11,7 +11,8 @@ function fixture(count: 2 | 4 | 8) {
     })),
     turnOrder: [...ids],
     proposedNextRoundOrder: [...ids.slice(-1), ...ids.slice(0, -1)],
-    events: [{ revision: 0, kind: "match-created" }],
+    events: [{ revision: 0, round: 1, kind: "match-created",
+      actorId: "system", fromStreetId: null, toStreetId: null }],
     boardActivities: [{ slotId: "N-01", cardId: "demo:activity:gauss", category: "culture" }],
     controlledActivities: [{ slotId: "N-01", ownerPlayerId: "alice", posture: 0 }],
     grossSalaryQuotes: ids.map(playerId => ({

@@ -1,9 +1,13 @@
+import { isPublicMatchEventRecord } from "./publicAudit";
+
 /**
  * #112: a deliberately NARROW public Development snapshot envelope guard.
  *
  * A JSON response is not type-safe just because responseJson<T> cast it.
  * This guard runs BEFORE match revision/session/ETag changes; the domain and
  * .NET audit replay are still authoritative for moves and event semantics.
+ * Every public audit event record must have a safe runtime shape, because
+ * the event feed runs during React render after a snapshot is accepted.
  * Intentionally DO NOT validate each board card / lot / quote value here:
  * independent #105/#108/#111 view projections must fail closed without
  * suppressing other valid public information and server command permissions.
@@ -49,7 +53,8 @@ export function hasValidDevelopmentPublicEnvelope(
     || !Array.isArray(value.events)
     || !Array.isArray(value.boardActivities)
     || !Array.isArray(value.controlledActivities)
-    || !Array.isArray(value.grossSalaryQuotes)) return false;
+    || !Array.isArray(value.grossSalaryQuotes)
+    || !value.events.every(isPublicMatchEventRecord)) return false;
 
   const ids = new Set<string>();
   for (const player of value.players) {

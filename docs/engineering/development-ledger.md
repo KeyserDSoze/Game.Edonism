@@ -4,8 +4,8 @@ GitHub Issues are the detailed source of truth. Work is committed directly to `m
 
 | Issue | Version | Work | Status | Verification |
 |---|---|---|---|---|
-| [#124](https://github.com/KeyserDSoze/Game.Edonism/issues/124) | 0.0.2 | Reject noncanonical actor-scoped free-move option street destinations at HTTP ingress | In progress | Pure 2/4/8 Playwright, full mocked UI, .NET Domain xUnit and exact-final-main CI pending |
-| [#123](https://github.com/KeyserDSoze/Game.Edonism/issues/123) | 0.0.2 | Validate canonical player streets at Development public snapshot ingress, prior to revision/session/ETag | In progress | Playwright 2/4/8 + xUnit canonical parity and exact-HEAD 3/3 CI pending |
+| [#124](https://github.com/KeyserDSoze/Game.Edonism/issues/124) | 0.0.2 | Canonical actor-scoped free-move option destination membership; preserve .NET movement authority and session recovery | Done (direct main) | [CI #43770637727](https://github.com/KeyserDSo/Game.Edonism/actions/runs/43770637727): 683/683 xUnit, 328/328 Playwright UI, 40/40 Playwright live, 3/3 green on `779f09f`; documentation-final SHA gate required before closure |
+| [#123](https://github.com/KeyserDSoze/Game.Edonism/issues/123) | 0.0.2 | Canonical player street IDs at Development public ingress, secure creator/join/poll/command session/revision/ETag | Done (direct main) | [CI #43770637727](https://github.com/KeyserDSo/Game.Edonism/actions/runs/43770637727): 683/683 xUnit, 328/328 Playwright UI, 40/40 Playwright live, 3/3 green on `779f09f`; documentation-final SHA gate required before closure |
 | [#1](https://github.com/KeyserDSoze/Game.Edonism/issues/1) | 0.0.1 | Foundation: React/Three.js, .NET 10, CI | Done | PR #2 merged, CI green |
 | [#4](https://github.com/KeyserDSoze/Game.Edonism/issues/4) | 0.0.2 | Printed rulebook baseline and unresolved design | In progress | Baseline merged #10; signoff and R-10 board inferred edges pending |
 | [#5](https://github.com/KeyserDSoze/Game.Edonism/issues/5) | 0.0.2 | 30-slot street graph, 3D viewer | Done | PR #11 merged, 28 xUnit + 5 Playwright |

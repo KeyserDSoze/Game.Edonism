@@ -17,6 +17,7 @@ const publicEvents: Event[] = [
 function fixture(count: 2 | 4 | 8) {
   const ids = names.slice(0, count);
   return {
+    boardVersion: "edonism-streets-v1",
     matchId: "typed-public-events", revision: 2, round: 1, phase: 0,
     activePlayerId: "bob",
     players: ids.map((playerId, i) => ({

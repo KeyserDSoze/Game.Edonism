@@ -36,8 +36,10 @@ export function hasValidDevelopmentPublicEnvelope(
 ): value is PublicDevelopmentSnapshotEnvelope {
   if (!isRecord(value) || typeof expectedMatchId !== "string"
     || value.matchId !== expectedMatchId
-    || !Number.isSafeInteger(value.revision) || (value.revision as number) < 0
-    || !Number.isSafeInteger(value.round) || (value.round as number) < 1
+    || typeof value.revision !== "number"
+    || !Number.isSafeInteger(value.revision) || value.revision < 0
+    || typeof value.round !== "number"
+    || !Number.isSafeInteger(value.round) || value.round < 1
     || (value.phase !== 0 && value.phase !== 1)
     || (value.activePlayerId !== null && typeof value.activePlayerId !== "string")
     || !Array.isArray(value.players)
@@ -71,5 +73,6 @@ export function hasValidDevelopmentPublicEnvelope(
   };
   return sameSeatSet(value.turnOrder)
     && sameSeatSet(value.proposedNextRoundOrder)
-    && (value.activePlayerId === null || ids.has(value.activePlayerId));
+    && (value.activePlayerId === null || (typeof value.activePlayerId === "string"
+      && ids.has(value.activePlayerId)));
 }

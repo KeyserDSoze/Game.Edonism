@@ -17,7 +17,8 @@ function genesis(count: Count) {
     turnOrder: ids,
     proposedNextRoundOrder: [...ids.slice(-1), ...ids.slice(0, -1)],
     events: [{ revision: 0, round: 1, kind: "match-created",
-      actorId: "system", fromStreetId: null, toStreetId: null }],
+      actorId: "system", fromStreetId: null as string | null,
+      toStreetId: null as string | null }],
     boardActivities: [], controlledActivities: [], grossSalaryQuotes: [],
   };
 }

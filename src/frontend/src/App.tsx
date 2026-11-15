@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CityScene } from "@/features/city/CityScene";
 import { cityBoard, slotById, slotsOnStreet, streetById } from "@/features/city/board";
 import { playerMarkerPlacements } from "@/features/city/playerMarkers";
-import { controlledLotMarkers, publicGrossSalaryQuotes, type PublicMatchSceneState } from "@/features/city/activityMarkers";
+import { controlledLotMarkers, publicGrossSalaryQuotes, verifiedPublicBoardCardCount, type PublicMatchSceneState } from "@/features/city/activityMarkers";
 import { verifiedTacticalFocus, type TacticalFocus } from "@/features/city/tacticalFocus";
 import { verifiedHistoricalStreetFocus, type HistoricalStreetFocus } from "@/features/city/historicalStreetFocus";
 import { useTheme, type Theme } from "@/features/settings/useTheme";
@@ -41,6 +41,7 @@ export default function App() {
     : [];
   const controlMarkers = publicPlayers ? controlledLotMarkers(publicPlayers) : [];
   const grossQuotes = publicPlayers ? publicGrossSalaryQuotes(publicPlayers) : [];
+  const verifiedBoardCardCount = verifiedPublicBoardCardCount(publicPlayers);
   const currentStreet = streetById(selectedStreetId) ?? cityBoard.streets[0];
   const currentSlot = selectedSlotId ? slotById(selectedSlotId) : undefined;
   const streetSlots = slotsOnStreet(selectedStreetId);
@@ -314,9 +315,11 @@ export default function App() {
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs font-semibold">{t("city.controlledActivities")}</p>
-                  <span className="text-xs text-muted-foreground" data-testid="match-board-card-count">
-                    {t("city.placedCardCount", { count: publicPlayers.boardActivities.length })}
-                  </span>
+                  {verifiedBoardCardCount !== null && (
+                    <span className="text-xs text-muted-foreground" data-testid="match-board-card-count">
+                      {t("city.placedCardCount", { count: verifiedBoardCardCount })}
+                    </span>
+                  )}
                 </div>
                 <ul className="grid gap-2 sm:grid-cols-2" aria-live="polite">
                   {controlMarkers.map((marker) => (

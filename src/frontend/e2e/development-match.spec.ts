@@ -1081,6 +1081,36 @@ test("#107: an omitted eight-seat gross quote hides all wage rows without removi
 });
 
 
+
+test("#111: malformed public card ID hides unverified board count but leaves city and controls intact",
+  async ({ page }) => {
+  // This is a JSON/read-only roster test, not a 3D rendering test.
+  await page.addInitScript(() => {
+    const native = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: function (this: HTMLCanvasElement, kind: string, ...args: unknown[]) {
+        if (kind === "webgl" || kind === "webgl2" || kind === "experimental-webgl")
+          return null;
+        return Reflect.apply(native, this, [kind, ...args]);
+      },
+    });
+  });
+  const { observedHeaders } = await mockMatchApi(page, { malformedPublicCardId: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("city-renderer")).toBeVisible();
+  await expect(page.getByTestId("match-activity-roster")).toBeVisible();
+  await expect(page.getByTestId("match-board-card-count")).toHaveCount(0);
+  await expect(page.getByTestId("controlled-lot-N-01")).toHaveAttribute("data-owner-id", "alice");
+  await expect(page.getByTestId("controlled-lot-S-01")).toHaveCount(0);
+  await expect(page.getByTestId("gross-salary-alice")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  expect(observedHeaders.filter(event => event.path.endsWith("/free-move")
+    || event.path.endsWith("/end-turn"))).toHaveLength(0);
+});
+
 test("#108: malformed public card ID never crashes the city or invents a controlled lot",
   async ({ page }) => {
   // DOM fallback prevents unnecessary 3D work in this snapshot integrity test.

@@ -1,4 +1,5 @@
 import { hasValidDevelopmentPublicEnvelope } from "./verifiedDevelopmentPublicEnvelope";
+import { hasValidDevelopmentPublicAuditChronology } from "./verifiedDevelopmentPublicAuditChronology";
 
 /**
  * #114: The Development creator response must bind one UNIQUE, typed 64-hex
@@ -29,6 +30,8 @@ export function hasValidDevelopmentCreatorResponse(
   }
   const state = value.state;
   if (!hasValidDevelopmentPublicEnvelope(state, value.matchId)
+    // A forged creator 201 must not bind credentials to a fake audit revision.
+    || !hasValidDevelopmentPublicAuditChronology(state, value.matchId)
     || state.players.length !== requested.size
     || state.players.some(player => !requested.has(player.playerId))) return false;
 

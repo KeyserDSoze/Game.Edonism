@@ -4,6 +4,7 @@ GitHub Issues are the detailed source of truth. Work is committed directly to `m
 
 | Issue | Version | Work | Status | Verification |
 |---|---|---|---|---|
+| [#125](https://github.com/KeyserDSoze/Game.Edonism/issues/125) | 0.0.2 | Reject public audit events with noncanonical from/to streets before Development match revision and ETag | In progress | Real-Vite 2/4/8, mocked React, .NET Domain xUnit, final-main 3/3 CI pending |
 | [#124](https://github.com/KeyserDSoze/Game.Edonism/issues/124) | 0.0.2 | Canonical actor-scoped free-move option destination membership; preserve .NET movement authority and session recovery | Done (direct main) | [CI #43770637727](https://github.com/KeyserDSo/Game.Edonism/actions/runs/43770637727): 683/683 xUnit, 328/328 Playwright UI, 40/40 Playwright live, 3/3 green on `779f09f`; documentation-final SHA gate required before closure |
 | [#123](https://github.com/KeyserDSoze/Game.Edonism/issues/123) | 0.0.2 | Canonical player street IDs at Development public ingress, secure creator/join/poll/command session/revision/ETag | Done (direct main) | [CI #43770637727](https://github.com/KeyserDSo/Game.Edonism/actions/runs/43770637727): 683/683 xUnit, 328/328 Playwright UI, 40/40 Playwright live, 3/3 green on `779f09f`; documentation-final SHA gate required before closure |
 | [#1](https://github.com/KeyserDSoze/Game.Edonism/issues/1) | 0.0.1 | Foundation: React/Three.js, .NET 10, CI | Done | PR #2 merged, CI green |

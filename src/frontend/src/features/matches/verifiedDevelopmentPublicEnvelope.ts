@@ -69,7 +69,12 @@ export function hasValidDevelopmentPublicEnvelope(
     || !Array.isArray(value.boardActivities)
     || !Array.isArray(value.controlledActivities)
     || !Array.isArray(value.grossSalaryQuotes)
-    || !value.events.every(isPublicMatchEventRecord)) return false;
+    // #125: Audited public street endpoints must refer to printed roads.
+    // This is only transport compatibility, NOT a browser audit replay.
+    || !value.events.every(event => isPublicMatchEventRecord(event)
+      && (event.fromStreetId === null || canonicalStreetIds.has(event.fromStreetId))
+      && (event.toStreetId === null || canonicalStreetIds.has(event.toStreetId))))
+    return false;
 
   const ids = new Set<string>();
   for (const player of value.players) {

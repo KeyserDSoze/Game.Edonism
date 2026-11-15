@@ -58,6 +58,7 @@ type MockOptions = {
   missingGrossQuote?: boolean; // #107: a forged incomplete public quote set.
   forgedHigherRevisionSnapshot?: boolean; // #112: corrupt first public poll, never a real command.
   forgedNullAuditEventSnapshot?: boolean; // #113: corrupt first poll with events:[null].
+  forgedForeignAuditStreetOnce?: boolean; // #125: plausible public 200 with foreign audit road.
   forgedPhaseActorMismatchSnapshot?: boolean; // #116: phase1 with active Alice in forged poll.
   forgedAuditChronologySnapshot?: boolean; // #119: high revision with genesis only.
   forgedPublicTurnOrderOnce?: boolean; // #120: coherent next revision but false order.
@@ -132,6 +133,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayedRevokedResponse = false;
   let delayedAliceOptions = false;
   let forgedSecondMoveIssued = false;
+  let forgedForeignAuditIssued = false;
   let forgedUnknownStreetIssued = false;
   let forgedJoinedHandIssued = false;
   let forgedBobHandIssued = false;
@@ -794,6 +796,26 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         return reply({ status: 503, json: { code: "temporarily_unavailable" } });
       }
       const supplied = request.headers()["if-none-match"] ?? null;
+      // #125: a well-typed forged event can claim a foreign street while
+      // advertising a plausible next revision and ETag. Ignore the entire
+      // response before changing session state or the conditional cache.
+      if (options.forgedForeignAuditStreetOnce && !forgedForeignAuditIssued) {
+        forgedForeignAuditIssued = true;
+        const foreignRevision = revision + 1;
+        const foreignEtag = `W/"edonism-revision-${foreignRevision}"`;
+        observedPolls.push({ status: 200, supplied, etag: foreignEtag,
+          prefer: request.headers()["prefer"] ?? null });
+        return reply({ status: 200,
+          headers: { ETag: foreignEtag, "Cache-Control": "no-store" },
+          json: {
+            ...snapshot(), revision: foreignRevision,
+            events: [...auditEvents, {
+              revision: foreignRevision, round: 1, kind: "free-move",
+              actorId: "alice", fromStreetId: "unmapped-road", toStreetId: "planck",
+            }],
+          },
+        });
+      }
       if (options.forgedPublicBoardVersionOnce && !forgedPublicBoardVersionSent) {
         forgedPublicBoardVersionSent = true;
         // #122: The malformed 200 claims the same revision and ETag, with
@@ -1379,6 +1401,36 @@ test("#119: forged high-revision HTTP 200 with gapped audit cannot poison the ac
   await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
   expect(observedHeaders.filter(e => e.path.endsWith("/end-turn"))).toHaveLength(1);
   expect(observedPolls.some(p => p.supplied === 'W/"edonism-revision-96"')).toBe(false);
+});
+
+test("#125: forged public audit road cannot advance match revision or poison ETag", async ({ page }) => {
+  const { observedPolls, observedHeaders } = await mockMatchApi(page,
+    { forgedForeignAuditStreetOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  const foreignTag = 'W/"edonism-revision-1"';
+  await expect.poll(() => observedPolls.some(p =>
+    p.status === 200 && p.etag === foreignTag)).toBe(true);
+
+  // This false next-revision public event has a well-typed body, but the
+  // fromStreetId is not on the board. Fail the whole response closed, not
+  // just its timeline marker. The private actor controls stay usable.
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "gauss");
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  expect(observedHeaders.filter(x => x.path.endsWith("/end-turn"))).toHaveLength(0);
+  expect(observedPolls.some(p => p.supplied === foreignTag)).toBe(false);
+
+  // The true server still has genesis revision 0, so a legitimate command
+  // must succeed once and the forged ETag must never become a poll cursor.
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("dev-audit-event-1")).toHaveAttribute("data-event-kind", "turn-ended");
+  expect(observedHeaders.filter(x => x.path.endsWith("/end-turn"))).toHaveLength(1);
 });
 
 test("#119: malformed creator public chronology cannot bind all-seat capabilities; good retry works",

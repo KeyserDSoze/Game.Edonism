@@ -66,6 +66,7 @@ type MockOptions = {
   bootstrapUnavailable?: boolean;
   noTurnOptions?: boolean;
   invalidTurnOptions?: boolean;
+  forgedSecondMoveOptionsOnce?: boolean; // #117: 200 offers another move after use.
   delayFirstAliceOptions?: boolean;
   dropFirstEndTurnResponse?: boolean;
   http503FirstEndTurn?: boolean;
@@ -117,6 +118,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayRevokedResponse = false;
   let delayedRevokedResponse = false;
   let delayedAliceOptions = false;
+  let forgedSecondMoveIssued = false;
   let firstResponseDropped = false;
   let firstHttp503 = false;
   let firstOverloadedPoll = false;
@@ -143,6 +145,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     path: string; token: string | undefined; idempotencyKey: string | undefined;
   }> = [];
   const observedPolls: Array<{ status: number; supplied: string | null; etag: string; prefer: string | null }> = [];
+  const observedForgedOptions: Array<{ seat: string; revision: number }> = [];
 
   const snapshot = () => ({
     matchId: "00000000-0000-0000-0000-000000000020",
@@ -635,6 +638,16 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         "main-square": ["gauss", "einstein"],
       };
       const isTurn = active === seat && phase === 0;
+      // #117: one malicious 200 after a *real* consumed free move must not
+      // advertise a second one. The next request returns genuine .NET-shaped
+      // options so the actor can recover without changing public revision.
+      const forgedSecondMove = options.forgedSecondMoveOptionsOnce
+        && !forgedSecondMoveIssued && seat === "alice" && isTurn
+        && moved[seat] && revision === 1;
+      if (forgedSecondMove) {
+        forgedSecondMoveIssued = true;
+        observedForgedOptions.push({ seat, revision });
+      }
       return reply({
         status: 200, headers: { "Cache-Control": "no-store" },
         json: {
@@ -642,7 +655,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           playerId: seat,
           revision: options.invalidTurnOptions ? revision + 999 : revision,
           canEndTurn: isTurn,
-          freeMoveStreetIds: isTurn && !moved[seat] ? neighbors[streets[seat]] ?? [] : [],
+          freeMoveStreetIds: forgedSecondMove ? ["meson"]
+            : isTurn && !moved[seat] ? neighbors[streets[seat]] ?? [] : [],
         },
       });
     }
@@ -817,6 +831,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   return {
     observedHeaders,
     observedPolls,
+    observedForgedOptions,
     setSnapshotFailure: (value: boolean) => { snapshotFailure = value; },
     delayNextRevokedSnapshot: () => { delayRevokedResponse = true; },
     didDelayRevokedSnapshot: () => delayedRevokedResponse,
@@ -1714,6 +1729,65 @@ test("Domain options are required: missing or wrong revision prevents browser co
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
   await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
   await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+});
+
+test("#117: forged second free move is hidden; later verified options recover same actor", async ({ page }) => {
+  // Use DOM fallback to isolate this options/command test from WebGL timing.
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: function (this: HTMLCanvasElement, kind: string, ...args: unknown[]) {
+        if (kind === "webgl" || kind === "webgl2" || kind === "experimental-webgl")
+          return null;
+        return Reflect.apply(original, this, [kind, ...args]);
+      },
+    });
+  });
+  const { observedHeaders, observedForgedOptions } = await mockMatchApi(page,
+    { forgedSecondMoveOptionsOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-move-planck")).toBeEnabled();
+  const forgedResponse = page.waitForResponse(r =>
+    new URL(r.url()).pathname.endsWith("/turn-options")
+    && r.request().headers()["x-edonism-dev-token"] === mockSeatToken(0));
+  await page.getByTestId("dev-move-planck").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  const poisoned = await forgedResponse;
+  expect(poisoned.status()).toBe(200);
+  expect(await poisoned.json()).toMatchObject({
+    playerId: "alice", revision: 1, canEndTurn: true,
+    freeMoveStreetIds: ["meson"],
+  });
+  expect(observedForgedOptions).toEqual([{ seat: "alice", revision: 1 }]);
+  await expect(page.getByTestId("dev-position")).toHaveText("Planck Avenue");
+  await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
+  // No partial untrusted lease: ignore the entire forged options response.
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  await page.getByTestId("dev-seat-alice").click();
+  // Real mock source now responds with no second move but canEndTurn=true.
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("2");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+  expect(observedHeaders.filter(e => e.path.endsWith("/free-move"))).toHaveLength(1);
+  expect(observedHeaders.filter(e => e.path.endsWith("/end-turn"))).toHaveLength(1);
+
+  const storage = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(storage)).not.toContain(mockSeatToken(0));
+  expect(JSON.stringify(storage)).not.toContain(mockSeatToken(1));
 });
 
 test("actor-scoped options follow seat and revision, not the locally selected street", async ({ page }) => {

@@ -34,3 +34,25 @@ one-worker/two-bearer Playwright gate must remain green **3/3 on exact final
 main SHA**, with issue/AGENTS/ledger/patch notes updated.
 
 [Issue #108](https://github.com/KeyserDSoze/Game.Edonism/issues/108)
+
+## #109 — Contradictory duplicate public player IDs
+
+An authenticated JSON payload may still contain internally contradictory
+public positions. When the same nonempty `playerId` appears twice (even when
+the second row has an unknown/null street), the city must **not** draw one
+arbitrary server-confirmed pawn. `playerMarkerPlacements` therefore counts
+syntactically valid IDs **before** filtering canonical streets, then paints a
+pawn only when an ID occurs **exactly once** and its street is known. Every
+copy of a repeated ID is suppressed, while independently valid players remain.
+There is no correction/invention of street, no move/attack permission, and no
+change to a valid 2–8-seat roster's alphabetical order, colors, geometry or
+same-street spacing. The already fail-closed gross salary projection
+#105/#107 independently rejects duplicate player IDs.
+
+Playwright imports the real TypeScript implementation in Vite's browser
+module (not Node/JSON). Deterministic 2/4/8-seat tests verify order-stable
+normal and shared-street spacing, plus duplicate same/conflicting/unknown/null
+street, duplicate two owners, second actor duplicate and unrelated malformed
+record. Existing mocked browser actor and two-bearer real-.NET tests must
+remain green. [Issue #109](https://github.com/KeyserDSoze/Game.Edonism/issues/109).
+Close only after **3/3 CI on the exact final main SHA**.

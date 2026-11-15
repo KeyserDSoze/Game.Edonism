@@ -34,18 +34,23 @@ export function playerMarkerPlacements(
   // #108: public JSON types are not enforced by TypeScript at runtime.
   // Skip malformed/unknown positions instead of breaking the entire city.
   if (!Array.isArray(players)) return [];
-  const uniqueIds = new Set<string>();
+  // #109: Count IDs BEFORE filtering unknown streets. A conflicting
+  // duplicate must not turn the "first" arbitrary street into a trusted pawn.
+  // Suppress ALL copies of an ambiguous ID, including duplicates whose
+  // other record has a malformed/unknown street.
+  const occurrences = new Map<string, number>();
+  for (const player of players) {
+    if (!player || typeof player !== "object"
+      || typeof player.playerId !== "string" || !player.playerId.trim()) continue;
+    occurrences.set(player.playerId, (occurrences.get(player.playerId) ?? 0) + 1);
+  }
   const knownPlayers = [...players]
     .filter((player) => !!player && typeof player === "object"
       && typeof player.playerId === "string" && player.playerId.trim().length > 0
+      && occurrences.get(player.playerId) === 1
       && typeof player.streetId === "string"
       && cityBoard.roads.some((road) => road.streetId === player.streetId))
-    .sort((a, b) => a.playerId < b.playerId ? -1 : a.playerId > b.playerId ? 1 : 0)
-    .filter((player) => {
-      if (uniqueIds.has(player.playerId)) return false;
-      uniqueIds.add(player.playerId);
-      return true;
-    });
+    .sort((a, b) => a.playerId < b.playerId ? -1 : a.playerId > b.playerId ? 1 : 0);
 
   return knownPlayers.map((player, index) => {
     // Main Square has multiple road rectangles; its first is north of City Hall,

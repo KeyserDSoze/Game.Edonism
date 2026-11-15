@@ -93,16 +93,54 @@ export function controlledLotMarkers(state: PublicMatchSceneState): ControlledLo
   });
 }
 
-/** Only server-quoted GROSS values; never interpret them as wallet credits. */
+/**
+ * #105: Read-only gross salary rows are displayed only if every quote agrees
+ * with the SAME public snapshot's validated lots and standing henchmen.
+ * Never calculate or award game currency: .NET GrossSalaryRules remains the
+ * sole authority; malformed/forged input hides ALL quotes, not a partial list.
+ */
 export function publicGrossSalaryQuotes(state: PublicMatchSceneState): PublicGrossSalaryQuote[] {
-  const knownOwners = new Set(state.players.map((player) => player.playerId));
-  const duplicateCheck = new Set<string>();
-  return state.grossSalaryQuotes.filter((quote) => {
-    if (!knownOwners.has(quote.playerId) || duplicateCheck.has(quote.playerId)
-      || !Number.isInteger(quote.baseAtoms) || quote.baseAtoms < 0
-      || !Number.isInteger(quote.standingActivityAtoms) || quote.standingActivityAtoms < 0
-      || !Number.isInteger(quote.grossAtoms) || quote.grossAtoms < 0) return false;
-    duplicateCheck.add(quote.playerId);
-    return true;
-  });
+  try {
+    if (!state || !Array.isArray(state.players)
+      || !Array.isArray(state.boardActivities)
+      || !Array.isArray(state.controlledActivities)
+      || !Array.isArray(state.grossSalaryQuotes)) return [];
+
+    const knownOwners = new Set<string>();
+    for (const player of state.players) {
+      if (!player || typeof player.playerId !== "string"
+        || !player.playerId.trim() || knownOwners.has(player.playerId)) return [];
+      knownOwners.add(player.playerId);
+    }
+
+    // This is the existing public renderer's fully checked slot/card/owner/
+    // posture projection. If any controlled lot is unrenderable or duplicated,
+    // its supposedly authoritative standing count cannot be trusted.
+    const confirmed = controlledLotMarkers(state);
+    if (confirmed.length !== state.controlledActivities.length) return [];
+    const standing = new Map<string, number>();
+    for (const lot of confirmed) {
+      if (lot.posture === "standing")
+        standing.set(lot.ownerPlayerId, (standing.get(lot.ownerPlayerId) ?? 0) + 1);
+    }
+
+    const seenQuotes = new Set<string>();
+    for (const quote of state.grossSalaryQuotes) {
+      if (!quote || typeof quote.playerId !== "string"
+        || !knownOwners.has(quote.playerId) || seenQuotes.has(quote.playerId)
+        || !Number.isSafeInteger(quote.baseAtoms) || quote.baseAtoms !== 2
+        || !Number.isSafeInteger(quote.standingActivityAtoms)
+        || quote.standingActivityAtoms < 0
+        || !Number.isSafeInteger(quote.grossAtoms) || quote.grossAtoms < 0
+        || quote.standingActivityAtoms !== (standing.get(quote.playerId) ?? 0)
+        || !Number.isSafeInteger(quote.baseAtoms + quote.standingActivityAtoms)
+        || quote.grossAtoms !== quote.baseAtoms + quote.standingActivityAtoms)
+        return [];
+      seenQuotes.add(quote.playerId);
+    }
+    return [...state.grossSalaryQuotes];
+  } catch {
+    // Network JSON is untrusted at runtime, regardless of TypeScript types.
+    return [];
+  }
 }

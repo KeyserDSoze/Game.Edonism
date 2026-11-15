@@ -46,6 +46,7 @@ type MockOptions = {
   sameStreet?: boolean;
   unknownStreet?: boolean;
   fallenHenchman?: boolean;
+  invalidGrossQuote?: boolean; // #105: forged public total, never server wallet state.
   badControlSlot?: boolean;
   unknownOwner?: boolean;
   missingBoardCard?: boolean;
@@ -172,7 +173,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       },
     ],
     grossSalaryQuotes: [
-      { playerId: "alice", baseAtoms: 2, standingActivityAtoms: 1, grossAtoms: 3 },
+      { playerId: "alice", baseAtoms: 2, standingActivityAtoms: 1,
+        grossAtoms: options.invalidGrossQuote ? 999 : 3 },
       {
         playerId: "bob",
         baseAtoms: 2,
@@ -1000,6 +1002,26 @@ test("controlled lots, cards and standing henchmen stay server-owned after moves
   expect(visible).not.toContain("a".repeat(64));
   expect(visible).not.toContain("b".repeat(64));
   expect(visible).not.toContain("demo:action:");
+});
+
+
+test("#105: forged gross salary quote hides all public wage rows, not gameplay controls",
+  async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page, { invalidGrossQuote: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("match-activity-roster")).toBeVisible();
+  await expect(page.getByTestId("controlled-lot-N-01")).toBeVisible();
+  await expect(page.getByTestId("controlled-lot-S-01")).toBeVisible();
+  await expect(page.getByTestId("gross-salary-alice")).toHaveCount(0);
+  await expect(page.getByTestId("gross-salary-bob")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  expect(observedHeaders.filter(event =>
+    /\\/(free-move|end-turn)$/.test(event.path))).toHaveLength(0);
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("gross-salary-alice")).toHaveCount(0);
 });
 
 test("fallen henchmen show explicit posture and gross quotes are not wallet credits", async ({ page }) => {

@@ -1022,6 +1022,8 @@ test("#112: malformed higher-revision poll cannot poison actor state or block la
   await page.getByTestId("dev-end-turn").click();
   await expect(page.getByTestId("dev-revision")).toHaveText("1");
   await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+  // The forged high revision must never enter conditional polling cache.
+  expect(observedPolls.some(p => p.supplied === 'W/"edonism-revision-99"')).toBe(false);
   expect(observedHeaders.filter(e => e.path.endsWith("/end-turn"))).toHaveLength(1);
 });
 

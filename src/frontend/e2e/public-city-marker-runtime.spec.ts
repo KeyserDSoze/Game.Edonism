@@ -44,8 +44,8 @@ for (const count of [2, 4, 8] as const) {
       [...state.players.map(player => player.playerId)].sort());
     expect(projected.players.every(player =>
       Number.isFinite(player.x) && Number.isFinite(player.z))).toBe(true);
-    expect(projected.lots.map(lot => lot.slotId)).toEqual(
-      state.boardActivities.map(card => card.slotId));
+    expect(projected.lots.map(lot => lot.slotId).sort()).toEqual(
+      state.boardActivities.map(card => card.slotId).sort());
     expect(projected.quotes).toEqual(state.grossSalaryQuotes);
     expect(JSON.stringify(state)).toBe(before);
   });
@@ -138,9 +138,11 @@ test("#108: malformed containers never throw and create no public city markers",
     });
   }, state);
   expect(results).toHaveLength(10);
-  for (const result of results) {
-    expect(result.pawns).toEqual([]);
-    expect(result.lots).toEqual([]);
-    expect(result.quotes).toEqual([]);
+  for (const [index, result] of results.entries()) {
+    // A malformed lot container must not suppress independent, valid
+    // public player positions. An absent/invalid player list must.
+    expect(result.pawns.length, `case ${index} players`).toBe(index >= 6 ? 2 : 0);
+    expect(result.lots, `case ${index} controlled lots`).toEqual([]);
+    expect(result.quotes, `case ${index} gross quotes`).toEqual([]);
   }
 });

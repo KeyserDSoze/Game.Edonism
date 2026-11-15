@@ -63,6 +63,8 @@ type MockOptions = {
   unknownSecretEvent?: boolean;
   playerCount?: number;
   brokenSeatBootstrap?: "wrong-player" | "wrong-revision";
+  forgedJoinedHandOnce?: boolean; // #118: duplicate private cards in atomic /seat.
+  forgedBobHandOnce?: boolean; // #118: malformed 200 /hand before later valid recovery.
   bootstrapUnavailable?: boolean;
   noTurnOptions?: boolean;
   invalidTurnOptions?: boolean;
@@ -119,6 +121,9 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayedRevokedResponse = false;
   let delayedAliceOptions = false;
   let forgedSecondMoveIssued = false;
+  let forgedJoinedHandIssued = false;
+  let forgedBobHandIssued = false;
+  const observedInvalidHandReplies: Array<"seat" | "hand"> = [];
   let firstResponseDropped = false;
   let firstHttp503 = false;
   let firstOverloadedPoll = false;
@@ -332,6 +337,14 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         boson: ["newton", "meson"],
         "main-square": ["gauss", "einstein"],
       };
+      const joinedCards = Array.from({ length: 4 }, (_, index) =>
+        `demo:action:${String((seat === "alice" ? 1
+          : 21 + (seats.indexOf(seat) - 1) * 4) + index).padStart(2, "0")}`);
+      if (options.forgedJoinedHandOnce && !forgedJoinedHandIssued && seat === "bob") {
+        forgedJoinedHandIssued = true;
+        observedInvalidHandReplies.push("seat");
+        joinedCards[1] = joinedCards[0]; // keep HTTP 200, actor and options valid.
+      }
       return reply({
         status: 200, headers: { "Cache-Control": "no-store" },
         json: {
@@ -341,9 +354,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           hand: {
             matchId: snapshot().matchId,
             playerId: seat,
-            cardIds: Array.from({ length: 4 }, (_, index) =>
-              `demo:action:${String((seat === "alice" ? 1
-                : 21 + (seats.indexOf(seat) - 1) * 4) + index).padStart(2, "0")}`),
+            cardIds: joinedCards,
           },
           turnOptions: {
             matchId: snapshot().matchId,
@@ -662,14 +673,16 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     }
 
     if (path.endsWith("/hand")) {
+      const cards = Array.from({ length: 4 }, (_, index) =>
+        `demo:action:${String((seat === "alice" ? 1 : 21 + (seats.indexOf(seat) - 1) * 4) + index).padStart(2, "0")}`);
+      if (options.forgedBobHandOnce && !forgedBobHandIssued && seat === "bob") {
+        forgedBobHandIssued = true;
+        observedInvalidHandReplies.push("hand");
+        cards[1] = cards[0]; // corrupt private read only, not the server deck.
+      }
       return reply({
-        status: 200,
-        json: {
-          matchId: snapshot().matchId,
-          playerId: seat,
-          cardIds: Array.from({ length: 4 }, (_, index) =>
-            `demo:action:${String((seat === "alice" ? 1 : 21 + (seats.indexOf(seat) - 1) * 4) + index).padStart(2, "0")}`),
-        },
+        status: 200, headers: { "Cache-Control": "no-store" },
+        json: { matchId: snapshot().matchId, playerId: seat, cardIds: cards },
       });
     }
 
@@ -832,6 +845,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     observedHeaders,
     observedPolls,
     observedForgedOptions,
+    observedInvalidHandReplies,
     setSnapshotFailure: (value: boolean) => { snapshotFailure = value; },
     delayNextRevokedSnapshot: () => { delayRevokedResponse = true; },
     didDelayRevokedSnapshot: () => delayedRevokedResponse,
@@ -1985,6 +1999,63 @@ test("inconsistent or failed atomic bootstrap never installs a session or privat
   await mockMatchApi(page, { bootstrapUnavailable: true });
   await page.getByTestId("dev-join").click();
   await expect(page.getByTestId("dev-session")).toHaveCount(0);
+});
+
+test("#118: forged Bob private /hand never renders duplicates; legitimate retry restores privacy", async ({ page }) => {
+  const { observedInvalidHandReplies, observedHeaders } =
+    await mockMatchApi(page, { forgedBobHandOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect.poll(() => observedInvalidHandReplies).toEqual(["hand"]);
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await page.getByTestId("dev-seat-alice").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-hand")).not.toContainText("demo:action:01");
+  expect(observedInvalidHandReplies).toEqual(["hand"]);
+  expect(observedHeaders.filter(x => x.path.endsWith("/hand") && x.token === mockSeatToken(1)))
+    .toHaveLength(2);
+  const exposure = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage), session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(exposure)).not.toContain(mockSeatToken(0));
+  expect(JSON.stringify(exposure)).not.toContain(mockSeatToken(1));
+});
+
+test("#118: forged atomic /seat private hand never binds; genuine retry joins Bob only", async ({ page }) => {
+  const { observedInvalidHandReplies, observedHeaders } =
+    await mockMatchApi(page, { forgedJoinedHandOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-join-id").fill("00000000-0000-0000-0000-000000000020");
+  await page.getByTestId("dev-join-token").fill(mockSeatToken(1));
+  await page.getByTestId("dev-join").click();
+  await expect.poll(() => observedInvalidHandReplies).toEqual(["seat"]);
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+  await expect(page.getByTestId("dev-error")).toBeVisible();
+
+  // Same authorized credential, genuine atomic server reply; no private
+  // state/turn actor was leaked or installed during the failed first join.
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-seat-alice")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-hand")).not.toContainText("demo:action:01");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+  expect(observedInvalidHandReplies).toEqual(["seat"]);
+  expect(observedHeaders.filter(x => x.path.endsWith("/seat"))).toHaveLength(2);
+  const exposure = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage), session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(exposure)).not.toContain(mockSeatToken(1));
 });
 
 test("mocked private responses remain no-store across creator seat changes", async ({ page }) => {

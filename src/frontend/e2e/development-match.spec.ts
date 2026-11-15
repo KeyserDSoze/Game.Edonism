@@ -49,6 +49,7 @@ type MockOptions = {
   creatorCredentialFaultOnce?: "duplicate-token" | "short-token" | "null-token" | "wrong-seat";
   forgedCreatorAuditChronologyOnce?: boolean; // #119: valid credentials, false public timeline.
   forgedCreatorTurnOrderOnce?: boolean; // #120: correct credentials, false next-round order.
+  forgedCreatorBoardVersionOnce?: boolean; // #122: false board version on creator 201.
   rotationCredentialFaultOnce?: "other-seat" | "other-seat-uppercase"; // #115 fake 200, no backend rotation.
   sameStreet?: boolean;
   unknownStreet?: boolean;
@@ -60,6 +61,7 @@ type MockOptions = {
   forgedPhaseActorMismatchSnapshot?: boolean; // #116: phase1 with active Alice in forged poll.
   forgedAuditChronologySnapshot?: boolean; // #119: high revision with genesis only.
   forgedPublicTurnOrderOnce?: boolean; // #120: coherent next revision but false order.
+  forgedPublicBoardVersionOnce?: boolean; // #122: false board version on public poll 200.
   forgedSameRevisionOnce?: "street" | "quote"; // #121: valid 200, same revision but different public JSON.
   badControlSlot?: boolean;
   unknownOwner?: boolean;
@@ -70,6 +72,7 @@ type MockOptions = {
   brokenSeatBootstrap?: "wrong-player" | "wrong-revision";
   forgedJoinedAuditChronologyOnce?: boolean; // #119: false revision in atomic /seat.
   forgedJoinedTurnOrderOnce?: boolean; // #120: coherent bootstrap except false preview.
+  forgedJoinedBoardVersionOnce?: boolean; // #122: false board version on atomic seat read.
   forgedJoinedHandOnce?: boolean; // #118: duplicate private cards in atomic /seat.
   forgedBobHandOnce?: boolean; // #118: malformed 200 /hand before later valid recovery.
   bootstrapUnavailable?: boolean;
@@ -138,9 +141,12 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let forgedSameRevisionSent = false;
   let forgedJoinedAuditChronologySent = false;
   let forgedJoinedTurnOrderSent = false;
+  let forgedJoinedBoardVersionSent = false;
   let creatorCredentialFaultIssued = false;
   let forgedCreatorAuditIssued = false;
   let forgedCreatorTurnOrderSent = false;
+  let forgedCreatorBoardVersionSent = false;
+  let forgedPublicBoardVersionSent = false;
   let delayedAlicePresence = false;
   let delayedSettlement = false;
   let delayedAliceTurnProgress = false;
@@ -327,11 +333,16 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       const forgedCreatorOrder = Boolean(options.forgedCreatorTurnOrderOnce
         && !forgedCreatorTurnOrderSent);
       if (forgedCreatorOrder) forgedCreatorTurnOrderSent = true;
+      const forgedCreatorBoard = Boolean(options.forgedCreatorBoardVersionOnce
+        && !forgedCreatorBoardVersionSent);
+      if (forgedCreatorBoard) forgedCreatorBoardVersionSent = true;
       const createdState = forgedCreatorAudit
         ? { ...snapshot(), revision: 43 }
         : forgedCreatorOrder
           ? { ...snapshot(), proposedNextRoundOrder: [...seats] }
-          : snapshot();
+          : forgedCreatorBoard
+            ? { ...snapshot(), boardVersion: "foreign-board-v2" }
+            : snapshot();
       return reply({
         status: 201,
         json: { matchId: snapshot().matchId, state: createdState, credentials },
@@ -359,13 +370,18 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       const forgedJoinOrder = Boolean(options.forgedJoinedTurnOrderOnce
         && !forgedJoinedTurnOrderSent && seat === "bob");
       if (forgedJoinOrder) forgedJoinedTurnOrderSent = true;
+      const forgedJoinBoard = Boolean(options.forgedJoinedBoardVersionOnce
+        && !forgedJoinedBoardVersionSent && seat === "bob");
+      if (forgedJoinBoard) forgedJoinedBoardVersionSent = true;
       // Actor, options, hand, revision and public audit remain coherent.
       // Only the displayed proposed round rotation is false in #120.
       const seatState = forgedJoinAudit
         ? { ...snapshot(), revision: 42 }
         : forgedJoinOrder
           ? { ...snapshot(), proposedNextRoundOrder: [...seats] }
-          : snapshot();
+          : forgedJoinBoard
+            ? { ...snapshot(), boardVersion: "foreign-board-v2" }
+            : snapshot();
       const adjacent: Record<string, string[]> = {
         gauss: ["planck", "newton", "main-square"],
         planck: ["gauss", "einstein", "meson"],
@@ -766,6 +782,19 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         return reply({ status: 503, json: { code: "temporarily_unavailable" } });
       }
       const supplied = request.headers()["if-none-match"] ?? null;
+      if (options.forgedPublicBoardVersionOnce && !forgedPublicBoardVersionSent) {
+        forgedPublicBoardVersionSent = true;
+        // #122: The malformed 200 claims the same revision and ETag, with
+        // canonical event/turn/actor JSON except for its foreign board ID.
+        // No gameplay action occurred and the local city must not bind it.
+        observedPolls.push({
+          status: 200, supplied, etag, prefer: request.headers()["prefer"] ?? null,
+        });
+        return reply({
+          status: 200, headers: { ETag: etag, "Cache-Control": "no-store" },
+          json: { ...snapshot(), boardVersion: "foreign-board-v2" },
+        });
+      }
       if (options.forgedSameRevisionOnce && !forgedSameRevisionSent) {
         forgedSameRevisionSent = true;
         const base = snapshot();
@@ -1505,6 +1534,81 @@ for (const corrupted of ["street", "quote"] as const) {
       expect(JSON.stringify(privacy)).not.toContain(secret);
   });
 }
+
+test("#122: foreign board version on poll cannot seed public ETag or advance turn", async ({ page }) => {
+  const { observedPolls, observedHeaders } = await mockMatchApi(page,
+    { forgedPublicBoardVersionOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect.poll(() => observedPolls.filter(p =>
+    p.status === 200 && p.supplied === null).length, { timeout: 10000 })
+    .toBeGreaterThanOrEqual(2);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  // The first forged 200 may not establish the conditional ETag; only the
+  // following legitimate server response is eligible for 304 caching.
+  await expect.poll(() => observedPolls.some(p =>
+    p.status === 304 && p.supplied === 'W/"edonism-revision-0"'),
+  { timeout: 10000 }).toBe(true);
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("dev-audit-event-1"))
+    .toHaveAttribute("data-event-kind", "turn-ended");
+  expect(observedHeaders.filter(h => h.path.endsWith("/end-turn"))).toHaveLength(1);
+});
+
+test("#122: creator cannot bind credentials to foreign public board version", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page,
+    { forgedCreatorBoardVersionOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-error")).toBeVisible();
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+  await expect(page.getByTestId("match-player-alice")).toHaveCount(0);
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-seat-alice")).toBeVisible();
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  expect(observedHeaders.filter(h => h.path.endsWith("/from-full-deck"))).toHaveLength(2);
+  const exposure = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  for (const secret of [mockSeatToken(0), mockSeatToken(1)])
+    expect(JSON.stringify(exposure)).not.toContain(secret);
+});
+
+test("#122: atomic joined seat rejects foreign board before binding private hand", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page,
+    { forgedJoinedBoardVersionOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-join-id").fill("00000000-0000-0000-0000-000000000020");
+  await page.getByTestId("dev-join-token").fill(mockSeatToken(1));
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-error")).toBeVisible();
+  await expect(page.getByTestId("dev-session")).toHaveCount(0);
+  await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+  await expect(page.getByTestId("match-player-bob")).toHaveCount(0);
+  await page.getByTestId("dev-join").click();
+  await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+  await expect(page.getByTestId("dev-seat-alice")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-error")).toHaveCount(0);
+  expect(observedHeaders.filter(h => h.path.endsWith("/seat"))).toHaveLength(2);
+  const exposure = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(exposure)).not.toContain(mockSeatToken(1));
+});
 
 test("controlled lots, cards and standing henchmen stay server-owned after moves and seat switches", async ({ page }) => {
   await mockMatchApi(page);

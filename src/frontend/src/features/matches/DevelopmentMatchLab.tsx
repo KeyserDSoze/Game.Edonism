@@ -12,6 +12,7 @@ import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
 import { hasValidDevelopmentPublicEnvelope } from "./verifiedDevelopmentPublicEnvelope";
 import { hasValidDevelopmentCreatorResponse } from "./verifiedDevelopmentCreatorResponse";
 import { hasValidDevelopmentRotatedCredential } from "./verifiedDevelopmentRotatedCredential";
+import { hasValidDevelopmentTurnOptions } from "./verifiedDevelopmentTurnOptions";
 import { buildVerifiedPublicAuditExport } from "./publicAuditExport";
 import {
   MaxPublicAuditImportBytes, buildOfflinePublicAuditReview,
@@ -719,10 +720,12 @@ export function DevelopmentMatchLab({
       .then((options) => {
         if (!controller.signal.aborted && currentMatchId.current === matchId
           && currentRevision.current === revision
-          && options.matchId === matchId && options.playerId === seatId
-          && options.revision === revision && typeof options.canEndTurn === "boolean"
-          && Array.isArray(options.freeMoveStreetIds)
-          && options.freeMoveStreetIds.every((id) => typeof id === "string")) {
+          && currentActorScope.current?.matchId === matchId
+          && currentActorScope.current?.seatId === seatId
+          && currentActorScope.current?.token === actorToken
+          // #117: The server's own public phase/seat and free-move-used
+          // snapshot must agree with untrusted actor options BEFORE UI lease.
+          && hasValidDevelopmentTurnOptions(options, seatId, session?.state)) {
           setOptionLease({ token: actorToken, options });
         }
       })
@@ -1323,6 +1326,9 @@ export function DevelopmentMatchLab({
       const { state, hand: privateHand, turnOptions: options } = bootstrap;
       const actor = bootstrap.playerId;
       if (!hasValidDevelopmentPublicEnvelope(state, id)
+        // The atomic /seat response is one coherent server projection:
+        // reject contradictory turn claims before binding hand or capability.
+        || !hasValidDevelopmentTurnOptions(options, actor, state)
         || bootstrap.matchId.toLowerCase() !== id || state.matchId.toLowerCase() !== id
         || privateHand.matchId.toLowerCase() !== id || options.matchId.toLowerCase() !== id
         || privateHand.playerId !== actor || options.playerId !== actor

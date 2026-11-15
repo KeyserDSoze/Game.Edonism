@@ -33,9 +33,9 @@ for (const count of [2, 4, 8] as const) {
         await import("/src/features/matches/verifiedDevelopmentPublicEnvelope.ts");
       const { hasValidDevelopmentPublicAuditChronology: chronology } =
         await import("/src/features/matches/verifiedDevelopmentPublicAuditChronology.ts");
-      const board = (await import("/../../shared/board/edonism-board.v1.json")).default;
+      const { cityBoard } = await import("/src/features/city/board.ts");
       return {
-        version: board.version,
+        version: cityBoard.version,
         valid: valid(initial, initial.matchId),
         chronology: chronology(initial, initial.matchId),
         otherMatch: valid(initial, "wrong-match"),

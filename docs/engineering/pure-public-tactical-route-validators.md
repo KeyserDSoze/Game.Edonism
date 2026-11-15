@@ -18,3 +18,7 @@ All three exports take unknown server projections and return boolean; nulls, mis
 
 ## Functional validation result
 [CI #43508994557](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43508994557) ran on implementation SHA `e08b1073`: **665/665 xUnit, 177/177 mocked Playwright (13 new deterministic validators), 40/40 live .NET Playwright**, all three jobs completed/success. For issue closure verify again on the final documentation-only main HEAD and record its SHA in #101.
+
+## #104 — Exact public opponent-lot slot selection
+
+The validated tactical focus's **targetId** is the canonical board slot for both an uncontrolled activity and a rival-controlled lot. Once `verifiedTacticalFocus` accepts its match/actor/revision/owner/path, the map's initial `chooseTacticalFocus` must select that **exact** slot, matching the existing final-waypoint behavior. Selecting merely the first slot of the destination street silently highlights a different public lot (for example a verified Bob-owned `S-02` would incorrectly select `S-01`). Player focus still selects a default street slot; manual street/slot inspection clears tactical focus. Neither route display nor selected slot authorizes commands, combat, move or purchases. The mocked #104 regression uses an isolated two-seat fixture with Bob-owned `S-02` and verifies exact selected-slot/aria-pressed, canonical path, waypoint traversal, manual clear and actor rotation. Existing forged/unknown owner tests and live two-bearer .NET tests remain mandatory, with final-main 3/3 CI before closure.

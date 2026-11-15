@@ -86,7 +86,7 @@ export default function App() {
     const targetStreet = valid.streetPath[valid.streetPath.length - 1];
     setTacticalFocus(valid);
     setSelectedStreetId(targetStreet);
-    setSelectedSlotId(valid.kind === "activity"
+    setSelectedSlotId(valid.kind === "activity" || valid.kind === "opponent-lot"
       ? valid.targetId : slotsOnStreet(targetStreet)[0]?.id ?? null);
   };
 

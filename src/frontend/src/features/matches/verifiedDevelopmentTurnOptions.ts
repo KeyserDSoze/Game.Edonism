@@ -1,4 +1,5 @@
 import { hasValidDevelopmentPublicEnvelope } from "./verifiedDevelopmentPublicEnvelope";
+import canonicalBoard from "../../../../shared/board/edonism-board.v1.json";
 
 /**
  * #117: Narrow, read-only consistency check for untrusted Development
@@ -6,6 +7,10 @@ import { hasValidDevelopmentPublicEnvelope } from "./verifiedDevelopmentPublicEn
  * .NET remains the only authority to grant or execute PvP commands.
  * We intentionally DO NOT derive allowable adjacent streets here.
  */
+// #124: Check destination membership in the same shared printed board;
+// never compute adjacency, grant permissions or trust a client-generated route.
+const canonicalStreetIds = new Set(canonicalBoard.streets.map(street => street.id));
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -34,6 +39,7 @@ export function hasValidDevelopmentTurnOptions(
   const seen = new Set<string>();
   for (const destination of value.freeMoveStreetIds) {
     if (typeof destination !== "string" || !destination.trim()
+      || !canonicalStreetIds.has(destination)
       || destination === seat.streetId || seen.has(destination))
       return false;
     seen.add(destination);

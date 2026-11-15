@@ -79,6 +79,7 @@ type MockOptions = {
   noTurnOptions?: boolean;
   invalidTurnOptions?: boolean;
   forgedSecondMoveOptionsOnce?: boolean; // #117: 200 offers another move after use.
+  forgedUnknownStreetOptionsOnce?: boolean; // #124: forged canonical/foreign destination mix.
   delayFirstAliceOptions?: boolean;
   dropFirstEndTurnResponse?: boolean;
   http503FirstEndTurn?: boolean;
@@ -131,6 +132,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayedRevokedResponse = false;
   let delayedAliceOptions = false;
   let forgedSecondMoveIssued = false;
+  let forgedUnknownStreetIssued = false;
   let forgedJoinedHandIssued = false;
   let forgedBobHandIssued = false;
   const observedInvalidHandReplies: Array<"seat" | "hand"> = [];
@@ -714,6 +716,15 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         forgedSecondMoveIssued = true;
         observedForgedOptions.push({ seat, revision });
       }
+      // #124: a typed, revision-correct HTTP 200 may contain an invented
+      // destination alongside a real printed street. Reject the entire lease.
+      const forgedForeignStreet = options.forgedUnknownStreetOptionsOnce
+        && !forgedUnknownStreetIssued && seat === "alice" && isTurn
+        && !moved[seat] && revision === 0;
+      if (forgedForeignStreet) {
+        forgedUnknownStreetIssued = true;
+        observedForgedOptions.push({ seat, revision });
+      }
       return reply({
         status: 200, headers: { "Cache-Control": "no-store" },
         json: {
@@ -721,7 +732,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           playerId: seat,
           revision: options.invalidTurnOptions ? revision + 999 : revision,
           canEndTurn: isTurn,
-          freeMoveStreetIds: forgedSecondMove ? ["meson"]
+          freeMoveStreetIds: forgedForeignStreet ? ["planck", "unmapped-road"]
+            : forgedSecondMove ? ["meson"]
             : isTurn && !moved[seat] ? neighbors[streets[seat]] ?? [] : [],
         },
       });
@@ -2159,6 +2171,56 @@ test("Domain options are required: missing or wrong revision prevents browser co
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
   await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
   await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+});
+
+
+test("#124: foreign destination in otherwise valid turn options hides all controls and recovers", async ({ page }) => {
+  // Keep DOM checks independent of WebGL, while retaining the real React runtime.
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: function (this: HTMLCanvasElement, kind: string, ...args: unknown[]) {
+        if (kind === "webgl" || kind === "webgl2" || kind === "experimental-webgl")
+          return null;
+        return Reflect.apply(original, this, [kind, ...args]);
+      },
+    });
+  });
+  const { observedHeaders, observedForgedOptions } = await mockMatchApi(page,
+    { forgedUnknownStreetOptionsOnce: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  await expect.poll(() => observedForgedOptions.length).toBe(1);
+  expect(observedForgedOptions).toEqual([{ seat: "alice", revision: 0 }]);
+  await expect(page.getByTestId("dev-position")).toHaveText("Gauss Avenue");
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "gauss");
+  await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+
+  // Seat changes re-fetch genuine actor-bound options; no forged move is sent.
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  await page.getByTestId("dev-seat-alice").click();
+  await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+  await expect(page.getByTestId("dev-move-planck")).toBeEnabled();
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(observedHeaders.filter(event => event.path.endsWith("/free-move"))).toHaveLength(0);
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+  expect(observedHeaders.filter(event => event.path.endsWith("/free-move"))).toHaveLength(0);
+  expect(observedHeaders.filter(event => event.path.endsWith("/end-turn"))).toHaveLength(1);
+
+  const storage = await page.evaluate(() => ({
+    url: location.href, local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(storage)).not.toContain(mockSeatToken(0));
+  expect(JSON.stringify(storage)).not.toContain(mockSeatToken(1));
 });
 
 test("#117: forged second free move is hidden; later verified options recover same actor", async ({ page }) => {

@@ -1018,7 +1018,7 @@ test("#105: forged gross salary quote hides all public wage rows, not gameplay c
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
   await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
   expect(observedHeaders.filter(event =>
-    /\\/(free-move|end-turn)$/.test(event.path))).toHaveLength(0);
+    event.path.endsWith("/free-move") || event.path.endsWith("/end-turn"))).toHaveLength(0);
   await page.getByTestId("dev-end-turn").click();
   await expect(page.getByTestId("dev-revision")).toHaveText("1");
   await expect(page.getByTestId("gross-salary-alice")).toHaveCount(0);

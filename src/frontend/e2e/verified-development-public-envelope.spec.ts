@@ -4,6 +4,7 @@ const seats = ["alice", "bob", "charlie", "diana", "eve", "frank", "grace", "hei
 function fixture(count: 2 | 4 | 8) {
   const ids = seats.slice(0, count);
   return {
+    boardVersion: "edonism-streets-v1",
     matchId: "public-envelope-test",
     revision: 3, round: 1, phase: 0, activePlayerId: "alice",
     players: ids.map((playerId, i) => ({

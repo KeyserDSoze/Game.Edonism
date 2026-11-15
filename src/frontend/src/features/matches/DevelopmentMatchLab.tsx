@@ -1158,8 +1158,11 @@ export function DevelopmentMatchLab({
           const next = (await response.json()) as DemoMatch;
           if (!controller.signal.aborted && !pendingRequest?.signal.aborted
             && !commandInFlight.current && currentMatchId.current === matchId
-            && next.matchId === matchId && Number.isInteger(next.revision)
+            && hasValidDevelopmentPublicEnvelope(next, matchId)
             && next.revision >= currentRevision.current) {
+            // Even a same-revision 200 is safe to ETag-cache only after
+            // validating its public envelope; a forged revision-99 snapshot
+            // must NEVER become a cached conditional-poll tag.
             acceptServerState(next, matchId);
             const value = response.headers.get("ETag");
             const expected = `W/"edonism-revision-${next.revision}"`;

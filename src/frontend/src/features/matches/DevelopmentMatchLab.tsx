@@ -38,6 +38,11 @@ type DemoPlayer = Readonly<{
   startingSlotId: string;
   freeMoveUsed: boolean;
   hearts: number | null;
+  // #139: server-public resources (not salary credits or action permissions).
+  atoms: number;
+  diplomacyTokens: number;
+  henchmenTotal: number;
+  henchmenAvailable: number;
 }>;
 type DemoMatch = Readonly<{
   matchId: string;
@@ -640,6 +645,12 @@ export function DevelopmentMatchLab({
             // #137: preserve the public .NET character heart count; nullable
             // legacy snapshots have no character card and must show no hearts.
             hearts: seat.hearts,
+            // #139: only existing public GameMatch snapshot resources, never
+            // capabilities or client-calculated wallet changes.
+            atoms: seat.atoms,
+            diplomacyTokens: seat.diplomacyTokens,
+            henchmenTotal: seat.henchmenTotal,
+            henchmenAvailable: seat.henchmenAvailable,
           })),
           boardActivities: state.boardActivities ?? [],
           controlledActivities: state.controlledActivities ?? [],

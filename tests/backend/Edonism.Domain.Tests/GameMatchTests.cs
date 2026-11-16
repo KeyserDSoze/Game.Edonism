@@ -10,6 +10,47 @@ public sealed class GameMatchTests
         GameMatch.CreateFromTrustedSetup(Guid.NewGuid(), BoardCatalog.LoadDefault(),
             players.Length > 0 ? players : [new("alice", "N-01"), new("bob", "E-01"), new("cara", "S-01")]);
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void PublicFirstRoundResourcesMatchControlledReserveAndDoNotCreditGrossQuotes(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var seeds = board.Slots.Take(count)
+            .Select((slot, i) => new MatchParticipantSeed($"player-{i}", slot.Id))
+            .ToArray();
+        var match = GameMatch.CreateFromTrustedSetup(Guid.NewGuid(), board, seeds);
+        var before = match.Snapshot();
+        Assert.Equal(count, before.Players.Count);
+        foreach (var seat in before.Players)
+        {
+            var deployed = before.ControlledActivities.Count(lot =>
+                lot.OwnerPlayerId == seat.PlayerId);
+            Assert.Equal(4, seat.Atoms);
+            Assert.Equal(2, seat.DiplomacyTokens);
+            Assert.Equal(16, seat.HenchmenTotal);
+            Assert.Equal(16 - deployed, seat.HenchmenAvailable);
+            var quote = Assert.Single(before.GrossSalaryQuotes,
+                row => row.PlayerId == seat.PlayerId);
+            Assert.Equal(3, quote.GrossAtoms);
+            Assert.NotEqual(quote.GrossAtoms, seat.Atoms);
+        }
+
+        var actor = before.Players[0];
+        var target = board.Streets.Single(s => s.Id == actor.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(actor.PlayerId, target, before.Revision).Accepted);
+        Assert.True(match.TryEndTurn(actor.PlayerId, match.Revision).Accepted);
+        var after = match.Snapshot();
+        Assert.Equal(before.Players.Select(p => (p.Atoms, p.DiplomacyTokens,
+            p.HenchmenTotal, p.HenchmenAvailable)),
+            after.Players.Select(p => (p.Atoms, p.DiplomacyTokens,
+                p.HenchmenTotal, p.HenchmenAvailable)));
+        Assert.Equal(before.GrossSalaryQuotes, after.GrossSalaryQuotes);
+        Assert.Equal(before.ControlledActivities, after.ControlledActivities);
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
     [Fact]
     public void TrustedSetupDerivesStreetsFromRealLotsAndPrintedInitialResources()
     {

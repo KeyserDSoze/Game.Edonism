@@ -8,6 +8,10 @@ type PublicPlayer = Readonly<{
   startingSlotId: string;
   freeMoveUsed: boolean;
   hearts: number;
+  atoms: number;
+  diplomacyTokens: number;
+  henchmenTotal: number;
+  henchmenAvailable: number;
 }>;
 type PublicMatch = Readonly<{
   matchId: string;
@@ -118,6 +122,20 @@ async function startRealMatch(page: Page): Promise<CreatedMatch> {
     await expect(summary).toContainText(`preventivo lordo: ${quote.grossAtoms} atomi`);
   }
   for (const player of match.state.players) {
+    // #139: resource counts are already in the authoritative public
+    // snapshot. Gross wage is an unpaid quote, NOT current atoms.
+    const owned = match.state.controlledActivities.filter(
+      lot => lot.ownerPlayerId === player.playerId);
+    expect(player.atoms).toBe(4);
+    expect(player.diplomacyTokens).toBe(2);
+    expect(player.henchmenTotal).toBe(16);
+    expect(player.henchmenAvailable).toBe(16 - owned.length);
+    const resources = page.getByTestId(`match-player-resources-${player.playerId}`);
+    await expect(resources).toHaveAttribute("data-atoms", String(player.atoms));
+    await expect(resources).toHaveAttribute("data-diplomacy-tokens", String(player.diplomacyTokens));
+    await expect(resources).toHaveAttribute("data-henchmen-total", String(player.henchmenTotal));
+    await expect(resources).toHaveAttribute("data-henchmen-available", String(player.henchmenAvailable));
+    await expect(resources).toContainText(`Atomi attuali: ${player.atoms}`);
     await expect(page.getByTestId(`match-player-${player.playerId}`))
       .toHaveAttribute("data-street-id", player.streetId);
     // #136: same public server field, no derived move permission.
@@ -311,6 +329,17 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   await expect(page.getByTestId("match-player-alice"))
     .toHaveAttribute("data-street-id", aliceDestination);
   expect(afterMove.players[0].freeMoveUsed).toBe(true);
+  // #139: the real server movement cannot spend/credit player resources;
+  // every city display must retain the same authoritative counts.
+  for (const seat of afterMove.players) {
+    const earlier = created.state.players.find(p => p.playerId === seat.playerId);
+    expect(seat.atoms).toBe(earlier?.atoms);
+    expect(seat.diplomacyTokens).toBe(earlier?.diplomacyTokens);
+    expect(seat.henchmenTotal).toBe(earlier?.henchmenTotal);
+    expect(seat.henchmenAvailable).toBe(earlier?.henchmenAvailable);
+    await expect(page.getByTestId(`match-player-resources-${seat.playerId}`))
+      .toHaveAttribute("data-henchmen-available", String(seat.henchmenAvailable));
+  }
   // #138: the only move cannot credit atoms, buy new lots or change quote.
   expect(afterMove.grossSalaryQuotes).toEqual(created.state.grossSalaryQuotes);
   expect(afterMove.controlledActivities).toEqual(created.state.controlledActivities);
@@ -707,6 +736,22 @@ test("real .NET eight-seat match supports private join and all sequential turns"
     await expect(summary).toHaveAttribute("data-controlled-lots", String(owned.length));
     await expect(summary).toHaveAttribute("data-standing", String(standing));
     await expect(summary).toHaveAttribute("data-fallen", String(owned.length - standing));
+  }
+
+  // #139: the eight-seat city shows every server-sent public resource
+  // alongside—not confused with—the uncredited salary quote.
+  for (const seat of created.state.players) {
+    const deployed = created.state.controlledActivities.filter(
+      lot => lot.ownerPlayerId === seat.playerId).length;
+    const resources = page.getByTestId(`match-player-resources-${seat.playerId}`);
+    expect(seat.atoms).toBe(4);
+    expect(seat.diplomacyTokens).toBe(2);
+    expect(seat.henchmenTotal).toBe(16);
+    expect(seat.henchmenAvailable).toBe(16 - deployed);
+    await expect(resources).toHaveAttribute("data-atoms", String(seat.atoms));
+    await expect(resources).toHaveAttribute("data-diplomacy-tokens", String(seat.diplomacyTokens));
+    await expect(resources).toHaveAttribute("data-henchmen-total", String(seat.henchmenTotal));
+    await expect(resources).toHaveAttribute("data-henchmen-available", String(seat.henchmenAvailable));
   }
 
   const guestContext = await browser.newContext();

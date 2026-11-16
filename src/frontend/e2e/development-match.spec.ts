@@ -56,6 +56,7 @@ type MockOptions = {
   fallenHenchman?: boolean;
   invalidGrossQuote?: boolean; // #105: forged public total, never server wallet state.
   missingGrossQuote?: boolean; // #107: a forged incomplete public quote set.
+  malformedReserve?: boolean; // #139: public henchmen reserve contradicts owned lots.
   forgedHigherRevisionSnapshot?: boolean; // #112: corrupt first public poll, never a real command.
   forgedNullAuditEventSnapshot?: boolean; // #113: corrupt first poll with events:[null].
   forgedForeignAuditStreetOnce?: boolean; // #125: plausible public 200 with foreign audit road.
@@ -207,6 +208,13 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       startingSlotId: playerId === "alice" ? "N-01" : playerId === "bob" ? bobLotSlot
         : `N-${String(index + 1).padStart(2, "0")}`,
       hearts: 3,
+      // #139: real .NET public fixture: 4 atoms, 2 diplomacy, 16
+      // henchmen, one deployed on each of the first two starting lots.
+      atoms: 4,
+      diplomacyTokens: 2,
+      henchmenTotal: 16,
+      henchmenAvailable: playerId === "alice" && options.malformedReserve
+        ? 14 : playerId === "alice" || playerId === "bob" ? 15 : 16,
       freeMoveUsed: moved[playerId],
     })),
     boardActivities: [
@@ -6413,6 +6421,81 @@ for (const kind of ["missingGrossQuote", "invalidGrossQuote", "missingBoardCard"
       for (const playerId of demoSeats) {
         await expect(page.getByTestId(`match-player-economy-${playerId}`)).toHaveCount(0);
         await expect(page.getByTestId(`gross-salary-${playerId}`)).toHaveCount(0);
+      }
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+    });
+}
+
+// #139: all values come from server-authored public player resources; a
+// quoted GROSS salary is never credited to the current atom count.
+for (const count of [2, 8] as const) {
+  test(`#139: ${count}-seat current public atoms/diplomacy/reserve remain stable through view and turn`,
+    async ({ page }) => {
+      if (count === 2) {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.addInitScript(() => {
+          const original = HTMLCanvasElement.prototype.getContext;
+          HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+            if (kind === "webgl" || kind === "webgl2"
+              || kind === "experimental-webgl") return null;
+            return Reflect.apply(original, this, [kind, ...args]);
+          };
+        });
+      }
+      const { observedHeaders } = await mockMatchApi(page, { playerCount: count });
+      await page.goto("/");
+      await page.getByTestId("dev-player-count").selectOption(String(count));
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(count);
+      for (const playerId of demoSeats.slice(0, count)) {
+        const resources = page.getByTestId(`match-player-resources-${playerId}`);
+        await expect(resources).toHaveAttribute("data-atoms", "4");
+        await expect(resources).toHaveAttribute("data-diplomacy-tokens", "2");
+        await expect(resources).toHaveAttribute("data-henchmen-total", "16");
+        await expect(resources).toHaveAttribute("data-henchmen-available",
+          playerId === "alice" || playerId === "bob" ? "15" : "16");
+        await expect(resources).toContainText("Atomi attuali: 4");
+      }
+      await expect(page.getByTestId("match-player-economy-alice"))
+        .toHaveAttribute("data-gross-atoms", "3");
+      expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+        .toHaveLength(0);
+      await page.getByTestId("dev-move-planck").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("1");
+      await expect(page.getByTestId("match-player-resources-alice"))
+        .toHaveAttribute("data-atoms", "4");
+      await page.getByTestId("match-inspect-street-bob").click();
+      await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+      await expect(page.getByTestId("match-player-resources-bob"))
+        .toContainText("Current atoms: 4");
+      await expect(page.getByTestId("match-player-resources-bob"))
+        .toContainText("available henchmen:");
+      await page.getByTestId("dev-seat-bob").click();
+      await expect(page.getByTestId("match-player-resources-alice"))
+        .toHaveAttribute("data-diplomacy-tokens", "2");
+      expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+        .toHaveLength(1);
+      await page.getByTestId("dev-leave").click();
+      await expect(page.getByTestId("match-player-resources-alice")).toHaveCount(0);
+    });
+}
+
+for (const malformed of [false, true] as const) {
+  test(`#139: 8-seat forged reserve=${malformed} hides or preserves entire scouting projection`,
+    async ({ page }) => {
+      await mockMatchApi(page, { playerCount: 8, malformedReserve: malformed });
+      await page.goto("/");
+      await page.getByTestId("dev-player-count").selectOption("8");
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(8);
+      for (const id of demoSeats) {
+        await expect(page.getByTestId(`match-player-resources-${id}`))
+          .toHaveCount(malformed ? 0 : 1);
+        // Independent verified public economic quote stays visible: only
+        // the invalid resource projection fails, not the whole match.
+        await expect(page.getByTestId(`match-player-economy-${id}`))
+          .toHaveCount(1);
       }
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       await expect(page.getByTestId("dev-end-turn")).toBeEnabled();

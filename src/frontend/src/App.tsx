@@ -11,6 +11,7 @@ import { verifiedPublicStartingLots } from "@/features/city/playerStartingLots";
 import { verifiedPublicFreeMoveUsage } from "@/features/city/playerFreeMoveUsage";
 import { verifiedPublicCharacterHearts } from "@/features/city/playerCharacterHearts";
 import { verifiedPublicSeatEconomy } from "@/features/city/publicSeatEconomy";
+import { verifiedPublicSeatResources } from "@/features/city/publicSeatResources";
 import { controlledLotMarkers, publicGrossSalaryQuotes, verifiedPublicBoardCardCount, type PublicMatchSceneState } from "@/features/city/activityMarkers";
 import { verifiedTacticalFocus, type TacticalFocus } from "@/features/city/tacticalFocus";
 import { verifiedHistoricalStreetFocus, type HistoricalStreetFocus } from "@/features/city/historicalStreetFocus";
@@ -57,6 +58,9 @@ export default function App() {
   // #138: same server-confirmed public lots and verified GROSS quote as
   // the activity roster below; never infer paid atoms or legal attacks.
   const publicSeatEconomy = verifiedPublicSeatEconomy(publicPlayers);
+  // #139: same verified public board/controlled-lot snapshot; copied wallet
+  // totals are distinct from unpaid gross quotes and never grant actions.
+  const publicSeatResources = verifiedPublicSeatResources(publicPlayers);
   const verifiedBoardCardCount = verifiedPublicBoardCardCount(publicPlayers);
   const currentStreet = streetById(selectedStreetId) ?? cityBoard.streets[0];
   const currentSlot = selectedSlotId ? slotById(selectedSlotId) : undefined;
@@ -365,6 +369,23 @@ export default function App() {
                             standing: publicSeatEconomy.get(marker.playerId)?.standing,
                             fallen: publicSeatEconomy.get(marker.playerId)?.fallen,
                             gross: publicSeatEconomy.get(marker.playerId)?.grossAtoms,
+                          })}
+                        </span>
+                      )}
+                      {publicSeatResources.has(marker.playerId) && (
+                        <span
+                          data-testid={`match-player-resources-${marker.playerId}`}
+                          data-atoms={publicSeatResources.get(marker.playerId)?.atoms}
+                          data-diplomacy-tokens={publicSeatResources.get(marker.playerId)?.diplomacyTokens}
+                          data-henchmen-total={publicSeatResources.get(marker.playerId)?.henchmenTotal}
+                          data-henchmen-available={publicSeatResources.get(marker.playerId)?.henchmenAvailable}
+                          className="text-muted-foreground"
+                        >
+                          {t("city.publicSeatResources", {
+                            atoms: publicSeatResources.get(marker.playerId)?.atoms,
+                            diplomacy: publicSeatResources.get(marker.playerId)?.diplomacyTokens,
+                            available: publicSeatResources.get(marker.playerId)?.henchmenAvailable,
+                            total: publicSeatResources.get(marker.playerId)?.henchmenTotal,
                           })}
                         </span>
                       )}

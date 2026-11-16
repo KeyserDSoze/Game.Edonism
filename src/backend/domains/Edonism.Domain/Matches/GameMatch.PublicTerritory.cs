@@ -19,7 +19,8 @@ public sealed record MatchPublicTerritoryStreet(
 public sealed record MatchPublicTerritoryReport(
     Guid MatchId, string PlayerId, int Round, long VerifiedRevision,
     int TotalSlots, int FreeLots, int ControlledLots, int SharedStreetCount,
-    IReadOnlyList<MatchPublicTerritoryStreet> Streets);
+    IReadOnlyList<MatchPublicTerritoryStreet> Streets,
+    IReadOnlyList<MatchPublicTerritoryFootprint> Footprints);
 
 public sealed partial class GameMatch
 {
@@ -99,10 +100,32 @@ public sealed partial class GameMatch
                 != BoardDefinition.PrintedActivitySlotCount)
             throw new InvalidOperationException("Public territory board totals disagree.");
 
+        // #159: derive every player's footprint strictly from these same
+        // seven reconciled owner rows. No second snapshot, actor claim or hand.
+        var totals = state.Players.Select((player, index) =>
+        {
+            var entries = streets.Select(street => street.Owners[index]).ToArray();
+            if (entries.Any(row => row.PlayerId != player.PlayerId))
+                throw new InvalidOperationException("Street owner order disagrees with roster.");
+            return new MatchPublicTerritoryFootprintTotals(
+                player.PlayerId, entries.Sum(row => row.ControlledLots),
+                entries.Sum(row => row.Standing), entries.Sum(row => row.Fallen),
+                entries.Count(row => row.ControlledLots > 0));
+        }).ToArray();
+        var footprints = PublicTerritoryFootprintOrdering.Rank(totals);
+        if (footprints.Sum(row => row.ControlledLots) != state.ControlledActivities.Count
+            || footprints.Sum(row => row.Standing) != streets.Sum(road => road.Standing)
+            || footprints.Sum(row => row.Fallen) != streets.Sum(road => road.Fallen)
+            || footprints.Any(row => row.OccupiedStreets != streets.Count(road =>
+                road.Owners.Any(owner => owner.PlayerId == row.PlayerId
+                    && owner.ControlledLots > 0))))
+            throw new InvalidOperationException("Territory footprint totals disagree with roads.");
+
         return new MatchPublicTerritoryReport(
             state.MatchId, actorId, state.Round, audit.VerifiedRevision,
             BoardDefinition.PrintedActivitySlotCount,
             streets.Sum(street => street.FreeLots), state.ControlledActivities.Count,
-            streets.Count(street => street.IsShared), Array.AsReadOnly(streets));
+            streets.Count(street => street.IsShared), Array.AsReadOnly(streets),
+            footprints);
     }
 }

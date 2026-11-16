@@ -407,6 +407,60 @@ async function assertLivePublicStreetControlMatrix(
   expect(available).toBe(freePlan.routes.length);
   expect(controlledTotal).toBe(created.state.controlledActivities.length);
 
+  // #158: the server computes an authenticated, audited seven-road territory
+  // projection. Match every road and ALL public owners (including zero) to
+  // the independently verified UI frame + real free/owned .NET routes.
+  const reportReply = await page.request.get(endpoint + "/public-territory", {
+    headers: auth(token),
+  });
+  expect(reportReply.status()).toBe(200);
+  expect(reportReply.headers()["cache-control"]).toContain("no-store");
+  const report = await reportReply.json() as {
+    matchId: string; playerId: string; round: number; verifiedRevision: number;
+    totalSlots: number; freeLots: number; controlledLots: number;
+    sharedStreetCount: number;
+    streets: {
+      streetId: string; streetName: string; totalSlots: number; freeLots: number;
+      controlledLots: number; standing: number; fallen: number;
+      distinctOwnerCount: number; isShared: boolean;
+      owners: { playerId: string; controlledLots: number; standing: number; fallen: number }[];
+    }[];
+  };
+  expect(report.matchId).toBe(created.matchId);
+  expect(report.playerId).toBe(actorId);
+  expect(report.round).toBe(1);
+  expect(report.verifiedRevision).toBe(created.state.revision);
+  expect(report.totalSlots).toBe(30);
+  expect(report.freeLots).toBe(freePlan.routes.length);
+  expect(report.controlledLots).toBe(created.state.controlledActivities.length);
+  const expectedServerReport = expected.map(street => {
+    const streetId = street.id.replace("public-street-control-", "");
+    const owners = street.owners.map(owner => ({
+      playerId: owner.id.slice(`public-street-control-${streetId}-owner-`.length),
+      controlledLots: Number(owner.controlled),
+      standing: Number(owner.standing),
+      fallen: Number(owner.fallen),
+    }));
+    const distinctOwnerCount = owners.filter(owner => owner.controlledLots > 0).length;
+    return {
+      streetId,
+      streetName: board.streets.find(road => road.id === streetId)!.name,
+      totalSlots: Number(street.totalSlots),
+      freeLots: Number(street.freeLots),
+      controlledLots: Number(street.controlledLots),
+      standing: Number(street.standing),
+      fallen: Number(street.fallen),
+      distinctOwnerCount,
+      isShared: distinctOwnerCount >= 2,
+      owners,
+    };
+  });
+  expect(report.streets).toEqual(expectedServerReport);
+  expect(report.sharedStreetCount).toBe(expectedServerReport.filter(x => x.isShared).length);
+  expect(JSON.stringify(report)).not.toMatch(/cardIds|cardId|accessToken|privateHand|atoms/i);
+  for (const credential of created.credentials)
+    expect(JSON.stringify(report)).not.toContain(credential.token);
+
   // #153: one batched browser frame verifies the public per-owner footprint
   // and shared ordinal tie positions against the REAL .NET public snapshot;
   // no guessed power, victory points, cards or client-authorized movement.

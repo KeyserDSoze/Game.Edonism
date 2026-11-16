@@ -7159,10 +7159,39 @@ for (const count of [2, 8] as const) {
         await expect(page.getByTestId("gross-salary-alice")).toHaveCount(1);
         await expect(page.getByTestId("match-character-hearts-bob")).toHaveCount(1);
 
+        // #150: combining a canonical street with a printed category filters
+        // ONLY this verified atlas; public totals, PvP state and choices stay.
+        const streetFilter = page.getByTestId("public-free-filter-street");
+        const categoryFilter = page.getByTestId("public-free-filter-category");
+        const countText = page.getByTestId("public-free-filter-count");
+        await expect(streetFilter.locator("option")).toHaveCount(8);
+        await expect(categoryFilter.locator("option")).toHaveCount(9);
+        await expect(countText).toHaveAttribute("data-total-count", "28");
+        await streetFilter.selectOption("gauss");
+        await expect(list.locator("li")).toHaveCount(7);
+        await expect(countText).toHaveAttribute("data-visible-count", "7");
+        await categoryFilter.selectOption("sport");
+        await expect(list.locator("li")).toHaveCount(0);
+        await expect(page.getByTestId("public-free-filter-empty")).toBeVisible();
+        await expect(countText).toHaveAttribute("data-total-count", "28");
+        await streetFilter.selectOption("");
+        await expect(list.locator("li")).toHaveCount(2);
+        await expect(page.getByTestId("public-free-filter-empty")).toHaveCount(0);
+        await expect(page.getByTestId("public-free-activity-B-02")).toBeVisible();
+        await expect(page.getByTestId("public-free-activity-B-03")).toBeVisible();
+        await categoryFilter.selectOption("");
+        await expect(list.locator("li")).toHaveCount(28);
+        expect(observedHeaders.filter(x => /\\/(free-move|end-turn)$/.test(x.path)))
+          .toHaveLength(0);
+
         if (count === 2) {
           await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
           await expect(atlas.locator("summary"))
             .toContainText("Inspect 28 uncontrolled activities on the board");
+          await expect(page.getByText("Filter by street", { exact: true })).toBeVisible();
+          await expect(page.getByText("Filter by category", { exact: true })).toBeVisible();
+          await expect(page.getByTestId("public-free-filter-count"))
+            .toHaveText("28 of 28 free public activities visible");
           await expect(page.getByTestId("match-inspect-free-activity-N-02"))
             .toHaveAttribute("aria-label",
               "Inspect uncontrolled activity at lot N-02 on Gauss Avenue");

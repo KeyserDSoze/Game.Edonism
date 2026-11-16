@@ -173,6 +173,12 @@ async function startRealMatch(page: Page): Promise<CreatedMatch> {
       character => character.playerId === player.playerId);
     expect(assigned).toBeDefined();
     expect(assigned?.printedInitialHearts).toBe(player.hearts);
+    // #146: inspect the same public assigned card identities in the actual
+    // React UI. Private hand/action cards and bearer tokens never enter it.
+    await expect(page.getByTestId(`match-character-card-${player.playerId}`))
+      .toHaveAttribute("data-character-card-id", assigned!.characterId);
+    await expect(page.getByTestId(`match-character-starting-card-${player.playerId}`))
+      .toHaveAttribute("data-starting-activity-card-id", assigned!.startingActivityCardId);
     // #137: real printed, public character hearts (not a client estimate).
     expect(player.hearts).toBeGreaterThanOrEqual(1);
     expect(player.hearts).toBeLessThanOrEqual(5);
@@ -813,6 +819,11 @@ test("real .NET eight-seat match supports private join and all sequential turns"
     expect(player?.hearts).toBe(character.printedInitialHearts);
     await expect(page.getByTestId(`match-character-hearts-${character.playerId}`))
       .toHaveAttribute("data-character-hearts", String(character.printedInitialHearts));
+    // #146: all eight PUBLIC technical IDs are rendered, not guessed.
+    await expect(page.getByTestId(`match-character-card-${character.playerId}`))
+      .toHaveAttribute("data-character-card-id", character.characterId);
+    await expect(page.getByTestId(`match-character-starting-card-${character.playerId}`))
+      .toHaveAttribute("data-starting-activity-card-id", character.startingActivityCardId);
   }
   await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(8);
   await expect(page.getByTestId("match-activity-roster").locator("li[data-owner-id]")).toHaveCount(8);

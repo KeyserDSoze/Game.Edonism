@@ -211,9 +211,10 @@ async function assertLivePublicUncontrolledAtlas(
   }[],
   inspectFirst = false,
 ) {
-  const slots = (JSON.parse(await readFile(
+  const printedBoard = JSON.parse(await readFile(
     new URL("../../shared/board/edonism-board.v1.json", import.meta.url), "utf8",
-  )) as { slots: { id: string }[] }).slots.map(slot => slot.id);
+  )) as { slots: { id: string }[]; streets: { id: string; name: string }[] };
+  const slots = printedBoard.slots.map(slot => slot.id);
   const expected = [...routes].sort((a, b) =>
     slots.indexOf(a.slotId) - slots.indexOf(b.slotId))
     .map(({ slotId, cardId, category, streetId }) => ({
@@ -268,6 +269,34 @@ async function assertLivePublicUncontrolledAtlas(
   await streetFilter.selectOption("");
   await expect(listed).toHaveCount(expected.length);
   await expect(page.getByTestId("public-free-filter-empty")).toHaveCount(0);
+
+  // #151: compare every street count to the genuine authenticated .NET
+  // route set, including streets with ZERO public uncontrolled cards.
+  const streetButtons = page.getByTestId("public-free-street-distribution")
+    .locator('button[data-testid^="public-free-street-count-"]');
+  await expect(streetButtons).toHaveCount(printedBoard.streets.length);
+  let countSum = 0;
+  for (let i = 0; i < printedBoard.streets.length; i++) {
+    const street = printedBoard.streets[i];
+    const amount = expected.filter(route => route.streetId === street.id).length;
+    countSum += amount;
+    await expect(streetButtons.nth(i)).toHaveAttribute(
+      "data-testid", `public-free-street-count-${street.id}`);
+    await expect(streetButtons.nth(i)).toHaveAttribute(
+      "data-free-count", String(amount));
+  }
+  expect(countSum).toBe(expected.length);
+  await categoryFilter.selectOption(expected[0].category);
+  await page.getByTestId(
+    `public-free-street-count-${expected[0].streetId}`).click();
+  await expect(streetFilter).toHaveValue(expected[0].streetId);
+  await expect(categoryFilter).toHaveValue("");
+  await expect(listed).toHaveCount(expected.filter(route =>
+    route.streetId === expected[0].streetId).length);
+  await streetFilter.selectOption("");
+  await expect(listed).toHaveCount(expected.length);
+  await expect(page.getByTestId("public-free-filter-count"))
+    .toHaveAttribute("data-total-count", String(expected.length));
   if (inspectFirst) {
     const before = await page.getByTestId("dev-revision").textContent();
     await page.getByTestId(

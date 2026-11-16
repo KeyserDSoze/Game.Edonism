@@ -433,3 +433,119 @@ for (const count of [2, 4, 8] as const) {
       })).toBe(source);
     });
 }
+
+
+// #157 — Real Vite module, source-of-truth printed full board. A valid
+// absence of shared streets MUST be [] and a rejected snapshot MUST be null.
+for (const count of [2, 4, 8] as const) {
+  test("#157: " + count + " seats see only genuine shared public lot ownership",
+    async ({ page }) => {
+      const base = {
+        activePlayerId: "alice" as string | null,
+        players: ids149.slice(0, count).map((playerId, i) => ({
+          playerId, streetId: i % 2 ? "einstein" : "gauss",
+        })),
+        boardActivities: slots149.map((slotId, i) => ({
+          slotId, cardId: "synthetic:card:" + slotId, category: categories149[i],
+        })),
+        controlledActivities: [] as {
+          slotId: string; ownerPlayerId: string; posture: number
+        }[],
+        privateHand: ["NEVER_EXPOSE_PRIVATE_HAND"],
+        bearer: "NEVER_EXPOSE_TOKEN",
+      };
+      const mutate = (edit: (value: typeof base) => void) => {
+        const value = structuredClone(base);
+        edit(value);
+        return value;
+      };
+      const shared = mutate(s => {
+        s.controlledActivities = [
+          { slotId: "N-01", ownerPlayerId: "alice", posture: 0 },
+          { slotId: "N-02", ownerPlayerId: "bob", posture: 1 },
+        ];
+      });
+      const moved = structuredClone(shared);
+      moved.players[0].streetId = "newton";
+      const settled = structuredClone(shared);
+      settled.activePlayerId = null;
+      const allOwned = mutate(s => {
+        s.controlledActivities = slots149.map((slotId, i) => ({
+          slotId, ownerPlayerId: ids149[i % count], posture: i % 2,
+        }));
+      });
+      const reserved = structuredClone(allOwned);
+      reserved.players[0].playerId = "system";
+      reserved.activePlayerId = "system";
+      for (const owned of reserved.controlledActivities)
+        if (owned.ownerPlayerId === "alice") owned.ownerPlayerId = "system";
+      const broken = [
+        mutate(s => { s.boardActivities[1].category = "unprinted"; }),
+        mutate(s => { s.boardActivities[1].cardId = s.boardActivities[0].cardId; }),
+        mutate(s => { s.boardActivities.pop(); }),
+        mutate(s => { s.players[0].playerId = "system"; }),
+        mutate(s => { s.players[0].playerId = " alice"; }),
+        mutate(s => { s.players[0].streetId = "unknown-street"; }),
+        mutate(s => { s.activePlayerId = "ghost"; }),
+        mutate(s => { s.players[0].playerId = s.players[1].playerId; }),
+        reserved,
+        (() => { const forged = structuredClone(shared);
+          forged.controlledActivities[0].ownerPlayerId = "ghost";
+          return forged;
+        })(),
+        (() => { const forged = structuredClone(shared);
+          forged.controlledActivities[0].posture = 2;
+          return forged;
+        })(),
+        (() => { const forged = structuredClone(shared);
+          forged.controlledActivities[0].slotId = "not-printed";
+          return forged;
+        })(),
+      ];
+      const before = JSON.stringify({ base, shared, moved, settled, allOwned, broken });
+      await page.goto("/");
+      const result = await page.evaluate(async states => {
+        const { verifiedPublicSharedOwnershipStreets: select } =
+          await import("/src/features/city/publicSharedOwnershipStreets.ts");
+        return {
+          zero: select(states.base),
+          shared: select(states.shared),
+          moved: select(states.moved),
+          settled: select(states.settled),
+          allOwned: select(states.allOwned),
+          broken: states.broken.map(x => select(x)),
+          nullInput: select(null),
+        };
+      }, { base, shared, moved, settled, allOwned, broken });
+      expect(result.zero).toEqual([]);
+      expect(result.nullInput).toBeNull();
+      expect(result.shared).toHaveLength(1);
+      expect(result.shared?.[0]).toMatchObject({
+        streetId: "gauss",
+        streetName: "Gauss Avenue",
+        freeLots: 6,
+        controlledLots: 2,
+        standing: 1,
+        fallen: 1,
+        ownerCount: 2,
+        owners: [
+          { playerId: "alice", controlled: 1, standing: 1, fallen: 0 },
+          { playerId: "bob", controlled: 1, standing: 0, fallen: 1 },
+        ],
+      });
+      expect(result.moved).toEqual(result.shared);
+      expect(result.settled).toEqual(result.shared);
+      // Complete 30/30 board: no free cards, six printed roads with lots,
+      // owners in public player order and honest per-road posture.
+      expect(result.allOwned).toHaveLength(6);
+      expect(result.allOwned?.every(row => row.freeLots === 0
+        && row.ownerCount >= 2
+        && row.standing + row.fallen === row.controlledLots)).toBe(true);
+      expect(result.allOwned?.reduce((sum, row) => sum + row.controlledLots, 0))
+        .toBe(30);
+      expect(result.broken).toEqual(broken.map(() => null));
+      expect(JSON.stringify(result)).not.toMatch(/NEVER_EXPOSE_/);
+      expect(JSON.stringify({ base, shared, moved, settled, allOwned, broken }))
+        .toBe(before);
+    });
+}

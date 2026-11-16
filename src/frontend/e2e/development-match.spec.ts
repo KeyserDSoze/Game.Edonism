@@ -61,6 +61,7 @@ type MockOptions = {
   forgedForeignAuditStreetOnce?: boolean; // #125: plausible public 200 with foreign audit road.
   forgedForeignAuditActorOnce?: boolean; // #126: plausible public 200 with foreign actor.
   forgedNonGenesisOnce?: "reserved-actor" | "duplicate-genesis"; // #134: valid transport, impossible origin.
+  forgedKnownEndpointsOnce?: "move-missing-destination" | "end-with-origin" | "pending-with-destination"; // #135.
   forgedUnicodePlayerIdOnce?: boolean; // #127: invisible bidi roster actor in otherwise coherent snapshot.
   forgedSystemSeatOnce?: boolean; // #128: reserved genesis ID impersonates an ordinary seat.
   forgedStartingSlotOnce?: "duplicate" | "unknown"; // #129: forged origin lot.
@@ -141,6 +142,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let forgedForeignAuditIssued = false;
   let forgedForeignActorIssued = false;
   let forgedNonGenesisIssued = false;
+  let forgedKnownEndpointsIssued = false;
   let forgedUnicodePlayerIdIssued = false;
   let forgedSystemSeatIssued = false;
   let forgedStartingSlotIssued = false;
@@ -920,6 +922,30 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
               actorId: options.forgedNonGenesisOnce === "reserved-actor"
                 ? "system" : "alice",
               fromStreetId: null, toStreetId: null,
+            }],
+          },
+        });
+      }
+      // #135: Canonical, validly typed roads and active seat but a known
+      // event kind with impossible endpoint shape must not bind a new ETag.
+      if (options.forgedKnownEndpointsOnce && !forgedKnownEndpointsIssued) {
+        forgedKnownEndpointsIssued = true;
+        const nextRevision = revision + 1;
+        const bogusTag = `W/"edonism-revision-${nextRevision}"`;
+        const kind = options.forgedKnownEndpointsOnce;
+        observedPolls.push({ status: 200, supplied, etag: bogusTag,
+          prefer: request.headers()["prefer"] ?? null });
+        return reply({ status: 200,
+          headers: { ETag: bogusTag, "Cache-Control": "no-store" },
+          json: {
+            ...snapshot(), revision: nextRevision,
+            events: [...auditEvents, {
+              revision: nextRevision, round: 1, actorId: "alice",
+              kind: kind === "move-missing-destination" ? "free-move"
+                : kind === "end-with-origin" ? "turn-ended" : "round-settlement-pending",
+              fromStreetId: kind === "end-with-origin" ? "gauss"
+                : kind === "move-missing-destination" ? "gauss" : null,
+              toStreetId: kind === "pending-with-destination" ? "planck" : null,
             }],
           },
         });
@@ -1999,6 +2025,34 @@ test("#127: invalid bidi roster ID cannot poison revision, ETag or private actor
   await expect(page.getByTestId("dev-audit-event-1")).toHaveAttribute("data-event-kind", "turn-ended");
   expect(observedHeaders.filter(x => x.path.endsWith("/end-turn"))).toHaveLength(1);
 });
+
+for (const kind of ["move-missing-destination", "end-with-origin",
+  "pending-with-destination"] as const) {
+  test(`#135: forged ${kind} event cannot poison revision/ETag/hand or later command`,
+    async ({ page }) => {
+      const { observedHeaders, observedPolls } = await mockMatchApi(page,
+        { forgedKnownEndpointsOnce: kind });
+      await page.goto("/");
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      const forgedTag = 'W/"edonism-revision-1"';
+      await expect.poll(() => observedPolls.some(p =>
+        p.status === 200 && p.etag === forgedTag)).toBe(true);
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-active", "true");
+      await expect(page.getByTestId("match-player-alice")).toHaveAttribute("data-street-id", "gauss");
+      await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+      await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+      await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+      expect(observedPolls.some(p => p.supplied === forgedTag)).toBe(false);
+      expect(observedHeaders.filter(x => x.path.endsWith("/end-turn"))).toHaveLength(0);
+      await page.getByTestId("dev-end-turn").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("1");
+      await expect(page.getByTestId("match-player-bob")).toHaveAttribute("data-active", "true");
+      await expect(page.getByTestId("dev-audit-event-1")).toHaveAttribute("data-event-kind", "turn-ended");
+      expect(observedHeaders.filter(x => x.path.endsWith("/end-turn"))).toHaveLength(1);
+    });
+}
 
 for (const kind of ["reserved-actor", "duplicate-genesis"] as const) {
   test(`#134: forged ${kind} event cannot poison revision, ETag or genuine commands`,

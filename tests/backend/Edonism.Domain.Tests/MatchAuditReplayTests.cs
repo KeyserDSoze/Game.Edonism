@@ -99,6 +99,71 @@ public sealed class MatchAuditReplayTests
     }
 
     [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void KnownPublicEventStreetEndpointsMustMatchWireShapes(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var seeds = board.Slots.Take(count)
+            .Select((slot, i) => new MatchParticipantSeed($"player-{i}", slot.Id))
+            .ToArray();
+        var match = GameMatch.CreateFromTrustedSetup(Guid.NewGuid(), board, seeds);
+        var firstStreet = match.Snapshot().Players[0].StreetId;
+        var destination = board.Streets.Single(street => street.Id == firstStreet).Neighbors[0];
+        Assert.True(match.TryFreeMove("player-0", destination, 0).Accepted);
+        var afterMove = match.Snapshot();
+        Assert.True(MatchAuditReplay.Verify(board, afterMove).IsValid);
+
+        var noFrom = MatchAuditReplay.Verify(board,
+            ReplaceEvent(afterMove, 1, e => e with { FromStreetId = null }));
+        var noTo = MatchAuditReplay.Verify(board,
+            ReplaceEvent(afterMove, 1, e => e with { ToStreetId = null }));
+        var sameStreet = MatchAuditReplay.Verify(board,
+            ReplaceEvent(afterMove, 1, e => e with { ToStreetId = firstStreet }));
+        foreach (var invalid in new[] { noFrom, noTo, sameStreet })
+        {
+            Assert.False(invalid.IsValid);
+            Assert.Equal("invalid_move_event", invalid.Code);
+            Assert.Empty(invalid.Frames);
+        }
+
+        Assert.True(match.TryEndTurn("player-0", 1).Accepted);
+        var afterEnd = match.Snapshot();
+        Assert.True(MatchAuditReplay.Verify(board, afterEnd).IsValid);
+        foreach (var invalid in new[]
+        {
+            MatchAuditReplay.Verify(board,
+                ReplaceEvent(afterEnd, 2, e => e with { FromStreetId = firstStreet })),
+            MatchAuditReplay.Verify(board,
+                ReplaceEvent(afterEnd, 2, e => e with { ToStreetId = destination }))
+        })
+        {
+            Assert.False(invalid.IsValid);
+            Assert.Equal("invalid_turn_end_event", invalid.Code);
+            Assert.Empty(invalid.Frames);
+        }
+
+        for (var index = 1; index < count; index++)
+            Assert.True(match.TryEndTurn($"player-{index}", match.Revision).Accepted);
+        var pending = match.Snapshot();
+        Assert.True(MatchAuditReplay.Verify(board, pending).IsValid);
+        var last = pending.Events.Count - 1;
+        foreach (var invalid in new[]
+        {
+            MatchAuditReplay.Verify(board,
+                ReplaceEvent(pending, last, e => e with { FromStreetId = firstStreet })),
+            MatchAuditReplay.Verify(board,
+                ReplaceEvent(pending, last, e => e with { ToStreetId = destination }))
+        })
+        {
+            Assert.False(invalid.IsValid);
+            Assert.Equal("invalid_settlement_event", invalid.Code);
+            Assert.Empty(invalid.Frames);
+        }
+    }
+
+    [Theory]
     [InlineData("revision", "invalid_event_revision")]
     [InlineData("round", "invalid_event_revision")]
     [InlineData("actor", "event_out_of_turn")]

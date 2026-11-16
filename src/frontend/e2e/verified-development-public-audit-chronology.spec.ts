@@ -115,6 +115,11 @@ for (const count of [2, 4, 8] as const) {
         s.events[1].actorId = "system";
         s.events[1].kind = "future-public-kind";
       }),
+      moveWithoutOrigin: changed(s => { s.events[1].fromStreetId = null; }),
+      moveWithoutDestination: changed(s => { s.events[1].toStreetId = null; }),
+      moveToSameStreet: changed(s => { s.events[1].toStreetId = "gauss"; }),
+      endTurnWithOrigin: changed(s => { s.events[2].fromStreetId = "gauss"; }),
+      endTurnWithDestination: changed(s => { s.events[2].toStreetId = "planck"; }),
       wrongSnapshotRound: changed(s => { s.round = 2; }),
       staleSnapshotRevision: changed(s => { s.revision = 1; }),
       highSnapshotRevision: changed(s => { s.revision = 99; }),
@@ -138,6 +143,37 @@ for (const count of [2, 4, 8] as const) {
       expect(accepted, name).toBe(false);
     expect(JSON.stringify(cases)).toBe(before);
   });
+}
+
+for (const count of [2, 4, 8] as const) {
+  test(`#135: ${count}-seat pending settlement must not carry street endpoints`,
+    async ({ page }) => {
+      const original = pending(count);
+      const withOrigin = structuredClone(original);
+      const withDestination = structuredClone(original);
+      withOrigin.events[withOrigin.events.length - 1].fromStreetId = "gauss";
+      withDestination.events[withDestination.events.length - 1].toStreetId = "planck";
+      const before = JSON.stringify({ original, withOrigin, withDestination });
+      await page.goto("/");
+      const result = await page.evaluate(async ({ original, withOrigin, withDestination }) => {
+        const { hasValidDevelopmentPublicEnvelope: envelope } =
+          await import("/src/features/matches/verifiedDevelopmentPublicEnvelope.ts");
+        const { hasValidDevelopmentPublicAuditChronology: valid } =
+          await import("/src/features/matches/verifiedDevelopmentPublicAuditChronology.ts");
+        return {
+          original: valid(original, original.matchId),
+          originBroad: envelope(withOrigin, original.matchId),
+          destinationBroad: envelope(withDestination, original.matchId),
+          originChronology: valid(withOrigin, original.matchId),
+          destinationChronology: valid(withDestination, original.matchId),
+        };
+      }, { original, withOrigin, withDestination });
+      expect(result).toEqual({
+        original: true, originBroad: true, destinationBroad: true,
+        originChronology: false, destinationChronology: false,
+      });
+      expect(JSON.stringify({ original, withOrigin, withDestination })).toBe(before);
+    });
 }
 
 test("#119: malformed chronology containers fail closed without throwing", async ({ page }) => {

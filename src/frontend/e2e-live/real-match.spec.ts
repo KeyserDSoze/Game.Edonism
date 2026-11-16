@@ -201,6 +201,51 @@ function auth(token: string) {
 }
 
 
+// #149: all UI free cards must equal the REAL .NET audited public route set.
+// Routes are sorted by distance; the city atlas is sorted by printed slot.
+// This checks the same cards rather than assuming an arbitrary UI order.
+async function assertLivePublicUncontrolledAtlas(
+  page: Page,
+  routes: readonly {
+    slotId: string; cardId: string; category: string; streetId: string;
+  }[],
+  inspectFirst = false,
+) {
+  const slots = (JSON.parse(await readFile(
+    new URL("../../shared/board/edonism-board.v1.json", import.meta.url), "utf8",
+  )) as { slots: { id: string }[] }).slots.map(slot => slot.id);
+  const expected = [...routes].sort((a, b) =>
+    slots.indexOf(a.slotId) - slots.indexOf(b.slotId))
+    .map(({ slotId, cardId, category, streetId }) => ({
+      slotId, cardId, category, streetId,
+    }));
+  const atlas = page.getByTestId("match-public-free-activities");
+  await expect(atlas).toBeVisible();
+  await expect(atlas.locator("summary"))
+    .toContainText(String(routes.length));
+  if (await atlas.getAttribute("open") === null)
+    await atlas.locator("summary").click();
+  await expect(atlas.getByTestId("match-public-free-activities-list")
+    .locator("li")).toHaveCount(routes.length);
+  const observed = await atlas.getByTestId("match-public-free-activities-list")
+    .locator("li").evaluateAll(items => items.map(item => ({
+      slotId: item.getAttribute("data-testid")?.replace("public-free-activity-", ""),
+      cardId: item.getAttribute("data-card-id"),
+      category: item.getAttribute("data-category"),
+      streetId: item.getAttribute("data-street-id"),
+    })));
+  expect(observed).toEqual(expected);
+  if (inspectFirst) {
+    const before = await page.getByTestId("dev-revision").textContent();
+    await page.getByTestId(
+      `match-inspect-free-activity-${expected[0].slotId}`).click();
+    await expect(page.getByTestId("selected-slot"))
+      .toHaveText(expected[0].slotId);
+    await expect(page.getByTestId("dev-revision")).toHaveText(before ?? "0");
+  }
+}
+
+
 // #147: the browser's active-turn street-hop labels must agree EXACTLY
 // with .NET's bearer-protected audited other-player route projection.
 // The extra read does not cause a move, attack or expose hidden action cards.
@@ -840,6 +885,17 @@ test("real .NET eight-seat match supports private join and all sequential turns"
   expect(created.credentials.map((p) => p.playerId)).toEqual(seatIds);
   expect(created.state.boardActivities).toHaveLength(30);
   expect(created.state.controlledActivities).toHaveLength(8);
+  // #149: live eight-seat .NET setup has 22 uncontrolled face-up cards.
+  const publicFreeResponse = await request.get(
+    `http://127.0.0.1:5080/api/dev/matches/${created.matchId}/uncontrolled-routes`,
+    { headers: auth(tokenFor(created, created.state.players[0].playerId)) },
+  );
+  expect(publicFreeResponse.status()).toBe(200);
+  const freePlan = await publicFreeResponse.json() as {
+    routes: { slotId: string; cardId: string; category: string; streetId: string }[];
+  };
+  expect(freePlan.routes).toHaveLength(22);
+  await assertLivePublicUncontrolledAtlas(page, freePlan.routes);
   // #140: 22 cards are deliberately UNCONTROLLED; legitimate complete
   // 30-card board keeps wages/scouting/resources visible to all eight seats.
   expect(new Set(created.state.boardActivities.map(a => a.slotId)).size).toBe(30);
@@ -2805,6 +2861,9 @@ test("real .NET: two browser street route plans follow public activity ownership
   expect(firstPlan.verifiedRevision).toBe(0);
   expect(firstPlan.fromStreetId).toBe(created.state.players[0].streetId);
   expect(firstPlan.routes).toHaveLength(28);
+  // #149: compare all 28 public face-up FREE cards against real .NET
+  // bearer-scoped audited route data. A click is inspection, not a move.
+  await assertLivePublicUncontrolledAtlas(page, firstPlan.routes, true);
   for (const route of firstPlan.routes) {
     expect(route.streetPath[0]).toBe(firstPlan.fromStreetId);
     expect(route.streetPath.at(-1)).toBe(route.streetId);

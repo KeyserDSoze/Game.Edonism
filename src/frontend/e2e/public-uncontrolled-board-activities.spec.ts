@@ -181,3 +181,116 @@ for (const count of [2, 4, 8] as const) {
       expect(JSON.stringify({ state, afterSettlement, malformed })).toBe(original);
     });
 }
+
+
+// #152: true Vite module, independent full-deck fixture. A street's
+// publicly occupied lots and standing/fallen posture never imply combat.
+for (const count of [2, 4, 8] as const) {
+  test(`#152: ${count} seats reconcile all public street control and free slots`,
+    async ({ page }) => {
+      const snapshot = {
+        activePlayerId: "alice" as string | null,
+        players: ids149.slice(0, count).map((playerId, i) => ({
+          playerId, streetId: i % 2 ? "einstein" : "gauss",
+        })),
+        boardActivities: slots149.map((slotId, i) => ({
+          slotId, cardId: `synthetic:public:${slotId}`,
+          category: categories149[i],
+        })),
+        controlledActivities: slots149.slice(0, count).map((slotId, i) => ({
+          slotId, ownerPlayerId: ids149[i],
+          posture: i === 1 ? 1 : 0,
+        })),
+        privateHand: ["SENSITIVE_HIDDEN_ACTION"],
+        token: "SENSITIVE_BEARER",
+      };
+      const changed = (mutate: (value: typeof snapshot) => void) => {
+        const copy = structuredClone(snapshot);
+        mutate(copy);
+        return copy;
+      };
+      const settlement = changed(s => { s.activePlayerId = null; });
+      const rotated = changed(s => { s.activePlayerId = "bob"; });
+      const allOwned = changed(s => {
+        s.controlledActivities = slots149.map((slotId, i) => ({
+          slotId, ownerPlayerId: ids149[i % count], posture: i % 2,
+        }));
+      });
+      const invalid = {
+        duplicateCard: changed(s => {
+          s.boardActivities[3].cardId = s.boardActivities[4].cardId;
+        }),
+        badQuota: changed(s => { s.boardActivities[4].category = "sport"; }),
+        partialBoard: changed(s => { s.boardActivities.pop(); }),
+        wrongSlot: changed(s => { s.boardActivities[0].slotId = "pluto"; }),
+        unknownControl: changed(s => { s.controlledActivities[0].slotId = "pluto"; }),
+        duplicateControl: changed(s => {
+          s.controlledActivities[0].slotId = s.controlledActivities[1].slotId;
+        }),
+        unknownOwner: changed(s => {
+          s.controlledActivities[0].ownerPlayerId = "intruder";
+        }),
+        invalidPosture: changed(s => { s.controlledActivities[0].posture = -1; }),
+        duplicatePlayer: changed(s => { s.players[0].playerId = "bob"; }),
+        invalidSeat: changed(s => { s.players[0].playerId = "system"; }),
+        invalidStreet: changed(s => { s.players[0].streetId = "pluto"; }),
+      };
+      const source = JSON.stringify({ snapshot, settlement, rotated, allOwned, invalid });
+      await page.goto("/");
+      const data = await page.evaluate(async args => {
+        const { verifiedPublicStreetControlMatrix: verify } =
+          await import("/src/features/city/publicStreetControlMatrix.ts");
+        const { cityBoard } = await import("/src/features/city/board.ts");
+        return {
+          rows: verify(args.snapshot),
+          settled: verify(args.settlement),
+          rotated: verify(args.rotated),
+          allOwned: verify(args.allOwned),
+          bad: Object.entries(args.invalid).map(([id, state]) =>
+            [id, verify(state).length]),
+          boardStreets: cityBoard.streets.map(street => ({
+            id: street.id, name: street.name,
+            slots: cityBoard.slots.filter(slot => slot.streetId === street.id)
+              .map(slot => slot.id),
+          })),
+          nullInput: verify(null).length,
+        };
+      }, { snapshot, settlement, rotated, allOwned, invalid });
+      expect(data.rows).toHaveLength(7);
+      expect(data.rows.map(x => x.streetId)).toEqual(
+        data.boardStreets.map(x => x.id));
+      expect(data.rows.reduce((sum, x) => sum + x.totalSlots, 0)).toBe(30);
+      expect(data.rows.reduce((sum, x) => sum + x.freeLots, 0)).toBe(30 - count);
+      expect(data.rows.reduce((sum, x) => sum + x.controlledLots, 0)).toBe(count);
+      expect(data.rows.reduce((sum, x) => sum + x.standing, 0)).toBe(count - 1);
+      expect(data.rows.reduce((sum, x) => sum + x.fallen, 0)).toBe(1);
+      for (const [index, road] of data.rows.entries()) {
+        const boardRoad = data.boardStreets[index];
+        expect(road.streetName).toBe(boardRoad.name);
+        expect(road.totalSlots).toBe(boardRoad.slots.length);
+        expect(road.owners.map(x => x.playerId)).toEqual(ids149.slice(0, count));
+        const controls = snapshot.controlledActivities.filter(x =>
+          boardRoad.slots.includes(x.slotId));
+        expect(road.controlledLots).toBe(controls.length);
+        expect(road.freeLots).toBe(boardRoad.slots.length - controls.length);
+        expect(road.standing + road.fallen).toBe(road.controlledLots);
+        for (const owner of road.owners) {
+          const owned = controls.filter(x => x.ownerPlayerId === owner.playerId);
+          expect(owner.controlled).toBe(owned.length);
+          expect(owner.standing).toBe(owned.filter(x => x.posture === 0).length);
+          expect(owner.fallen).toBe(owned.filter(x => x.posture === 1).length);
+        }
+      }
+      expect(data.rows.find(x => x.streetId === "main-square")?.controlledLots).toBe(0);
+      expect(data.settled).toEqual(data.rows);
+      expect(data.rotated).toEqual(data.rows);
+      expect(data.allOwned).toHaveLength(7);
+      expect(data.allOwned.every(x => x.freeLots === 0)).toBe(true);
+      expect(data.allOwned.reduce((sum, x) => sum + x.controlledLots, 0)).toBe(30);
+      expect(data.bad).toEqual(Object.keys(invalid).map(id => [id, 0]));
+      expect(data.nullInput).toBe(0);
+      expect(JSON.stringify(data)).not.toMatch(/SENSITIVE_/);
+      expect(JSON.stringify({ snapshot, settlement, rotated, allOwned, invalid }))
+        .toBe(source);
+    });
+}

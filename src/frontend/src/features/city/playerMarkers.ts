@@ -1,7 +1,7 @@
 import { cityBoard, toScene } from "./board";
 
 /** The only match fields the renderer accepts: public, server-authored IDs. */
-export type PublicPlayerPosition = Readonly<{ playerId: string; streetId: string; startingSlotId?: string }>;
+export type PublicPlayerPosition = Readonly<{ playerId: string; streetId: string; startingSlotId?: string; freeMoveUsed?: boolean }>;
 export type PublicPlayerPositions = Readonly<{
   players: readonly PublicPlayerPosition[];
   activePlayerId: string | null;

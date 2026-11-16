@@ -8,6 +8,7 @@ import { CityScene } from "@/features/city/CityScene";
 import { cityBoard, slotById, slotsOnStreet, streetById } from "@/features/city/board";
 import { playerMarkerPlacements } from "@/features/city/playerMarkers";
 import { verifiedPublicStartingLots } from "@/features/city/playerStartingLots";
+import { verifiedPublicFreeMoveUsage } from "@/features/city/playerFreeMoveUsage";
 import { controlledLotMarkers, publicGrossSalaryQuotes, verifiedPublicBoardCardCount, type PublicMatchSceneState } from "@/features/city/activityMarkers";
 import { verifiedTacticalFocus, type TacticalFocus } from "@/features/city/tacticalFocus";
 import { verifiedHistoricalStreetFocus, type HistoricalStreetFocus } from "@/features/city/historicalStreetFocus";
@@ -43,6 +44,9 @@ export default function App() {
   // #130: show an initial activity lot without guessing ownership or current
   // position. This comes only from verified public Development match JSON.
   const startingLotsByPlayer = verifiedPublicStartingLots(publicPlayers?.players);
+  // #136: public server-confirmed history flag, not a move availability
+  // calculation or permission to call the Development API.
+  const publicFreeMoveUsage = verifiedPublicFreeMoveUsage(publicPlayers?.players);
   const controlMarkers = publicPlayers ? controlledLotMarkers(publicPlayers) : [];
   const grossQuotes = publicPlayers ? publicGrossSalaryQuotes(publicPlayers) : [];
   const verifiedBoardCardCount = verifiedPublicBoardCardCount(publicPlayers);
@@ -322,6 +326,14 @@ export default function App() {
                       >
                         {streetById(marker.streetId)?.name}
                       </button>
+                      {publicFreeMoveUsage.has(marker.playerId) && (
+                        <span data-testid={`match-free-move-${marker.playerId}`}
+                          data-free-move-used={publicFreeMoveUsage.get(marker.playerId) ? "true" : "false"}
+                          className="text-muted-foreground">
+                          {t(publicFreeMoveUsage.get(marker.playerId)
+                            ? "city.publicFreeMoveUsed" : "city.publicFreeMoveNotUsed")}
+                        </span>
+                      )}
                       {startingLotsByPlayer.has(marker.playerId) && (
                         <span className="text-muted-foreground"
                           data-testid={`match-origin-${marker.playerId}`}>

@@ -109,6 +109,9 @@ async function startRealMatch(page: Page): Promise<CreatedMatch> {
   for (const player of match.state.players) {
     await expect(page.getByTestId(`match-player-${player.playerId}`))
       .toHaveAttribute("data-street-id", player.streetId);
+    // #136: same public server field, no derived move permission.
+    await expect(page.getByTestId(`match-free-move-${player.playerId}`))
+      .toHaveAttribute("data-free-move-used", String(player.freeMoveUsed));
   }
   return match;
 }
@@ -290,6 +293,10 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   await expect(page.getByTestId("match-player-alice"))
     .toHaveAttribute("data-street-id", aliceDestination);
   expect(afterMove.players[0].freeMoveUsed).toBe(true);
+  await expect(page.getByTestId("match-free-move-alice"))
+    .toHaveAttribute("data-free-move-used", "true");
+  await expect(page.getByTestId("match-free-move-bob"))
+    .toHaveAttribute("data-free-move-used", "false");
   expect(afterMove.events).toHaveLength(2);
   await expect(page.getByTestId("dev-audit-event-1")).toHaveAttribute(
     "data-event-kind", "free-move");

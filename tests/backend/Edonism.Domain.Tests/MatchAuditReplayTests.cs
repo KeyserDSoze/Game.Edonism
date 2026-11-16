@@ -74,6 +74,37 @@ public sealed class MatchAuditReplayTests
     [InlineData(2)]
     [InlineData(4)]
     [InlineData(8)]
+    public void PublicFreeMoveUsedFlagOnlyChangesForTheServerAcceptedMover(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var seeds = board.Slots.Take(count)
+            .Select((slot, i) => new MatchParticipantSeed($"player-{i}", slot.Id))
+            .ToArray();
+        var match = GameMatch.CreateFromTrustedSetup(Guid.NewGuid(), board, seeds);
+        var before = match.Snapshot();
+        Assert.Equal(count, before.Players.Count);
+        Assert.All(before.Players, player => Assert.False(player.FreeMoveUsed));
+
+        var origin = before.Players[0].StreetId;
+        var destination = board.Streets.Single(street => street.Id == origin).Neighbors[0];
+        Assert.True(match.TryFreeMove("player-0", destination, match.Revision).Accepted);
+        var moved = match.Snapshot();
+        Assert.True(moved.Players[0].FreeMoveUsed);
+        Assert.Equal(destination, moved.Players[0].StreetId);
+        Assert.All(moved.Players.Skip(1), player => Assert.False(player.FreeMoveUsed));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+
+        Assert.False(match.TryFreeMove("player-0", origin, match.Revision).Accepted);
+        var rejected = match.Snapshot();
+        Assert.Equal(moved.Revision, rejected.Revision);
+        Assert.Equal(moved.Players.Select(player => player.FreeMoveUsed),
+            rejected.Players.Select(player => player.FreeMoveUsed));
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
     public void TechnicalGenesisActorAndEventKindAreUniqueAcrossFirstRound(int count)
     {
         var board = BoardCatalog.LoadDefault();

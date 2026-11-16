@@ -6235,3 +6235,61 @@ test("#100: forged nested rival lot actor scope hides all atomic tactical views 
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);
 });
+
+// #136: These are server-public history flags, never move permissions.
+// Read-only city inspection and locale changes do not issue game commands.
+for (const count of [2, 8] as const) {
+  test(`#136: ${count}-seat public free-move flags follow honest moves without extra commands`,
+    async ({ page }) => {
+      if (count === 2) {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.addInitScript(() => {
+          const original = HTMLCanvasElement.prototype.getContext;
+          HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+            if (kind === "webgl" || kind === "webgl2"
+              || kind === "experimental-webgl") return null;
+            return Reflect.apply(original, this, [kind, ...args]);
+          };
+        });
+      }
+      const { observedHeaders } = await mockMatchApi(page, { playerCount: count });
+      await page.goto("/");
+      await page.getByTestId("dev-player-count").selectOption(String(count));
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(count);
+      for (const playerId of demoSeats.slice(0, count)) {
+        await expect(page.getByTestId(`match-free-move-${playerId}`))
+          .toHaveAttribute("data-free-move-used", "false");
+        await expect(page.getByTestId(`match-free-move-${playerId}`))
+          .toHaveText("Movimento libero non usato");
+      }
+      expect(observedHeaders.filter(h => h.path.endsWith("/free-move")
+        || h.path.endsWith("/end-turn"))).toHaveLength(0);
+
+      await page.getByTestId("dev-move-planck").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("1");
+      await expect(page.getByTestId("match-free-move-alice"))
+        .toHaveAttribute("data-free-move-used", "true");
+      await expect(page.getByTestId("match-free-move-alice"))
+        .toHaveText("Movimento libero usato");
+      for (const playerId of demoSeats.slice(1, count)) {
+        await expect(page.getByTestId(`match-free-move-${playerId}`))
+          .toHaveAttribute("data-free-move-used", "false");
+      }
+      await page.getByTestId("match-inspect-street-bob").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("1");
+      expect(observedHeaders.filter(h => h.path.endsWith("/free-move")
+        || h.path.endsWith("/end-turn"))).toHaveLength(1);
+      await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+      await expect(page.getByTestId("match-free-move-alice")).toHaveText("Free move used");
+      await expect(page.getByTestId("match-free-move-bob")).toHaveText("Free move not used");
+      await page.getByTestId("dev-seat-bob").click();
+      await expect(page.getByTestId("match-free-move-alice"))
+        .toHaveAttribute("data-free-move-used", "true");
+      await expect(page.getByTestId("dev-revision")).toHaveText("1");
+      expect(observedHeaders.filter(h => h.path.endsWith("/free-move")
+        || h.path.endsWith("/end-turn"))).toHaveLength(1);
+      await page.getByTestId("dev-leave").click();
+      await expect(page.getByTestId("match-free-move-alice")).toHaveCount(0);
+    });
+}

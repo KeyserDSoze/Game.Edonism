@@ -635,6 +635,8 @@ export function DevelopmentMatchLab({
             playerId: seat.playerId,
             streetId: seat.streetId,
             startingSlotId: seat.startingSlotId,
+            // #136: already-public server flag; never compute move legality.
+            freeMoveUsed: seat.freeMoveUsed,
           })),
           boardActivities: state.boardActivities ?? [],
           controlledActivities: state.controlledActivities ?? [],

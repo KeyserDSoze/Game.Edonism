@@ -126,6 +126,76 @@ public sealed class OtherPlayerRoutesTests
         AssertActiveOwnerRoutes();
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void NearestPublicRivalTieSetIsCompleteAndOrdinalThroughTurnRotation(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = FullMatch(count);
+        var dealBefore = JsonSerializer.Serialize(match.CaptureCheckpoint().PrivateDeal);
+        var atomsBefore = match.Snapshot().Players.ToDictionary(p => p.PlayerId, p => p.Atoms);
+
+        void Verify()
+        {
+            var state = match.Snapshot();
+            var actorId = Assert.IsType<string>(state.ActivePlayerId);
+            var actor = Assert.Single(state.Players, p => p.PlayerId == actorId);
+            var plan = Assert.IsType<MatchOtherPlayerRoutes>(
+                match.VerifiedOtherPlayerRoutesForActor(actorId));
+            Assert.Equal(count - 1, plan.Others.Count);
+            var nearestSteps = plan.Others.Min(o => o.StreetSteps);
+            var serverTies = plan.Others.Where(o => o.StreetSteps == nearestSteps)
+                .Select(o => o.OtherPlayerId).OrderBy(id => id, StringComparer.Ordinal)
+                .ToArray();
+            var expected = state.Players.Where(p => p.PlayerId != actorId)
+                .Select(p => (p.PlayerId,
+                    Steps: board.ShortestStreetDistance(actor.StreetId, p.StreetId)))
+                .Where(row => row.Steps == nearestSteps)
+                .Select(row => row.PlayerId).OrderBy(id => id, StringComparer.Ordinal)
+                .ToArray();
+            Assert.NotEmpty(serverTies);
+            Assert.Equal(expected, serverTies);
+            Assert.All(plan.Others.Where(o => serverTies.Contains(o.OtherPlayerId)), route =>
+                Assert.Equal(nearestSteps, route.StreetSteps));
+            Assert.All(state.Players, p => Assert.Equal(atomsBefore[p.PlayerId], p.Atoms));
+            Assert.Equal(dealBefore, JsonSerializer.Serialize(match.CaptureCheckpoint().PrivateDeal));
+            Assert.True(match.VerifyPublicAudit().IsValid);
+        }
+
+        Verify();
+        var original = match.Snapshot();
+        var moving = Assert.Single(original.Players,
+            p => p.PlayerId == original.ActivePlayerId);
+        var destination = board.Streets.Single(s => s.Id == moving.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(moving.PlayerId, destination, match.Revision).Accepted);
+        Verify();
+        Assert.True(match.TryEndTurn(moving.PlayerId, match.Revision).Accepted);
+        Assert.Equal(original.TurnOrder[1], match.ActivePlayerId);
+        Verify();
+    }
+
+    [Fact]
+    public void NearestPublicRivalsKeepEveryZeroHopTieInsteadOfSelectingOneSeat()
+    {
+        var match = GameMatch.CreateFromTrustedSetup(
+            Guid.NewGuid(), BoardCatalog.LoadDefault(),
+            [new MatchParticipantSeed("alice", "N-01"),
+             new MatchParticipantSeed("bob", "N-02"),
+             new MatchParticipantSeed("charlie", "N-03"),
+             new MatchParticipantSeed("diana", "S-01")]);
+        var plan = Assert.IsType<MatchOtherPlayerRoutes>(
+            match.VerifiedOtherPlayerRoutesForActor("alice"));
+        var minimum = plan.Others.Min(o => o.StreetSteps);
+        var tiedIds = plan.Others.Where(o => o.StreetSteps == minimum)
+            .Select(o => o.OtherPlayerId).OrderBy(id => id, StringComparer.Ordinal).ToArray();
+        Assert.Equal(0, minimum);
+        Assert.Equal(new[] { "bob", "charlie" }, tiedIds);
+        Assert.Equal(0, match.Revision);
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
     [Fact]
     public void TwoPlayersOnTheSameStreetHaveZeroStepsAndAnInclusivePath()
     {

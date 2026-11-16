@@ -144,6 +144,21 @@ public sealed class GrossSalaryRulesTests
     }
 
     [Fact]
+    public void LegitimateSeatWithNoControlledLotsReceivesBaseOnlyWithoutPaying()
+    {
+        var state = NewMatch().Snapshot();
+        var players = state.Players.ToArray();
+        players[0] = players[0] with { HenchmenAvailable = 16 };
+        var onlyBob = state.ControlledActivities
+            .Where(lot => lot.OwnerPlayerId == "bob").ToArray();
+        var quotes = GrossSalaryRules.Quote(Board, players, onlyBob);
+        Assert.Equal(new[] { 2, 3 }, quotes.Select(q => q.GrossAtoms));
+        Assert.Equal(new[] { 0, 1 }, quotes.Select(q => q.StandingActivityAtoms));
+        Assert.Equal(4, players[0].Atoms); // read-only, never salary credited
+        Assert.Equal(16, players[0].HenchmenAvailable);
+    }
+
+    [Fact]
     public void GrossSalaryRejectsForgedRosterAndImpossiblePlayerResources()
     {
         var actual = NewMatch().Snapshot();

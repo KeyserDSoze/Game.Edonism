@@ -14,6 +14,7 @@ import { verifiedActiveTurnRivalProximity } from "@/features/city/activeTurnRiva
 import { verifiedNearestActiveTurnRivals } from "@/features/city/nearestActiveTurnRivals";
 import { selectVerifiedPublicUncontrolledActivities } from "@/features/city/publicUncontrolledActivityFilters";
 import { verifiedPublicFreeActivityStreetDistribution } from "@/features/city/publicFreeActivityStreetDistribution";
+import { verifiedPublicStreetControlMatrix } from "@/features/city/publicStreetControlMatrix";
 import { printedActivityCategoryQuotas } from "@/features/city/activityMarkers";
 import { verifiedPublicSeatEconomy } from "@/features/city/publicSeatEconomy";
 import { verifiedPublicSeatResources } from "@/features/city/publicSeatResources";
@@ -102,6 +103,9 @@ export default function App() {
   // #151: canonical street-wide counts are independent of local filters.
   // Never infer any property purchase/move permission from a count.
   const freeStreetCounts = verifiedPublicFreeActivityStreetDistribution(publicPlayers);
+  // #152: complete verified public territory, including owned lots by every
+  // rival and deployed-henchman posture, never hidden hands or attack rights.
+  const streetControlMatrix = verifiedPublicStreetControlMatrix(publicPlayers);
   const currentStreet = streetById(selectedStreetId) ?? cityBoard.streets[0];
   const currentSlot = selectedSlotId ? slotById(selectedSlotId) : undefined;
   const streetSlots = slotsOnStreet(selectedStreetId);
@@ -718,6 +722,72 @@ export default function App() {
                         <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
                           {card.cardId} · {card.category}
                         </p>
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+              </section>
+            )}
+            {streetControlMatrix.length > 0 && (
+              <section
+                className="mx-3 mb-4 rounded-xl border border-border bg-muted/30 p-3 sm:mx-5"
+                data-testid="public-street-control-section"
+                aria-label={t("city.publicStreetControlTitle")}>
+                <details data-testid="public-street-control-details">
+                  <summary className="cursor-pointer rounded-sm text-xs font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                    {t("city.publicStreetControlSummary")}
+                  </summary>
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    {t("city.publicStreetControlNote")}
+                  </p>
+                  <ol className="mt-3 grid gap-2" data-testid="public-street-control-list">
+                    {streetControlMatrix.map(street => (
+                      <li key={street.streetId}
+                        data-testid={`public-street-control-${street.streetId}`}
+                        data-street-id={street.streetId}
+                        data-total-slots={street.totalSlots}
+                        data-free-count={street.freeLots}
+                        data-controlled-count={street.controlledLots}
+                        data-standing-count={street.standing}
+                        data-fallen-count={street.fallen}
+                        className="min-w-0 rounded-lg border border-border bg-card p-3 text-xs">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button type="button"
+                            data-testid={`public-street-control-inspect-${street.streetId}`}
+                            aria-label={t("city.publicStreetControlInspect", {
+                              street: street.streetName,
+                            })}
+                            onClick={() => chooseStreet(street.streetId)}
+                            className="rounded-sm font-semibold underline decoration-dotted underline-offset-2 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                            {street.streetName}
+                          </button>
+                          <span className="text-muted-foreground">
+                            {t("city.publicStreetControlLine", {
+                              free: street.freeLots,
+                              owned: street.controlledLots,
+                              standing: street.standing,
+                              fallen: street.fallen,
+                              total: street.totalSlots,
+                            })}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                          {street.owners.map(owner => (
+                            <span key={owner.playerId}
+                              data-testid={`public-street-control-${street.streetId}-owner-${owner.playerId}`}
+                              data-owned-count={owner.controlled}
+                              data-standing-count={owner.standing}
+                              data-fallen-count={owner.fallen}
+                              className="break-all text-[11px] text-muted-foreground">
+                              {t("city.publicStreetControlOwner", {
+                                player: owner.playerId,
+                                owned: owner.controlled,
+                                standing: owner.standing,
+                                fallen: owner.fallen,
+                              })}
+                            </span>
+                          ))}
+                        </div>
                       </li>
                     ))}
                   </ol>

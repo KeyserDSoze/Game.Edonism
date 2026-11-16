@@ -1,4 +1,5 @@
 using Edonism.Domain.Matches;
+using Edonism.Domain.World;
 using Edonism.Infrastructure.World;
 using Xunit;
 
@@ -45,6 +46,38 @@ public sealed class CharacterMatchSetupTests
         Assert.Equal(before.GrossSalaryQuotes, after.GrossSalaryQuotes);
         Assert.Equal(before.Players.Select(p => p.Atoms),
             after.Players.Select(p => p.Atoms));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void FullDeckPublicCategoriesObeyPrintedEightQuotasAfterRealTurn(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = GameMatch.CreateFromTrustedCharacterCatalog(
+            Guid.NewGuid(), board,
+            Enumerable.Range(0, count).Select(i => $"player-{i}").ToArray(),
+            CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(), 143 + count);
+        var before = match.Snapshot();
+        Assert.Equal(30, before.BoardActivities.Count);
+        Assert.Equal(8, ActivityPlacement.PrintedCategoryQuotas.Count);
+        Assert.Equal(30, ActivityPlacement.PrintedCategoryQuotas.Values.Sum());
+        foreach (var category in ActivityPlacement.PrintedCategoryQuotas)
+            Assert.Equal(category.Value, before.BoardActivities.Count(
+                card => card.Category == category.Key));
+        Assert.All(before.BoardActivities, card =>
+            Assert.Contains(card.Category, ActivityPlacement.PrintedCategoryQuotas.Keys));
+        Assert.Equal(count, before.GrossSalaryQuotes.Count);
+
+        var actor = before.Players[0];
+        var destination = board.Streets.Single(s => s.Id == actor.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(actor.PlayerId, destination, before.Revision).Accepted);
+        Assert.True(match.TryEndTurn(actor.PlayerId, match.Revision).Accepted);
+        var after = match.Snapshot();
+        Assert.Equal(before.BoardActivities, after.BoardActivities);
+        Assert.Equal(before.GrossSalaryQuotes, after.GrossSalaryQuotes);
         Assert.True(match.VerifyPublicAudit().IsValid);
     }
 

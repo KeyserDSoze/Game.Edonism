@@ -97,3 +97,34 @@ board/economic projections.
 
 [GitHub #142](https://github.com/KeyserDSoze/Game.Edonism/issues/142);
 close only after 3/3 CI jobs green on the exact current `main` SHA.
+
+## #143 — Printed activity categories and full-deck quotas
+
+The original Rulebook2 page 4 (already transcribed by the
+`.NET ActivityPlacement.PrintedCategoryQuotas`) requires the selected
+30-card Development board to contain precisely eight category counts:
+5 public-financing, 5 private-financing, 4 black-market, 4 corruption,
+4 culture, 2 sport, 3 transport and 3 bishopric. This is public,
+printed setup metadata, not action/deck/hidden-hand content.
+
+Previously `verifiedPublicBoardCardCount` checked only that category
+was a nonempty string, allowing forged `outer-space` on an uncontrolled
+lot or a complete 30-card payload with all IDs/slots unique but 29/30
+cards assigned to impossible category quotas. The same global verifier
+now rejects categories not in this exact printed list, and validates
+the **eight quotas only when all 30 distinct canonical slots are
+present**. Synthetic partial 0–29-card Development fixtures remain
+permitted for existing read-only views and are *not* required to carry
+full printed quotas. No new rules, client card selection or tax/credit
+logic is introduced.
+
+Any violation yields `null` for the board count, and by #140 also
+hides all salary quotes, #138 economic scouting and #139 resources.
+Independently valid controlled-lot markers, player street labels and
+server turn commands remain unaffected.
+
+Tests: xUnit .NET 10 Theory 2/4/8 real character setup + move/end;
+actual Vite TS 2/4/8 valid partial/full/forged category and quota;
+mocked React UI 2/8, mobile/no WebGL, IT/EN and real .NET live 2/8.
+Track exact-head CI and issue closure at
+[GitHub #143](https://github.com/KeyserDSoze/Game.Edonism/issues/143).

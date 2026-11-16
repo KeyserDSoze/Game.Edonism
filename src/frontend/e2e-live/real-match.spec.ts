@@ -747,6 +747,19 @@ test("real .NET eight-seat match supports private join and all sequential turns"
   // #142: no physical activity may occupy multiple canonical slots,
   // even if the server's printed slot set itself remains unique.
   expect(new Set(created.state.boardActivities.map(a => a.cardId)).size).toBe(30);
+  // #143: the real eight-seat full deck must obey the same printed
+  // category quotas as .NET ActivityPlacement; the client cannot
+  // silently accept an invented category or an impossible 30-card mix.
+  const printedQuota143: Record<string, number> = {
+    "public-financing": 5, "private-financing": 5,
+    "black-market": 4, corruption: 4, culture: 4,
+    sport: 2, transport: 3, bishopric: 3,
+  };
+  for (const [category, expected] of Object.entries(printedQuota143))
+    expect(created.state.boardActivities.filter(card =>
+      card.category === category)).toHaveLength(expected);
+  expect(created.state.boardActivities.every(card =>
+    Object.hasOwn(printedQuota143, card.category))).toBe(true);
   expect(created.state.boardActivities.filter(a =>
     !created.state.controlledActivities.some(l => l.slotId === a.slotId))).toHaveLength(22);
   await expect(page.getByTestId("match-board-card-count")).toContainText("30");

@@ -40,6 +40,33 @@ function shortestStreetPath(from: string, to: string): string[] | null {
 
 type Seat = string;
 const demoSeats = ["alice", "bob", "charlie", "diana", "eve", "frank", "grace", "heidi"] as const;
+// #143: test-only complete printed-card fixture. Its category distribution
+// mirrors .NET ActivityPlacement's p.4 quotas. Alice's N-01 is culture
+// and Bob's S-01 is transport; the remaining 28 are public/uncontrolled.
+const mockPrintedSlotIds143 = [
+  ...Array.from({ length: 8 }, (_, i) => `N-${String(i + 1).padStart(2, "0")}`),
+  ...Array.from({ length: 8 }, (_, i) => `S-${String(i + 1).padStart(2, "0")}`),
+  ...Array.from({ length: 3 }, (_, i) => `W-${String(i + 1).padStart(2, "0")}`),
+  ...Array.from({ length: 3 }, (_, i) => `E-${String(i + 1).padStart(2, "0")}`),
+  ...Array.from({ length: 4 }, (_, i) => `B-${String(i + 1).padStart(2, "0")}`),
+  ...Array.from({ length: 4 }, (_, i) => `M-${String(i + 1).padStart(2, "0")}`),
+];
+const mockRemainingPrintedCategories143: string[] = [
+  ...Array(5).fill("public-financing"),
+  ...Array(5).fill("private-financing"),
+  ...Array(4).fill("black-market"),
+  ...Array(4).fill("corruption"),
+  ...Array(3).fill("culture"),
+  ...Array(2).fill("sport"),
+  ...Array(2).fill("transport"),
+  ...Array(3).fill("bishopric"),
+];
+const mockFullBoardExtras143 = mockPrintedSlotIds143
+  .filter(id => id !== "N-01" && id !== "S-01")
+  .map((slotId, i) => ({
+    slotId, cardId: `synthetic:printed:${slotId}`,
+    category: mockRemainingPrintedCategories143[i],
+  }));
 // #114: All synthetic 2–8 seat bearers must obey the same 64-hex format
 // as the real server and the Development join/rotation controls.
 const mockSeatToken = (index: number) => "abcdef01".charAt(index).repeat(64);
@@ -61,6 +88,8 @@ type MockOptions = {
     | "duplicate-starting-activity" | "missing-seat" | "foreign-actor" | "bad-heart"; // #141.
   unownedBoardCard?: "valid" | "duplicate" | "foreign" | "bad-category" | "bad-id"; // #140: untouched controlled cards.
   duplicatePublicCardIds?: "unowned-vs-unowned" | "unowned-vs-controlled" | "controlled-vs-controlled"; // #142: distinct canonical slots, cloned physical card.
+  publicCardCategory?: "partial-valid" | "partial-foreign" | "partial-casing"
+    | "full-valid" | "full-bad-quota"; // #143: category/quota on unowned lots.
   forgedHigherRevisionSnapshot?: boolean; // #112: corrupt first public poll, never a real command.
   forgedNullAuditEventSnapshot?: boolean; // #113: corrupt first poll with events:[null].
   forgedForeignAuditStreetOnce?: boolean; // #125: plausible public 200 with foreign audit road.
@@ -259,6 +288,22 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         { slotId: "N-07", cardId: "demo:free:duplicated-id", category: "culture" },
         { slotId: "N-08", cardId: "demo:free:duplicated-id", category: "culture" },
       ] : []),
+      // #143: all extra slots remain unowned; only their printed category
+      // changes. For a full 30-card list the quota table must be exact.
+      ...(options.publicCardCategory === "full-valid"
+        || options.publicCardCategory === "full-bad-quota"
+        ? mockFullBoardExtras143.map((card, i) => ({
+          ...card,
+          category: options.publicCardCategory === "full-bad-quota" && i === 0
+            ? "culture" : card.category,
+        }))
+        : options.publicCardCategory ? [{
+          slotId: "N-08", cardId: "synthetic:category:unowned",
+          category: options.publicCardCategory === "partial-foreign"
+            ? "outer-space"
+            : options.publicCardCategory === "partial-casing"
+              ? "Culture" : "culture",
+        }] : []),
     ],
     // #141: these are PUBLIC server-assigned card facts, not private hands.
     // The roster's printed hearts must agree with exactly one distinct
@@ -6705,6 +6750,68 @@ for (const count of [2, 8] as const) {
           await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
           await expect(page.getByTestId("match-player-legend").locator("li"))
             .toHaveCount(2);
+        }
+      });
+  }
+}
+
+// #143: valid full 30-card Domain quotas must keep the economic UI visible;
+// a forged printed category or a wrong full-deck quota hides every derived
+// finance/resource row without disabling a genuine turn or public pawn.
+for (const count of [2, 8] as const) {
+  for (const scenario of [
+    "partial-valid", "partial-foreign", "partial-casing",
+    "full-valid", "full-bad-quota",
+  ] as const) {
+    test(`#143: ${count} seats board category=${scenario} respects complete public quotas`,
+      async ({ page }) => {
+        if (count === 2) {
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.addInitScript(() => {
+            const original = HTMLCanvasElement.prototype.getContext;
+            HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+              if (kind === "webgl" || kind === "webgl2"
+                || kind === "experimental-webgl") return null;
+              return Reflect.apply(original, this, [kind, ...args]);
+            };
+          });
+        }
+        const { observedHeaders } = await mockMatchApi(page,
+          { playerCount: count, publicCardCategory: scenario });
+        await page.goto("/");
+        await page.getByTestId("dev-player-count").selectOption(String(count));
+        await page.getByTestId("dev-create").click();
+        await expect(page.getByTestId("match-player-legend").locator("li"))
+          .toHaveCount(count);
+        await expect(page.getByTestId("controlled-lot-N-01")).toBeVisible();
+        await expect(page.getByTestId("controlled-lot-S-01")).toBeVisible();
+        await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+        await expect(page.getByTestId("dev-revision")).toHaveText("0");
+        const valid = scenario === "partial-valid" || scenario === "full-valid";
+        await expect(page.getByTestId("match-board-card-count"))
+          .toHaveCount(valid ? 1 : 0);
+        if (valid) {
+          await expect(page.getByTestId("match-board-card-count"))
+            .toContainText(scenario === "full-valid" ? "30" : "3");
+        }
+        for (const id of demoSeats.slice(0, count)) {
+          await expect(page.getByTestId(`gross-salary-${id}`))
+            .toHaveCount(valid ? 1 : 0);
+          await expect(page.getByTestId(`match-player-economy-${id}`))
+            .toHaveCount(valid ? 1 : 0);
+          await expect(page.getByTestId(`match-player-resources-${id}`))
+            .toHaveCount(valid ? 1 : 0);
+          await expect(page.getByTestId(`match-inspect-street-${id}`))
+            .toHaveCount(1);
+        }
+        expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+          .toHaveLength(0);
+        if (count === 2 && scenario === "full-valid") {
+          await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+          await expect(page.getByTestId("match-player-economy-alice"))
+            .toContainText("gross quote:");
+          await expect(page.getByTestId("match-player-resources-alice"))
+            .toContainText("Current atoms:");
         }
       });
   }

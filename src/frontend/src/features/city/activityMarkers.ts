@@ -117,6 +117,24 @@ export function controlledLotMarkers(state: PublicMatchSceneState): ControlledLo
 
 
 /**
+ * #143: These eight category quotas are transcribed from the same printed
+ * Rulebook2 p.4 table as .NET ActivityPlacement.PrintedCategoryQuotas.
+ * ONLY the fully placed 30-card board has to match the entire quota table:
+ * partial Development fixtures (0–29 cards) are not full-deck claims.
+ * Never use these UI checks to select cards, move pawns or pay salary.
+ */
+const printedActivityCategoryQuotas = new Map<string, number>([
+  ["public-financing", 5],
+  ["private-financing", 5],
+  ["black-market", 4],
+  ["corruption", 4],
+  ["culture", 4],
+  ["sport", 2],
+  ["transport", 3],
+  ["bishopric", 3],
+]);
+
+/**
  * #111 — A board card count is trustworthy only for a complete, well-shaped
  * PUBLIC card list with unique canonical printed slots AND unique physical
  * activity card IDs (ordinal exact match; #142). This is display-only:
@@ -131,16 +149,28 @@ export function verifiedPublicBoardCardCount(
   // #142: 30 separate printed cards cannot occupy different slots under
   // one repeated physical CardId; match .NET's ordinal-unique deck contract.
   const physicalCardIds = new Set<string>();
+  const categoryCounts = new Map<string, number>();
   for (const card of state.boardActivities) {
     if (!card || typeof card !== "object" || Array.isArray(card)
       || typeof card.slotId !== "string" || !slotById(card.slotId)
       || occupiedSlots.has(card.slotId)
       || typeof card.cardId !== "string" || !card.cardId.trim()
       || physicalCardIds.has(card.cardId)
-      || typeof card.category !== "string" || !card.category.trim())
+      || typeof card.category !== "string"
+      // #143: an unknown but nonempty category is NOT a printed activity.
+      || !printedActivityCategoryQuotas.has(card.category))
       return null;
     occupiedSlots.add(card.slotId);
     physicalCardIds.add(card.cardId);
+    categoryCounts.set(card.category, (categoryCounts.get(card.category) ?? 0) + 1);
+  }
+  // Exactly 30 public cards means the COMPLETE original printed board.
+  // When the payload is complete, all eight category quotas are mandatory.
+  // Do not extrapolate full-deck quotas from valid partial Development lists.
+  if (state.boardActivities.length === cityBoard.slots.length) {
+    for (const [category, expected] of printedActivityCategoryQuotas) {
+      if (categoryCounts.get(category) !== expected) return null;
+    }
   }
   return occupiedSlots.size;
 }

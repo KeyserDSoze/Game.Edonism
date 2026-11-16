@@ -320,3 +320,105 @@ for (const count of [2, 4, 8] as const) {
       expect(JSON.stringify({ legitimate, forged })).toBe(unchanged);
     });
 }
+
+// #143: compare the ACTUAL Vite/TypeScript projector with the printed
+// eight-category Domain quotas; valid partial fixtures remain displayable.
+const fullPrintedSlots143 = [
+  ...Array.from({ length: 8 }, (_, i) => `N-${String(i + 1).padStart(2, "0")}`),
+  ...Array.from({ length: 8 }, (_, i) => `S-${String(i + 1).padStart(2, "0")}`),
+  ...Array.from({ length: 3 }, (_, i) => `W-${String(i + 1).padStart(2, "0")}`),
+  ...Array.from({ length: 3 }, (_, i) => `E-${String(i + 1).padStart(2, "0")}`),
+  ...Array.from({ length: 4 }, (_, i) => `B-${String(i + 1).padStart(2, "0")}`),
+  ...Array.from({ length: 4 }, (_, i) => `M-${String(i + 1).padStart(2, "0")}`),
+] as const;
+const printedQuota143 = [
+  ["public-financing", 5], ["private-financing", 5],
+  ["black-market", 4], ["corruption", 4], ["culture", 4],
+  ["sport", 2], ["transport", 3], ["bishopric", 3],
+] as const;
+const printedCategories143 = printedQuota143.flatMap(([name, count]) =>
+  Array.from({ length: count }, () => name));
+
+for (const count of [2, 4, 8] as const) {
+  test(`#143: ${count} seats require canonical public categories and exact 30-card quotas`,
+    async ({ page }) => {
+      const base = fixture(count);
+      const partial = {
+        ...base,
+        players: base.players.map(p => ({
+          ...p, atoms: 4, diplomacyTokens: 2,
+          henchmenTotal: 16, henchmenAvailable: 15,
+        })),
+      };
+      const full = structuredClone(partial);
+      full.boardActivities = fullPrintedSlots143.map((slotId, i) => ({
+        slotId, cardId: `synthetic:full-deck:${i}`,
+        category: printedCategories143[i] as string,
+      }));
+      const partialValid = structuredClone(partial);
+      partialValid.boardActivities.push({
+        slotId: "N-08", cardId: "synthetic:valid-unowned",
+        category: "culture",
+      });
+      const tamper = (original: typeof full, edit: (s: typeof full) => void) => {
+        const cloned = structuredClone(original);
+        edit(cloned);
+        return cloned;
+      };
+      const forged = {
+        unknownPartial: tamper(partialValid, s => {
+          s.boardActivities[s.boardActivities.length - 1].category = "alien";
+        }),
+        casingPartial: tamper(partialValid, s => {
+          s.boardActivities[s.boardActivities.length - 1].category = "Culture";
+        }),
+        unknownFullUnowned: tamper(full, s => {
+          s.boardActivities[s.boardActivities.length - 1].category = "alien";
+        }),
+        fullQuotaWrongButAllKnown: tamper(full, s => {
+          s.boardActivities[s.boardActivities.length - 1].category = "culture";
+        }),
+      };
+      const unchanged = JSON.stringify({ partial, partialValid, full, forged });
+      await page.goto("/");
+      const projection = await page.evaluate(async ({ partial, partialValid, full, forged }) => {
+        const { verifiedPublicBoardCardCount: countCards,
+          publicGrossSalaryQuotes: salary } =
+          await import("/src/features/city/activityMarkers.ts");
+        const { verifiedPublicSeatEconomy: economy } =
+          await import("/src/features/city/publicSeatEconomy.ts");
+        const { verifiedPublicSeatResources: resources } =
+          await import("/src/features/city/publicSeatResources.ts");
+        const read = (state: typeof full) => ({
+          count: countCards(state), salary: salary(state).length,
+          economy: economy(state).size, resources: resources(state).size,
+        });
+        return {
+          partial: read(partial),
+          partialValid: read(partialValid),
+          full: read(full),
+          invalid: Object.fromEntries(Object.entries(forged).map(
+            ([key, state]) => [key, read(state)])),
+          empty: countCards({ boardActivities: [] }),
+        };
+      }, { partial, partialValid, full, forged });
+      expect(full.boardActivities).toHaveLength(30);
+      expect(projection.partial).toEqual({
+        count, salary: count, economy: count, resources: count,
+      });
+      expect(projection.partialValid).toEqual({
+        count: count + 1, salary: count, economy: count, resources: count,
+      });
+      expect(projection.full).toEqual({
+        count: 30, salary: count, economy: count, resources: count,
+      });
+      expect(projection.empty).toBe(0);
+      for (const [name, result] of Object.entries(projection.invalid)) {
+        expect(result, name).toEqual({
+          count: null, salary: 0, economy: 0, resources: 0,
+        });
+      }
+      expect(JSON.stringify({ partial, partialValid, full, forged }))
+        .toBe(unchanged);
+    });
+}

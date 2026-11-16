@@ -7124,6 +7124,7 @@ for (const count of [2, 8] as const) {
           // #152: a forged full-board quota cannot produce an apparently
           // valid rival-control matrix with free/owned counts.
           await expect(page.getByTestId("public-street-control-section")).toHaveCount(0);
+          await expect(page.getByTestId("public-territory-standings-section")).toHaveCount(0);
           await expect(page.getByTestId("match-board-card-count")).toHaveCount(0);
           // A rejected printed category NEVER suppresses player positions
           // or revokes a valid actor's separate .NET turn command.
@@ -7192,6 +7193,35 @@ for (const count of [2, 8] as const) {
           .toHaveAttribute("data-owned-count", "0");
         await expect(page.getByTestId("public-street-control-einstein-owner-bob"))
           .toHaveAttribute("data-owned-count", "1");
+        // #153: only TWO owners have a lot in this synthetic 8-seat
+        // fixture; all zero-lot rivals remain visible, with competition
+        // positions 1,1,3 (not gameplay victory points).
+        const footprint = page.getByTestId("public-territory-standings");
+        await expect(footprint).toBeVisible();
+        await expect(footprint).not.toHaveAttribute("open", "");
+        await footprint.locator("summary").click();
+        await expect(footprint).toHaveAttribute("open", "");
+        const seatStandings = page.getByTestId("public-territory-standings-list").locator("li");
+        await expect(seatStandings).toHaveCount(count);
+        for (const playerId of ["alice", "bob"]) {
+          const row = page.getByTestId(`public-territory-footprint-${playerId}`);
+          await expect(row).toHaveAttribute("data-place", "1");
+          await expect(row).toHaveAttribute("data-controlled-lots", "1");
+          await expect(row).toHaveAttribute("data-occupied-streets", "1");
+        }
+        for (const playerId of demoSeats.slice(2, count)) {
+          const row = page.getByTestId(`public-territory-footprint-${playerId}`);
+          await expect(row).toHaveAttribute("data-place", "3");
+          await expect(row).toHaveAttribute("data-controlled-lots", "0");
+          await expect(row).toHaveAttribute("data-occupied-streets", "0");
+        }
+        const bobFootprint = page.getByTestId("public-territory-footprint-bob");
+        await expect(bobFootprint).toHaveAttribute("data-standing", "1");
+        await expect(bobFootprint).toHaveAttribute("data-fallen", "0");
+        await expect(seatStandings.first()).toHaveAttribute("data-testid",
+          "public-territory-footprint-alice");
+        await expect(seatStandings.nth(1)).toHaveAttribute("data-testid",
+          "public-territory-footprint-bob");
         await page.getByTestId("public-street-control-inspect-einstein").click();
         await expect(page.getByTestId("selected-street")).toHaveText("Einstein Avenue");
         await expect(page.getByTestId("dev-revision")).toHaveText("0");
@@ -7268,6 +7298,10 @@ for (const count of [2, 8] as const) {
             .toContainText("Free public activities by street");
           await expect(territory.locator("summary"))
             .toContainText("Public territory: free and controlled lots by street");
+          await expect(footprint.locator("summary"))
+            .toContainText("Public territory comparison · not a victory score");
+          await expect(page.getByTestId("public-territory-footprint-bob"))
+            .toContainText("Place 1 · 1 lots · 1 standing · 0 fallen · 1 streets");
           await expect(page.getByTestId("public-street-control-gauss"))
             .toContainText("7 free · 1 controlled");
           await expect(page.getByTestId("public-street-control-inspect-einstein"))
@@ -7292,6 +7326,8 @@ for (const count of [2, 8] as const) {
           await expect(list.locator("li")).toHaveCount(28);
           await expect(territory).toBeVisible();
           await expect(gaussControl).toHaveAttribute("data-controlled-count", "1");
+          await expect(page.getByTestId("public-territory-footprint-alice"))
+            .toHaveAttribute("data-place", "1");
         }
       });
   }
@@ -7319,6 +7355,16 @@ test("#152: fallen public rival henchman is not counted as standing or an attack
       .toHaveAttribute("data-fallen-count", "1");
     await expect(page.getByTestId("public-street-control-einstein-owner-alice"))
       .toHaveAttribute("data-owned-count", "0");
+    const standings = page.getByTestId("public-territory-standings");
+    await standings.locator("summary").click();
+    await expect(page.getByTestId("public-territory-footprint-alice"))
+      .toHaveAttribute("data-place", "1");
+    await expect(page.getByTestId("public-territory-footprint-bob"))
+      .toHaveAttribute("data-place", "1");
+    await expect(page.getByTestId("public-territory-footprint-bob"))
+      .toHaveAttribute("data-standing", "0");
+    await expect(page.getByTestId("public-territory-footprint-bob"))
+      .toHaveAttribute("data-fallen", "1");
     await expect(page.getByTestId("match-public-free-activities-list")).toHaveCount(1);
     await page.getByTestId("public-street-control-inspect-einstein").click();
     await expect(page.getByTestId("selected-street")).toHaveText("Einstein Avenue");

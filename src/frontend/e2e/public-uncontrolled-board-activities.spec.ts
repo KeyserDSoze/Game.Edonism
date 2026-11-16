@@ -216,6 +216,16 @@ for (const count of [2, 4, 8] as const) {
           slotId, ownerPlayerId: ids149[i % count], posture: i % 2,
         }));
       });
+      // #153: adding one genuinely public lot changes the comparative
+      // footprint, while equal 1-lot rivals MUST share first position even
+      // when the posture differs (Bob's henchman is already fallen).
+      const uneven = changed(s => {
+        s.controlledActivities.push({
+          slotId: "M-04", ownerPlayerId: "alice", posture: 0,
+        });
+      });
+      const emptyLots = changed(s => { s.controlledActivities = []; });
+      const reversedSeats = changed(s => { s.players.reverse(); });
       const invalid = {
         duplicateCard: changed(s => {
           s.boardActivities[3].cardId = s.boardActivities[4].cardId;
@@ -235,14 +245,29 @@ for (const count of [2, 4, 8] as const) {
         invalidSeat: changed(s => { s.players[0].playerId = "system"; }),
         invalidStreet: changed(s => { s.players[0].streetId = "pluto"; }),
       };
-      const source = JSON.stringify({ snapshot, settlement, rotated, allOwned, invalid });
+      const source = JSON.stringify({
+        snapshot, settlement, rotated, allOwned, uneven, emptyLots,
+        reversedSeats, invalid,
+      });
       await page.goto("/");
       const data = await page.evaluate(async args => {
         const { verifiedPublicStreetControlMatrix: verify } =
           await import("/src/features/city/publicStreetControlMatrix.ts");
         const { cityBoard } = await import("/src/features/city/board.ts");
+        const { verifiedPublicTerritoryFootprints: footprints } =
+          await import("/src/features/city/publicTerritoryFootprints.ts");
         return {
           rows: verify(args.snapshot),
+          standings: footprints(args.snapshot),
+          standingsSettled: footprints(args.settlement),
+          standingsRotated: footprints(args.rotated),
+          standingsAllOwned: footprints(args.allOwned),
+          standingsUneven: footprints(args.uneven),
+          standingsNoOwned: footprints(args.emptyLots),
+          standingsReversed: footprints(args.reversedSeats),
+          badStandings: Object.entries(args.invalid).map(([id, state]) =>
+            [id, footprints(state).length]),
+          standingsNull: footprints(null).length,
           settled: verify(args.settlement),
           rotated: verify(args.rotated),
           allOwned: verify(args.allOwned),
@@ -255,7 +280,10 @@ for (const count of [2, 4, 8] as const) {
           })),
           nullInput: verify(null).length,
         };
-      }, { snapshot, settlement, rotated, allOwned, invalid });
+      }, {
+        snapshot, settlement, rotated, allOwned, uneven, emptyLots,
+        reversedSeats, invalid,
+      });
       expect(data.rows).toHaveLength(7);
       expect(data.rows.map(x => x.streetId)).toEqual(
         data.boardStreets.map(x => x.id));
@@ -289,8 +317,38 @@ for (const count of [2, 4, 8] as const) {
       expect(data.allOwned.reduce((sum, x) => sum + x.controlledLots, 0)).toBe(30);
       expect(data.bad).toEqual(Object.keys(invalid).map(id => [id, 0]));
       expect(data.nullInput).toBe(0);
+      // #153: public footprint is NOT a victory/win rank. Every 1-lot
+      // player shares rank 1 even if Bob has a fallen scagnozzo.
+      expect(data.standings).toHaveLength(count);
+      expect(data.standings.map(x => x.playerId)).toEqual(ids149.slice(0, count));
+      expect(data.standings.every(x => x.place === 1 && x.controlledLots === 1
+        && x.occupiedStreets === 1)).toBe(true);
+      expect(data.standings[1].standing).toBe(0);
+      expect(data.standings[1].fallen).toBe(1);
+      expect(data.standings.reduce((sum, x) => sum + x.controlledLots, 0))
+        .toBe(count);
+      expect(data.standingsSettled).toEqual(data.standings);
+      expect(data.standingsRotated).toEqual(data.standings);
+      expect(data.standingsReversed).toEqual(data.standings);
+      expect(data.standingsUneven[0]).toMatchObject({
+        playerId: "alice", place: 1, controlledLots: 2,
+        occupiedStreets: 2,
+      });
+      for (const x of data.standingsUneven.slice(1))
+        expect(x.place).toBe(2);
+      expect(data.standingsNoOwned).toHaveLength(count);
+      expect(data.standingsNoOwned.every(x => x.place === 1
+        && x.controlledLots === 0 && x.occupiedStreets === 0)).toBe(true);
+      expect(data.standingsAllOwned).toHaveLength(count);
+      expect(data.standingsAllOwned.reduce(
+        (sum, x) => sum + x.controlledLots, 0)).toBe(30);
+      expect(data.badStandings).toEqual(
+        Object.keys(invalid).map(id => [id, 0]));
+      expect(data.standingsNull).toBe(0);
       expect(JSON.stringify(data)).not.toMatch(/SENSITIVE_/);
-      expect(JSON.stringify({ snapshot, settlement, rotated, allOwned, invalid }))
-        .toBe(source);
+      expect(JSON.stringify({
+        snapshot, settlement, rotated, allOwned, uneven, emptyLots,
+        reversedSeats, invalid,
+      })).toBe(source);
     });
 }

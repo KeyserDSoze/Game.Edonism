@@ -15,6 +15,7 @@ import { verifiedNearestActiveTurnRivals } from "@/features/city/nearestActiveTu
 import { selectVerifiedPublicUncontrolledActivities } from "@/features/city/publicUncontrolledActivityFilters";
 import { verifiedPublicFreeActivityStreetDistribution } from "@/features/city/publicFreeActivityStreetDistribution";
 import { verifiedPublicStreetControlMatrix } from "@/features/city/publicStreetControlMatrix";
+import { verifiedPublicTerritoryFootprints } from "@/features/city/publicTerritoryFootprints";
 import { printedActivityCategoryQuotas } from "@/features/city/activityMarkers";
 import { verifiedPublicSeatEconomy } from "@/features/city/publicSeatEconomy";
 import { verifiedPublicSeatResources } from "@/features/city/publicSeatResources";
@@ -106,6 +107,8 @@ export default function App() {
   // #152: complete verified public territory, including owned lots by every
   // rival and deployed-henchman posture, never hidden hands or attack rights.
   const streetControlMatrix = verifiedPublicStreetControlMatrix(publicPlayers);
+  // #153: public territorial comparison, NOT a victory or PvP score.
+  const publicTerritoryFootprints = verifiedPublicTerritoryFootprints(publicPlayers);
   const currentStreet = streetById(selectedStreetId) ?? cityBoard.streets[0];
   const currentSlot = selectedSlotId ? slotById(selectedSlotId) : undefined;
   const streetSlots = slotsOnStreet(selectedStreetId);
@@ -788,6 +791,45 @@ export default function App() {
                             </span>
                           ))}
                         </div>
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+              </section>
+            )}
+            {publicTerritoryFootprints.length > 0 && (
+              <section
+                className="mx-3 mb-4 rounded-xl border border-border bg-muted/30 p-3 sm:mx-5"
+                data-testid="public-territory-standings-section"
+                aria-label={t("city.publicTerritoryFootprintsTitle")}>
+                <details data-testid="public-territory-standings">
+                  <summary className="cursor-pointer rounded-sm text-xs font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                    {t("city.publicTerritoryFootprintsTitle")}
+                  </summary>
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    {t("city.publicTerritoryFootprintsNote")}
+                  </p>
+                  <ol data-testid="public-territory-standings-list"
+                    className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {publicTerritoryFootprints.map(player => (
+                      <li key={player.playerId}
+                        data-testid={`public-territory-footprint-${player.playerId}`}
+                        data-place={player.place}
+                        data-controlled-lots={player.controlledLots}
+                        data-standing={player.standing}
+                        data-fallen={player.fallen}
+                        data-occupied-streets={player.occupiedStreets}
+                        className="min-w-0 rounded-lg border border-border bg-card p-3 text-xs">
+                        <strong className="break-all">{player.playerId}</strong>
+                        <p className="mt-1 text-muted-foreground">
+                          {t("city.publicTerritoryFootprintsEntry", {
+                            place: player.place,
+                            lots: player.controlledLots,
+                            standing: player.standing,
+                            fallen: player.fallen,
+                            roads: player.occupiedStreets,
+                          })}
+                        </p>
                       </li>
                     ))}
                   </ol>

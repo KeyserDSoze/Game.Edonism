@@ -406,6 +406,53 @@ async function assertLivePublicStreetControlMatrix(
   expect(total).toBe(30);
   expect(available).toBe(freePlan.routes.length);
   expect(controlledTotal).toBe(created.state.controlledActivities.length);
+
+  // #153: one batched browser frame verifies the public per-owner footprint
+  // and shared ordinal tie positions against the REAL .NET public snapshot;
+  // no guessed power, victory points, cards or client-authorized movement.
+  const standingsPanel = page.getByTestId("public-territory-standings");
+  await expect(standingsPanel).toBeVisible();
+  if (await standingsPanel.getAttribute("open") === null)
+    await standingsPanel.locator("summary").click();
+  const standingsRows = page.getByTestId("public-territory-standings-list")
+    .locator("li");
+  await expect(standingsRows).toHaveCount(created.state.players.length);
+  const observedFootprints = await standingsRows.evaluateAll(nodes => nodes.map(node => ({
+    id: node.getAttribute("data-testid"),
+    place: node.getAttribute("data-place"),
+    owned: node.getAttribute("data-controlled-lots"),
+    standing: node.getAttribute("data-standing"),
+    fallen: node.getAttribute("data-fallen"),
+    roads: node.getAttribute("data-occupied-streets"),
+  })));
+  const rawFootprints = created.state.players.map(player => {
+    const own = created.state.controlledActivities.filter(
+      x => x.ownerPlayerId === player.playerId);
+    return {
+      playerId: player.playerId,
+      owned: own.length,
+      standing: own.filter(x => x.posture === 0).length,
+      fallen: own.filter(x => x.posture === 1).length,
+      roads: new Set(own.map(x => bySlot.get(x.slotId))).size,
+    };
+  }).sort((a, b) => b.owned - a.owned
+    || (a.playerId < b.playerId ? -1 : a.playerId > b.playerId ? 1 : 0));
+  let place = 0;
+  const expectedFootprints = rawFootprints.map((player, i) => {
+    if (i === 0 || player.owned !== rawFootprints[i - 1].owned)
+      place = i + 1;
+    return {
+      id: `public-territory-footprint-${player.playerId}`,
+      place: String(place),
+      owned: String(player.owned),
+      standing: String(player.standing),
+      fallen: String(player.fallen),
+      roads: String(player.roads),
+    };
+  });
+  expect(observedFootprints).toEqual(expectedFootprints);
+  expect(rawFootprints.reduce((sum, item) => sum + item.owned, 0))
+    .toBe(created.state.controlledActivities.length);
   const before = await page.getByTestId("dev-revision").textContent();
   const requests: string[] = [];
   const onRequest = (request: { method(): string; url(): string }) => {

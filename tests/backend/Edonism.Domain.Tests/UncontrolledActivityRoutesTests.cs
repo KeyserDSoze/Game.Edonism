@@ -394,6 +394,82 @@ public sealed class UncontrolledActivityRoutesTests
         Verify();
     }
 
+    // #153: browser standings compare PUBLIC territory only. Every actor
+    // starts with one controlled lot and one standing henchman in the
+    // authentic full-deck first-round fixture; all 2/4/8 actors have an
+    // honest tie by count, regardless of other public resources/secret cards.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void PublicTerritoryFootprintsHaveSharedOneLotPositionAcrossTurn(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = NewMatch(count);
+        var before = match.Snapshot();
+        var checkpoint = JsonSerializer.Serialize(match.CaptureCheckpoint().PrivateDeal);
+        var publicLots = JsonSerializer.Serialize(before.ControlledActivities);
+
+        void Verify()
+        {
+            var state = match.Snapshot();
+            Assert.Equal(count, state.Players.Count);
+            Assert.Equal(30, state.BoardActivities.Count);
+            Assert.Equal(count, state.ControlledActivities.Count);
+            var footprints = state.Players.Select(player =>
+            {
+                var own = state.ControlledActivities
+                    .Where(lot => lot.OwnerPlayerId == player.PlayerId).ToArray();
+                var streets = own.Select(lot =>
+                    board.Slots.Single(slot => slot.Id == lot.SlotId).StreetId)
+                    .Distinct(StringComparer.Ordinal).ToArray();
+                var standing = own.Count(lot =>
+                    lot.Posture == HenchmanPosture.Standing);
+                var fallen = own.Count(lot =>
+                    lot.Posture == HenchmanPosture.Fallen);
+                Assert.Equal(own.Length, standing + fallen);
+                Assert.Equal(1, own.Length);
+                Assert.Equal(1, streets.Length);
+                Assert.Equal(1, standing);
+                Assert.Equal(0, fallen);
+                return (player.PlayerId, Controlled: own.Length,
+                    Standing: standing, Fallen: fallen, Streets: streets.Length);
+            }).OrderByDescending(item => item.Controlled)
+              .ThenBy(item => item.PlayerId, StringComparer.Ordinal).ToArray();
+            Assert.Equal(count, footprints.Length);
+            Assert.Equal(state.Players.Select(p => p.PlayerId)
+                .Order(StringComparer.Ordinal),
+                footprints.Select(p => p.PlayerId));
+            Assert.All(footprints, item => Assert.Equal(1, item.Controlled));
+            foreach (var actor in state.Players)
+            {
+                var opponents = Assert.IsType<MatchOpponentControlledLotRoutes>(
+                    match.VerifiedOpponentControlledLotsForActor(actor.PlayerId));
+                Assert.Equal(count - 1, opponents.Routes.Count);
+                foreach (var rival in state.Players.Where(p => p.PlayerId != actor.PlayerId))
+                    Assert.Single(opponents.Routes,
+                        route => route.OwnerPlayerId == rival.PlayerId);
+                var serialized = JsonSerializer.Serialize(opponents);
+                foreach (var seat in state.Players)
+                    foreach (var secret in match.PrivateHandForActor(seat.PlayerId)!.CardIds)
+                        Assert.DoesNotContain(secret, serialized, StringComparison.Ordinal);
+            }
+            Assert.Equal(count, footprints.Sum(x => x.Controlled));
+            Assert.Equal(publicLots, JsonSerializer.Serialize(state.ControlledActivities));
+            Assert.Equal(checkpoint, JsonSerializer.Serialize(match.CaptureCheckpoint().PrivateDeal));
+            Assert.True(match.VerifyPublicAudit().IsValid);
+        }
+
+        Verify();
+        var actorId = before.Players[0].PlayerId;
+        var origin = before.Players[0].StreetId;
+        var adjacent = board.Streets.Single(s => s.Id == origin).Neighbors[0];
+        Assert.True(match.TryFreeMove(actorId, adjacent, match.Revision).Accepted);
+        Verify();
+        Assert.True(match.TryEndTurn(actorId, match.Revision).Accepted);
+        Verify();
+    }
+
     [Fact]
     public void MinimalTrustedFixtureDoesNotInventMissingPublicCards()
     {

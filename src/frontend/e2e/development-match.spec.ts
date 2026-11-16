@@ -81,6 +81,7 @@ type MockOptions = {
   sameStreet?: boolean;
   unknownStreet?: boolean;
   fallenHenchman?: boolean;
+  sharedOwnedStreet?: boolean; // #157: Bob also owns a fallen lot on Gauss.
   invalidGrossQuote?: boolean; // #105: forged public total, never server wallet state.
   missingGrossQuote?: boolean; // #107: a forged incomplete public quote set.
   malformedReserve?: boolean; // #139: public henchmen reserve contradicts owned lots.
@@ -342,6 +343,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         ownerPlayerId: options.unknownOwner ? "intruder" : "bob",
         posture: options.fallenHenchman ? 1 : 0,
       },
+      ...(options.sharedOwnedStreet
+        ? [{ slotId: "N-02", ownerPlayerId: "bob", posture: 1 }] : []),
     ],
     // #107: one public read-only quote per synthetic seat, including
     // additional seats without controlled activities (2 base / 0 standing).
@@ -7130,6 +7133,7 @@ for (const count of [2, 8] as const) {
           // valid rival-control matrix with free/owned counts.
           await expect(page.getByTestId("public-street-control-section")).toHaveCount(0);
           await expect(page.getByTestId("public-territory-standings-section")).toHaveCount(0);
+          await expect(page.getByTestId("public-shared-ownership-section")).toHaveCount(0);
           await expect(page.getByTestId("match-board-card-count")).toHaveCount(0);
           // A rejected printed category NEVER suppresses player positions
           // or revokes a valid actor's separate .NET turn command.
@@ -7198,6 +7202,14 @@ for (const count of [2, 8] as const) {
           .toHaveAttribute("data-owned-count", "0");
         await expect(page.getByTestId("public-street-control-einstein-owner-bob"))
           .toHaveAttribute("data-owned-count", "1");
+        // #157: Alice and Bob own different streets; show a VERIFIED empty
+        // shared-ownership panel (never hide a valid zero as invalid).
+        const sharedPanel = page.getByTestId("public-shared-ownership-details");
+        await expect(sharedPanel).toBeVisible();
+        await expect(sharedPanel).not.toHaveAttribute("open", "");
+        await sharedPanel.locator("summary").click();
+        await expect(page.getByTestId("public-shared-ownership-empty")).toBeVisible();
+        await expect(page.getByTestId("public-shared-ownership-list")).toHaveCount(0);
         // #153: only TWO owners have a lot in this synthetic 8-seat
         // fixture; all zero-lot rivals remain visible, with competition
         // positions 1,1,3 (not gameplay victory points).
@@ -7306,6 +7318,10 @@ for (const count of [2, 8] as const) {
             .toContainText("Public territory: free and controlled lots by street");
           await expect(footprint.locator("summary"))
             .toContainText("Public territory comparison · not a victory score");
+          await expect(sharedPanel.locator("summary"))
+            .toContainText("Streets with lots owned by multiple players");
+          await expect(page.getByTestId("public-shared-ownership-empty"))
+            .toContainText("No street has lots controlled by different players");
           await expect(page.getByTestId("public-territory-footprint-bob"))
             .toContainText("Place 1 · 1 lots · 1 standing · 0 fallen · 1 streets");
           await expect(page.getByTestId("public-street-control-gauss"))
@@ -7377,3 +7393,68 @@ test("#152: fallen public rival henchman is not counted as standing or an attack
     expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
       .toHaveLength(0);
   });
+
+
+// #157: a genuinely shared public street never becomes combat permission.
+// These two independent mocked browsers cover 2/8 actors, accessible DOM,
+// language switching, mobile/no-WebGL and no command POST.
+for (const count of [2, 8] as const) {
+  test("#157: " + count + " seats inspect public shared street without commands",
+    async ({ page }) => {
+      if (count === 8) test.setTimeout(75_000);
+      if (count === 2) {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.addInitScript(() => {
+          const original = HTMLCanvasElement.prototype.getContext;
+          HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+            if (kind === "webgl" || kind === "webgl2"
+              || kind === "experimental-webgl") return null;
+            return Reflect.apply(original, this, [kind, ...args]);
+          };
+        });
+      }
+      const { observedHeaders } = await mockMatchApi(page, {
+        playerCount: count, publicCardCategory: "full-valid",
+        sharedOwnedStreet: true,
+      });
+      await page.goto("/");
+      await page.getByTestId("dev-player-count").selectOption(String(count));
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      const panel = page.getByTestId("public-shared-ownership-details");
+      await expect(panel).toBeVisible();
+      await expect(panel).not.toHaveAttribute("open", "");
+      await panel.locator("summary").click();
+      await expect(page.getByTestId("public-shared-ownership-empty")).toHaveCount(0);
+      const rows = page.getByTestId("public-shared-ownership-list").locator("li");
+      await expect(rows).toHaveCount(1);
+      const gauss = page.getByTestId("public-shared-ownership-gauss");
+      await expect(gauss).toHaveAttribute("data-owner-count", "2");
+      await expect(gauss).toHaveAttribute("data-free-count", "6");
+      await expect(gauss).toHaveAttribute("data-controlled-count", "2");
+      await expect(gauss).toHaveAttribute("data-standing-count", "1");
+      await expect(gauss).toHaveAttribute("data-fallen-count", "1");
+      await expect(page.getByTestId("public-shared-ownership-gauss-owner-alice"))
+        .toHaveAttribute("data-standing-count", "1");
+      await expect(page.getByTestId("public-shared-ownership-gauss-owner-bob"))
+        .toHaveAttribute("data-fallen-count", "1");
+      await expect(gauss.locator('[data-testid*="-owner-"]')).toHaveCount(2);
+      await page.getByTestId("public-shared-ownership-inspect-gauss").click();
+      await expect(page.getByTestId("selected-street")).toHaveText("Gauss Avenue");
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+        .toHaveLength(0);
+      if (count === 2) {
+        await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+        await expect(panel.locator("summary"))
+          .toContainText("Streets with lots owned by multiple players");
+        await expect(gauss).toContainText("2 owners · 6 free · 2 controlled");
+        await expect(page.getByTestId("public-shared-ownership-inspect-gauss"))
+          .toHaveAttribute("aria-label",
+            "Inspect shared-ownership street Gauss Avenue without game actions");
+        const overflow = await page.evaluate(() =>
+          document.documentElement.scrollWidth > window.innerWidth + 2);
+        expect(overflow).toBe(false);
+      }
+    });
+}

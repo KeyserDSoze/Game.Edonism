@@ -76,6 +76,30 @@ public sealed class PublicTerritoryReportTests
                             owner.Fallen);
                     }
                 }
+                // #159: every player, including any with zero lots, comes
+                // solely from the same Domain-authenticated 7-street matrix.
+                var totals = snapshot.Players.Select(player =>
+                {
+                    var held = snapshot.ControlledActivities
+                        .Where(lot => lot.OwnerPlayerId == player.PlayerId).ToArray();
+                    var occupied = held.Select(lot =>
+                        board.Slots.Single(slot => slot.Id == lot.SlotId).StreetId)
+                        .Distinct(StringComparer.Ordinal).Count();
+                    return new MatchPublicTerritoryFootprintTotals(
+                        player.PlayerId, held.Length,
+                        held.Count(lot => lot.Posture == HenchmanPosture.Standing),
+                        held.Count(lot => lot.Posture == HenchmanPosture.Fallen),
+                        occupied);
+                }).ToArray();
+                var expected = PublicTerritoryFootprintOrdering.Rank(totals);
+                Assert.Equal(expected, report.Footprints);
+                Assert.Equal(count, report.Footprints.Count);
+                Assert.All(report.Footprints, item => Assert.Equal(1, item.Place));
+                Assert.All(report.Footprints, item => Assert.Equal(1, item.ControlledLots));
+                Assert.All(report.Footprints, item => Assert.Equal(1, item.OccupiedStreets));
+                Assert.Equal(count, report.Footprints.Sum(item => item.ControlledLots));
+                Assert.Throws<NotSupportedException>(() =>
+                    ((IList<MatchPublicTerritoryFootprint>)report.Footprints).Clear());
                 Assert.Equal(report.SharedStreetCount, report.Streets.Count(s => s.IsShared));
                 Assert.Equal(30, report.Streets.Sum(s => s.TotalSlots));
                 Assert.Equal(count, report.Streets.Sum(s => s.ControlledLots));

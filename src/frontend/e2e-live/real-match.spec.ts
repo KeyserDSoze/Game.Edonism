@@ -98,6 +98,19 @@ async function startRealMatch(page: Page): Promise<CreatedMatch> {
   await expect(page.getByTestId("match-activity-roster")).toBeVisible();
   expect(match.state.boardActivities).toHaveLength(30);
   expect(match.state.controlledActivities).toHaveLength(2);
+  // #145: the genuine two-seat printed character origin is one board
+  // card in exactly the same immutable starting lot as its player.
+  for (const character of match.state.assignedCharacters) {
+    const seat = match.state.players.find(p => p.playerId === character.playerId);
+    expect(seat).toBeDefined();
+    const byCard = match.state.boardActivities.filter(card =>
+      card.cardId === character.startingActivityCardId);
+    const bySlot = match.state.boardActivities.filter(card =>
+      card.slotId === seat!.startingSlotId);
+    expect(byCard).toHaveLength(1);
+    expect(bySlot).toHaveLength(1);
+    expect(byCard[0]).toEqual(bySlot[0]);
+  }
   // #140: actual server full-deck contains many UNCONTROLLED cards;
   // their printed lots are unique and do not invalidate financial views.
   expect(new Set(match.state.boardActivities.map(a => a.slotId)).size).toBe(30);
@@ -779,6 +792,19 @@ test("real .NET eight-seat match supports private join and all sequential turns"
   await expect(page.getByTestId("match-board-card-count")).toContainText("30");
   expect(created.state.assignedCharacters).toHaveLength(8);
   expect(created.state.grossSalaryQuotes).toHaveLength(8);
+  // #145: eight authentic assigned character starting cards also match
+  // the concrete public 30-card lot for every real .NET seat.
+  for (const character of created.state.assignedCharacters) {
+    const seat = created.state.players.find(p => p.playerId === character.playerId);
+    expect(seat).toBeDefined();
+    const byCard = created.state.boardActivities.filter(card =>
+      card.cardId === character.startingActivityCardId);
+    const bySlot = created.state.boardActivities.filter(card =>
+      card.slotId === seat!.startingSlotId);
+    expect(byCard).toHaveLength(1);
+    expect(bySlot).toHaveLength(1);
+    expect(byCard[0]).toEqual(bySlot[0]);
+  }
   // #141: every public 8-player heart badge is confirmed by that
   // seat's unique public assigned-character printed card record.
   expect(new Set(created.state.assignedCharacters.map(c => c.characterId)).size).toBe(8);

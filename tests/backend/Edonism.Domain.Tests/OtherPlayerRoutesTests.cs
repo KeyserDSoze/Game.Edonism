@@ -76,6 +76,56 @@ public sealed class OtherPlayerRoutesTests
         Assert.Equal(originalCheckpoint, JsonSerializer.Serialize(match.CaptureCheckpoint()));
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void ActiveTurnOwnerPublicStreetHopsAgreeWithAuthoritativeRoutesAfterMoveAndRotation(int count)
+    {
+        var match = FullMatch(count);
+        var board = BoardCatalog.LoadDefault();
+        var privateBefore = JsonSerializer.Serialize(match.CaptureCheckpoint().PrivateDeal);
+        var atomsBefore = match.Snapshot().Players.ToDictionary(p => p.PlayerId, p => p.Atoms);
+
+        void AssertActiveOwnerRoutes()
+        {
+            var snapshot = match.Snapshot();
+            var activeId = Assert.IsType<string>(snapshot.ActivePlayerId);
+            var active = Assert.Single(snapshot.Players, p => p.PlayerId == activeId);
+            var routes = Assert.IsType<MatchOtherPlayerRoutes>(
+                match.VerifiedOtherPlayerRoutesForActor(activeId));
+            Assert.Equal(snapshot.Revision, routes.VerifiedRevision);
+            Assert.Equal(active.StreetId, routes.FromStreetId);
+            Assert.Equal(count - 1, routes.Others.Count);
+            foreach (var other in routes.Others)
+            {
+                Assert.NotEqual(activeId, other.OtherPlayerId);
+                var rival = Assert.Single(snapshot.Players,
+                    p => p.PlayerId == other.OtherPlayerId);
+                Assert.Equal(rival.StreetId, other.StreetId);
+                var canonical = board.ShortestStreetPath(active.StreetId, rival.StreetId);
+                Assert.NotNull(canonical);
+                Assert.Equal(canonical, other.StreetPath);
+                Assert.Equal(canonical.Count - 1, other.StreetSteps);
+                Assert.Equal(active.StreetId, other.StreetPath[0]);
+                Assert.Equal(rival.StreetId, other.StreetPath[^1]);
+            }
+            Assert.Equal(privateBefore, JsonSerializer.Serialize(match.CaptureCheckpoint().PrivateDeal));
+            Assert.All(snapshot.Players, p => Assert.Equal(atomsBefore[p.PlayerId], p.Atoms));
+            Assert.True(match.VerifyPublicAudit().IsValid);
+        }
+
+        AssertActiveOwnerRoutes();
+        var before = match.Snapshot();
+        var actor = Assert.Single(before.Players, p => p.PlayerId == before.ActivePlayerId);
+        var adjacent = board.Streets.Single(s => s.Id == actor.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(actor.PlayerId, adjacent, before.Revision).Accepted);
+        AssertActiveOwnerRoutes();
+        Assert.True(match.TryEndTurn(actor.PlayerId, match.Revision).Accepted);
+        Assert.Equal(before.TurnOrder[1], match.ActivePlayerId);
+        AssertActiveOwnerRoutes();
+    }
+
     [Fact]
     public void TwoPlayersOnTheSameStreetHaveZeroStepsAndAnInclusivePath()
     {

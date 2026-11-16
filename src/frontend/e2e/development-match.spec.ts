@@ -7181,7 +7181,7 @@ for (const count of [2, 8] as const) {
         await expect(page.getByTestId("public-free-activity-B-03")).toBeVisible();
         await categoryFilter.selectOption("");
         await expect(list.locator("li")).toHaveCount(28);
-        expect(observedHeaders.filter(x => /\\/(free-move|end-turn)$/.test(x.path)))
+        expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
           .toHaveLength(0);
 
         if (count === 2) {

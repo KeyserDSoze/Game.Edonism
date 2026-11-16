@@ -98,16 +98,6 @@ for (const count of [2, 4, 8] as const) {
           undefinedInput: verify(undefined).length,
         };
       }, { state, afterSettlement, malformed });
-      const expected = state.boardActivities.slice(count).map(card => ({
-        slotId: card.slotId,
-        streetId: slots149.indexOf(card.slotId) < 8 ? "gauss"
-          : slots149.indexOf(card.slotId) < 16 ? "einstein"
-            : slots149.indexOf(card.slotId) < 19 ? "newton"
-              : slots149.indexOf(card.slotId) < 22 ? "planck"
-                : slots149.indexOf(card.slotId) < 26 ? "boson" : "meson",
-        cardId: card.cardId,
-        category: card.category,
-      }));
       expect(output.valid).toHaveLength(30 - count);
       expect(output.valid.map(card => card.slotId)).toEqual(slots149.slice(count));
       expect(output.valid.map(card => card.cardId)).toEqual(

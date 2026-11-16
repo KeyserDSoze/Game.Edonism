@@ -12,6 +12,7 @@ import { verifiedPublicFreeMoveUsage } from "@/features/city/playerFreeMoveUsage
 import { verifiedPublicCharacterHearts, verifiedPublicCharacterRoster } from "@/features/city/playerCharacterHearts";
 import { verifiedActiveTurnRivalProximity } from "@/features/city/activeTurnRivalProximity";
 import { verifiedNearestActiveTurnRivals } from "@/features/city/nearestActiveTurnRivals";
+import { verifiedPublicUncontrolledBoardActivities } from "@/features/city/publicUncontrolledBoardActivities";
 import { verifiedPublicSeatEconomy } from "@/features/city/publicSeatEconomy";
 import { verifiedPublicSeatResources } from "@/features/city/publicSeatResources";
 import { controlledLotMarkers, publicGrossSalaryQuotes, verifiedPublicBoardCardCount, type PublicMatchSceneState } from "@/features/city/activityMarkers";
@@ -75,6 +76,9 @@ export default function App() {
   // totals are distinct from unpaid gross quotes and never grant actions.
   const publicSeatResources = verifiedPublicSeatResources(publicPlayers);
   const verifiedBoardCardCount = verifiedPublicBoardCardCount(publicPlayers);
+  // #149: independently verified complete printed board; list UNCONTROLLED
+  // face-up cards only, with no purchase/action/secret inference.
+  const freePublicActivities = verifiedPublicUncontrolledBoardActivities(publicPlayers);
   const currentStreet = streetById(selectedStreetId) ?? cityBoard.streets[0];
   const currentSlot = selectedSlotId ? slotById(selectedSlotId) : undefined;
   const streetSlots = slotsOnStreet(selectedStreetId);
@@ -569,6 +573,49 @@ export default function App() {
                   </ul>
                   <p className="mt-2 text-[11px] text-muted-foreground">{t("city.salaryNotPaid")}</p>
                 </div>
+              </section>
+            )}
+            {freePublicActivities.length > 0 && (
+              <section className="mx-3 mb-4 rounded-xl border border-border bg-muted/30 p-3 sm:mx-5"
+                data-testid="match-public-free-activity-section"
+                aria-label={t("city.publicFreeActivitiesTitle")}>
+                <details data-testid="match-public-free-activities" className="group">
+                  <summary className="cursor-pointer rounded-sm text-xs font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                    {t("city.publicFreeActivitiesSummary", { count: freePublicActivities.length })}
+                  </summary>
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    {t("city.publicFreeActivitiesNote")}
+                  </p>
+                  <ol className="mt-3 grid gap-2 sm:grid-cols-2"
+                    data-testid="match-public-free-activities-list">
+                    {freePublicActivities.map(card => (
+                      <li key={card.slotId}
+                        data-testid={`public-free-activity-${card.slotId}`}
+                        data-card-id={card.cardId}
+                        data-category={card.category}
+                        data-street-id={card.streetId}
+                        className="min-w-0 rounded-lg border border-border bg-card p-2 text-xs">
+                        <button type="button"
+                          data-testid={`match-inspect-free-activity-${card.slotId}`}
+                          aria-label={t("city.inspectPublicFreeActivity", {
+                            slot: card.slotId,
+                            street: streetById(card.streetId)?.name,
+                          })}
+                          aria-pressed={selectedSlotId === card.slotId}
+                          onClick={() => chooseSlot(card.slotId)}
+                          className="rounded-sm font-semibold underline decoration-dotted underline-offset-2 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                          {card.slotId}
+                        </button>
+                        <span className="ml-2 text-muted-foreground">
+                          {streetById(card.streetId)?.name}
+                        </span>
+                        <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
+                          {card.cardId} · {card.category}
+                        </p>
+                      </li>
+                    ))}
+                  </ol>
+                </details>
               </section>
             )}
           </Card>

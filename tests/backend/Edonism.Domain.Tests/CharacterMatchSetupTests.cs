@@ -192,6 +192,48 @@ public sealed class CharacterMatchSetupTests
         Assert.True(match.VerifyPublicAudit().IsValid);
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void PublicCharacterStartingCardsAreExactlyThePrintedOriginLotBeforeAndAfterTurn(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = GameMatch.CreateFromTrustedCharacterCatalog(
+            Guid.NewGuid(), board,
+            Enumerable.Range(0, count).Select(i => $"player-{i}").ToArray(),
+            CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(), 145 + count);
+
+        static void AssertOrigins(MatchSnapshot snapshot, int expectedCount)
+        {
+            Assert.Equal(30, snapshot.BoardActivities.Count);
+            Assert.Equal(expectedCount, snapshot.AssignedCharacters.Count);
+            foreach (var assigned in snapshot.AssignedCharacters)
+            {
+                var player = Assert.Single(snapshot.Players,
+                    seat => seat.PlayerId == assigned.PlayerId);
+                var byCard = Assert.Single(snapshot.BoardActivities,
+                    card => card.CardId == assigned.StartingActivityCardId);
+                var bySlot = Assert.Single(snapshot.BoardActivities,
+                    card => card.SlotId == player.StartingSlotId);
+                Assert.Equal(bySlot, byCard);
+                Assert.Equal(player.Hearts, assigned.PrintedInitialHearts);
+            }
+        }
+
+        var before = match.Snapshot();
+        AssertOrigins(before, count);
+        var actor = before.Players[0];
+        var next = board.Streets.Single(x => x.Id == actor.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(actor.PlayerId, next, before.Revision).Accepted);
+        Assert.True(match.TryEndTurn(actor.PlayerId, match.Revision).Accepted);
+        var after = match.Snapshot();
+        AssertOrigins(after, count);
+        Assert.Equal(before.BoardActivities, after.BoardActivities);
+        Assert.Equal(before.AssignedCharacters, after.AssignedCharacters);
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
     [Fact]
     public void DrawnCharacterDeterminesStartingLotStreetAndPublicHearts()
     {

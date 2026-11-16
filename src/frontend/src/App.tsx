@@ -309,7 +309,25 @@ export default function App() {
                       {startingLotsByPlayer.has(marker.playerId) && (
                         <span className="text-muted-foreground"
                           data-testid={`match-origin-${marker.playerId}`}>
-                          {t("city.startingLot")}: {startingLotsByPlayer.get(marker.playerId)}
+                          {t("city.startingLot")}:{" "}
+                          <button
+                            type="button"
+                            data-testid={`match-inspect-origin-${marker.playerId}`}
+                            aria-label={t("city.inspectStartingLot", {
+                              player: marker.playerId,
+                              id: startingLotsByPlayer.get(marker.playerId),
+                            })}
+                            aria-pressed={selectedSlotId === startingLotsByPlayer.get(marker.playerId)}
+                            onClick={() => {
+                              // #131: Public board inspection ONLY: not a
+                              // Development game command or a change of seat.
+                              const origin = startingLotsByPlayer.get(marker.playerId);
+                              if (origin) chooseSlot(origin);
+                            }}
+                            className="rounded-sm font-semibold underline decoration-dotted underline-offset-2 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                          >
+                            {startingLotsByPlayer.get(marker.playerId)}
+                          </button>
                         </span>
                       )}
                       {marker.isActive && <span className="font-semibold text-primary">{t("city.activePlayerMarker")}</span>}

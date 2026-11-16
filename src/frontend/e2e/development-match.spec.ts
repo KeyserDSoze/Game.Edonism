@@ -1318,6 +1318,102 @@ for (const count of [2, 8] as const) {
   });
 }
 
+
+for (const count of [2, 8] as const) {
+  test("#131: inspect rival initial lot without moving live pawn or changing private actor ("
+    + count + " seats)", async ({ page }) => {
+    const { observedHeaders } = await mockMatchApi(page, { playerCount: count });
+    await page.goto("/");
+    await page.getByTestId("dev-player-count").selectOption(String(count));
+    await page.getByTestId("dev-create").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    await expect(page.getByTestId("match-player-legend").locator("li"))
+      .toHaveCount(count);
+    await expect(page.getByTestId("match-inspect-origin-bob"))
+      .toHaveAttribute("aria-label", "Esplora il lotto iniziale S-01 di bob");
+
+    // Bob begins on Einstein; Alice is the authorized seat on Gauss.
+    await page.getByTestId("match-inspect-origin-bob").click();
+    await expect(page.getByTestId("selected-slot")).toHaveText("S-01");
+    await expect(page.getByTestId("street-picker-einstein"))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("match-inspect-origin-bob"))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("dev-active-player")).toHaveText("alice");
+    await expect(page.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-street-id", "gauss");
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+    // Inspect must never issue a command, even while changing city streets.
+    expect(observedHeaders.filter(x =>
+      x.path.endsWith("/free-move") || x.path.endsWith("/end-turn")))
+      .toHaveLength(0);
+
+    // Legitimate movement changes Alice's street, not her starting lot.
+    await page.getByTestId("dev-move-planck").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-street-id", "planck");
+    await page.getByTestId("street-picker-meson").click();
+    await page.getByTestId("match-inspect-origin-alice").click();
+    await expect(page.getByTestId("selected-slot")).toHaveText("N-01");
+    await expect(page.getByTestId("street-picker-gauss"))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-street-id", "planck");
+    await expect(page.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-starting-slot-id", "N-01");
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    expect(observedHeaders.filter(x => x.path.endsWith("/free-move")))
+      .toHaveLength(1);
+
+    await page.getByTestId("dev-seat-bob").click();
+    await page.getByTestId("match-inspect-origin-bob").click();
+    await expect(page.getByTestId("selected-slot")).toHaveText("S-01");
+    await expect(page.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-street-id", "planck");
+    expect(observedHeaders.filter(x =>
+      x.path.endsWith("/free-move") || x.path.endsWith("/end-turn")))
+      .toHaveLength(1);
+
+    await page.getByTestId("dev-leave").click();
+    await expect(page.getByTestId("match-inspect-origin-alice")).toHaveCount(0);
+    await expect(page.getByTestId("match-inspect-origin-bob")).toHaveCount(0);
+  });
+}
+
+test("#131: origin inspection is keyboard reachable in English and WebGL fallback",
+  async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+      if (kind === "webgl" || kind === "webgl2"
+        || kind === "experimental-webgl") return null;
+      return Reflect.apply(original, this, [kind, ...args]);
+    };
+  });
+  await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  const target = page.getByTestId("match-inspect-origin-bob");
+  await expect(target).toHaveAttribute("aria-label",
+    "Inspect bob’s starting lot S-01");
+  await target.focus();
+  await expect(target).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("selected-slot")).toHaveText("S-01");
+  await expect(page.getByTestId("street-picker-einstein"))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  const overflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth > window.innerWidth + 2);
+  expect(overflow).toBe(false);
+  await page.getByTestId("dev-leave").click();
+  await expect(target).toHaveCount(0);
+});
+
 test("#130: starting lot roster stays accessible in English/mobile/WebGL fallback",
   async ({ page }) => {
   await page.addInitScript(() => {

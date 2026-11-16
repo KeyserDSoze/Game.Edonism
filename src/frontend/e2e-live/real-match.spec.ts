@@ -174,6 +174,30 @@ test("real .NET + React: server draws a match, moves two players and stops befor
       .toContainText(p.startingSlotId);
   }
 
+  // #131: Inspect Bob's actual server-authored starting lot using the
+  // board selection UI, not a POST move/turn API. Current pawn and actor
+  // must remain unchanged, even if this lot is on another street.
+  const bobOriginId = created.state.players[1].startingSlotId;
+  const bobOriginStreet = (
+    (JSON.parse(slotSource) as { slots: { id: string; streetId: string }[] })
+      .slots.find(s => s.id === bobOriginId)
+  )?.streetId;
+  expect(bobOriginStreet).toBeTruthy();
+  const serverCommands: string[] = [];
+  page.on("request", req => {
+    const path = new URL(req.url()).pathname;
+    if (req.method() === "POST" && /(free-move|end-turn)$/.test(path))
+      serverCommands.push(path);
+  });
+  await page.getByTestId("match-inspect-origin-bob").click();
+  await expect(page.getByTestId("selected-slot")).toHaveText(bobOriginId);
+  await expect(page.getByTestId("street-picker-" + bobOriginStreet))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("match-player-bob"))
+    .toHaveAttribute("data-street-id", created.state.players[1].streetId);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(serverCommands).toHaveLength(0);
+
   const aliceToken = tokenFor(created, "alice");
   const bobToken = tokenFor(created, "bob");
 
@@ -204,6 +228,14 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   await moveAlice.click();
   await expect(page.getByTestId("match-player-alice"))
     .toHaveAttribute("data-starting-slot-id", created.state.players[0].startingSlotId);
+  // #131: Inspect Alice's ORIGINAL lot after her pawn left its road.
+  // The visible selected street changes without a second API command.
+  await page.getByTestId("match-inspect-origin-alice").click();
+  await expect(page.getByTestId("selected-slot"))
+    .toHaveText(created.state.players[0].startingSlotId);
+  await expect(page.getByTestId("match-player-alice"))
+    .toHaveAttribute("data-starting-slot-id", created.state.players[0].startingSlotId);
+  expect(serverCommands.filter(p => p.endsWith("/free-move"))).toHaveLength(1);
   await expect(page.getByTestId("match-origin-alice"))
     .toContainText(created.state.players[0].startingSlotId);
   await expect(page.getByTestId("dev-revision")).toHaveText("1");

@@ -6,7 +6,10 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./e2e-live",
-  timeout: 45_000,
+  // #154: 2-browser / offline replay tests can exceed 45s on a shared
+  // software-WebGL CI runner. Keep assertion timeouts at 15s; never skip
+  // tests, and retain the workflow's 30-minute overall job cap.
+  timeout: 90_000,
   expect: { timeout: 15_000 },
   retries: 0,
   workers: 1,

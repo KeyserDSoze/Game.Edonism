@@ -350,11 +350,29 @@ async function assertLivePublicStreetControlMatrix(
     await matrix.locator("summary").click();
   const rows = page.getByTestId("public-street-control-list").locator("li");
   await expect(rows).toHaveCount(board.streets.length);
+  // #154: Do NOT run ~250 sequential Playwright expect/poll calls across
+  // seven roads times eight public seats. Read one consistent DOM frame,
+  // then compare every owner and posture against REAL bearer-protected .NET
+  // routes and the server-public snapshot. The previous polling loop made
+  // the 8-seat test exceed its timeout before finishing the fourth road.
+  const observed = await rows.evaluateAll(elements => elements.map(row => ({
+    id: row.getAttribute("data-testid"),
+    totalSlots: row.getAttribute("data-total-slots"),
+    freeLots: row.getAttribute("data-free-count"),
+    controlledLots: row.getAttribute("data-controlled-count"),
+    standing: row.getAttribute("data-standing-count"),
+    fallen: row.getAttribute("data-fallen-count"),
+    owners: Array.from(row.querySelectorAll('[data-testid*="-owner-"]')).map(owner => ({
+      id: owner.getAttribute("data-testid"),
+      controlled: owner.getAttribute("data-owned-count"),
+      standing: owner.getAttribute("data-standing-count"),
+      fallen: owner.getAttribute("data-fallen-count"),
+    })),
+  })));
   let total = 0;
   let available = 0;
   let controlledTotal = 0;
-  for (let i = 0; i < board.streets.length; i++) {
-    const street = board.streets[i];
+  const expected = board.streets.map(street => {
     const slots = board.slots.filter(slot => slot.streetId === street.id);
     const control = created.state.controlledActivities.filter(x =>
       bySlot.get(x.slotId) === street.id);
@@ -363,30 +381,28 @@ async function assertLivePublicStreetControlMatrix(
     total += slots.length;
     available += free.length;
     controlledTotal += control.length;
-    const row = rows.nth(i);
-    await expect(row).toHaveAttribute(
-      "data-testid", `public-street-control-${street.id}`);
-    await expect(row).toHaveAttribute("data-total-slots", String(slots.length));
-    await expect(row).toHaveAttribute("data-free-count", String(free.length));
-    await expect(row).toHaveAttribute("data-controlled-count", String(control.length));
-    await expect(row).toHaveAttribute("data-standing-count",
-      String(control.filter(x => x.posture === 0).length));
-    await expect(row).toHaveAttribute("data-fallen-count",
-      String(control.filter(x => x.posture === 1).length));
     expect(rival).toHaveLength(control.filter(x =>
       x.ownerPlayerId !== actorId).length);
-    for (const [j, actor] of created.state.players.entries()) {
-      const one = control.filter(x => x.ownerPlayerId === actor.playerId);
-      const tag = row.locator('[data-testid*="-owner-"]').nth(j);
-      await expect(tag).toHaveAttribute("data-testid",
-        `public-street-control-${street.id}-owner-${actor.playerId}`);
-      await expect(tag).toHaveAttribute("data-owned-count", String(one.length));
-      await expect(tag).toHaveAttribute("data-standing-count",
-        String(one.filter(x => x.posture === 0).length));
-      await expect(tag).toHaveAttribute("data-fallen-count",
-        String(one.filter(x => x.posture === 1).length));
-    }
-  }
+    return {
+      id: `public-street-control-${street.id}`,
+      totalSlots: String(slots.length),
+      freeLots: String(free.length),
+      controlledLots: String(control.length),
+      standing: String(control.filter(x => x.posture === 0).length),
+      fallen: String(control.filter(x => x.posture === 1).length),
+      owners: created.state.players.map(actor => {
+        const one = control.filter(x => x.ownerPlayerId === actor.playerId);
+        return {
+          id: `public-street-control-${street.id}-owner-${actor.playerId}`,
+          controlled: String(one.length),
+          standing: String(one.filter(x => x.posture === 0).length),
+          fallen: String(one.filter(x => x.posture === 1).length),
+        };
+      }),
+    };
+  });
+  // Full order, all zero-valued owners, 30 slots and posture checks remain.
+  expect(observed).toEqual(expected);
   expect(total).toBe(30);
   expect(available).toBe(freePlan.routes.length);
   expect(controlledTotal).toBe(created.state.controlledActivities.length);

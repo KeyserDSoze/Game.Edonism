@@ -13,6 +13,7 @@ import { verifiedPublicCharacterHearts, verifiedPublicCharacterRoster } from "@/
 import { verifiedActiveTurnRivalProximity } from "@/features/city/activeTurnRivalProximity";
 import { verifiedNearestActiveTurnRivals } from "@/features/city/nearestActiveTurnRivals";
 import { selectVerifiedPublicUncontrolledActivities } from "@/features/city/publicUncontrolledActivityFilters";
+import { verifiedPublicFreeActivityStreetDistribution } from "@/features/city/publicFreeActivityStreetDistribution";
 import { printedActivityCategoryQuotas } from "@/features/city/activityMarkers";
 import { verifiedPublicSeatEconomy } from "@/features/city/publicSeatEconomy";
 import { verifiedPublicSeatResources } from "@/features/city/publicSeatResources";
@@ -98,6 +99,9 @@ export default function App() {
     category: freeCategoryFilter,
   });
   const freePublicActivities = publicFreeAtlas.all;
+  // #151: canonical street-wide counts are independent of local filters.
+  // Never infer any property purchase/move permission from a count.
+  const freeStreetCounts = verifiedPublicFreeActivityStreetDistribution(publicPlayers);
   const currentStreet = streetById(selectedStreetId) ?? cityBoard.streets[0];
   const currentSlot = selectedSlotId ? slotById(selectedSlotId) : undefined;
   const streetSlots = slotsOnStreet(selectedStreetId);
@@ -611,6 +615,41 @@ export default function App() {
                   <p className="mt-2 text-[11px] text-muted-foreground">
                     {t("city.publicFreeActivitiesNote")}
                   </p>
+                  {freeStreetCounts.length > 0 && (
+                    <section className="mt-3 space-y-2"
+                      data-testid="public-free-street-distribution"
+                      aria-label={t("city.publicFreeStreetDistributionTitle")}>
+                      <p className="text-xs font-semibold">
+                        {t("city.publicFreeStreetDistributionTitle")}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {freeStreetCounts.map(street => (
+                          <Button key={street.streetId} type="button"
+                            variant={freeStreetFilter === street.streetId ? "secondary" : "outline"}
+                            size="sm"
+                            data-testid={`public-free-street-count-${street.streetId}`}
+                            data-free-count={street.count}
+                            data-street-id={street.streetId}
+                            aria-label={t("city.publicFreeStreetDistributionInspect", {
+                              street: street.streetName,
+                              count: street.count,
+                            })}
+                            onClick={() => {
+                              setFreeStreetFilter(street.streetId);
+                              // A shortcut means *all* public cards on
+                              // this street, never a stale category subset.
+                              setFreeCategoryFilter("");
+                            }}
+                            className="h-auto min-h-9 max-w-full whitespace-normal text-left text-xs">
+                            {street.streetName} · {street.count}
+                          </Button>
+                        ))}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {t("city.publicFreeStreetDistributionNote")}
+                      </p>
+                    </section>
+                  )}
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <label className="flex min-w-0 flex-col gap-1 text-xs">
                       <span className="font-semibold">{t("city.publicFreeFilterStreet")}</span>

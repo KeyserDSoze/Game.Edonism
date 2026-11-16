@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 // #125: Synthetic first-round transport checks against the actual Vite TS.
+// #135: The broader public envelope still accepts canonical/null street fields,
+// while first-round known-event chronology requires distinct move endpoints.
 // Only the server validates turn legality, card effects and audit replay.
 const seats = ["alice", "bob", "charlie", "diana", "eve", "frank", "grace", "heidi"];
 type Count = 2 | 4 | 8;
@@ -77,11 +79,16 @@ for (const count of [2, 4, 8] as const) {
       "gauss", "einstein", "newton", "planck", "boson", "meson", "main-square",
     ]);
     expect(result.baseline).toEqual([true, true]);
-    expect(result.allFrom).toEqual(Array.from({ length: 7 }, () => [true, true]));
-    expect(result.allTo).toEqual(Array.from({ length: 7 }, () => [true, true]));
-    expect(result.nullFrom).toEqual([true, true]);
-    expect(result.nullTo).toEqual([true, true]);
-    expect(result.nullBoth).toEqual([true, true]);
+    // All seven board streets are envelope-canonical. A free-move cannot
+    // have identical endpoints: this is a wire-shape check (#135), not
+    // a client implementation of the .NET adjacency/turn rule.
+    expect(result.allFrom).toEqual(
+      result.roads.map(id => [true, id !== "planck"]));
+    expect(result.allTo).toEqual(
+      result.roads.map(id => [true, id !== "gauss"]));
+    expect(result.nullFrom).toEqual([true, false]);
+    expect(result.nullTo).toEqual([true, false]);
+    expect(result.nullBoth).toEqual([true, false]);
     expect(result.futureKind).toEqual([true, true]);
     expect(result.unrelatedBadCard).toBe(true);
     expect(JSON.stringify(state)).toBe(before);

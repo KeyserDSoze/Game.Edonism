@@ -151,6 +151,47 @@ public sealed class CharacterMatchSetupTests
         Assert.True(match.VerifyPublicAudit().IsValid);
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void PublicGrossSalaryRosterHasOnlyLocatableTechnicalSeatsThroughFirstTurn(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = GameMatch.CreateFromTrustedCharacterCatalog(
+            Guid.NewGuid(), board,
+            Enumerable.Range(0, count).Select(i => $"player-{i}").ToArray(),
+            CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(), 144 + count);
+        var before = match.Snapshot();
+        Assert.Equal(count, before.Players.Count);
+        Assert.Equal(count, before.GrossSalaryQuotes.Count);
+        Assert.Equal(count, before.Players.Select(p => p.PlayerId)
+            .Distinct(StringComparer.Ordinal).Count());
+
+        foreach (var seat in before.Players)
+        {
+            Assert.True(MatchParticipantId.IsValid(seat.PlayerId));
+            Assert.Contains(board.Streets, street => street.Id == seat.StreetId);
+            var quote = Assert.Single(before.GrossSalaryQuotes,
+                row => row.PlayerId == seat.PlayerId);
+            Assert.Equal(2 + before.ControlledActivities.Count(lot =>
+                lot.OwnerPlayerId == seat.PlayerId && lot.Posture == HenchmanPosture.Standing),
+                quote.GrossAtoms);
+        }
+
+        var actor = before.Players[0];
+        var destination = board.Streets.Single(s => s.Id == actor.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(actor.PlayerId, destination, before.Revision).Accepted);
+        Assert.True(match.TryEndTurn(actor.PlayerId, match.Revision).Accepted);
+        var after = match.Snapshot();
+        Assert.Equal(before.GrossSalaryQuotes, after.GrossSalaryQuotes);
+        Assert.Equal(before.Players.Select(p => p.PlayerId),
+            after.Players.Select(p => p.PlayerId));
+        Assert.All(after.Players, seat =>
+            Assert.Contains(board.Streets, street => street.Id == seat.StreetId));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
     [Fact]
     public void DrawnCharacterDeterminesStartingLotStreetAndPublicHearts()
     {

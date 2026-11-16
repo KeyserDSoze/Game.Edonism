@@ -3667,7 +3667,7 @@ test("#147: real .NET active-turn rival distances follow move, turn rotation and
     const streetNames = {
       gauss: "Gauss Avenue", einstein: "Einstein Avenue",
       newton: "Newton Avenue", planck: "Planck Avenue",
-      boson: "Boson Avenue", meson: "Meson Avenue",
+      boson: "Boson Street", meson: "Meson Street",
       "main-square": "Main Square",
     } as const;
     await expect(page.getByTestId("selected-street")).toHaveText(

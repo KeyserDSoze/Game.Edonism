@@ -120,6 +120,92 @@ public sealed class UncontrolledActivityRoutesTests
         Assert.Equal(1, restored.Revision);
     }
 
+    // #149: The city must expose ALL already-public but unowned printed
+    // activity cards; it is not a purchase command or a client-generated deck.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void CompletePrintedBoardPublicUncontrolledCardsMatchAuditedDomainRoutes(int count)
+    {
+        var match = NewMatch(count);
+        var board = BoardCatalog.LoadDefault();
+        var before = match.Snapshot();
+        var secretBefore = JsonSerializer.Serialize(match.CaptureCheckpoint().PrivateDeal);
+        Assert.Equal(30, before.BoardActivities.Count);
+        Assert.Equal(30, before.BoardActivities.Select(c => c.SlotId)
+            .Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(30, before.BoardActivities.Select(c => c.CardId)
+            .Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(count, before.ControlledActivities.Count);
+
+        var quotas = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["public-financing"] = 5, ["private-financing"] = 5,
+            ["black-market"] = 4, ["corruption"] = 4,
+            ["culture"] = 4, ["sport"] = 2,
+            ["transport"] = 3, ["bishopric"] = 3,
+        };
+        Assert.Equal(quotas.Count,
+            before.BoardActivities.Select(c => c.Category).Distinct().Count());
+        foreach (var (category, expected) in quotas)
+            Assert.Equal(expected, before.BoardActivities.Count(c => c.Category == category));
+
+        static string[] PublicFreeSlots(GameMatch game, Edonism.Domain.World.BoardDefinition map)
+        {
+            var state = game.Snapshot();
+            var occupied = state.ControlledActivities.Select(c => c.SlotId)
+                .ToHashSet(StringComparer.Ordinal);
+            return map.Slots.Where(s => !occupied.Contains(s.Id))
+                .Select(s => s.Id).ToArray();
+        }
+
+        void AssertPublicAtlas()
+        {
+            var state = match.Snapshot();
+            var free = PublicFreeSlots(match, board);
+            Assert.Equal(30 - count, free.Length);
+            Assert.Equal(free.Length, free.Distinct(StringComparer.Ordinal).Count());
+            foreach (var player in state.Players)
+            {
+                var routes = Assert.IsType<MatchUncontrolledRoutes>(
+                    match.VerifiedUncontrolledRoutesForActor(player.PlayerId));
+                var routeIds = routes.Routes.Select(route => route.SlotId)
+                    .OrderBy(id => id, StringComparer.Ordinal).ToArray();
+                Assert.Equal(free.OrderBy(id => id, StringComparer.Ordinal), routeIds);
+                foreach (var slotId in free)
+                {
+                    var card = Assert.Single(state.BoardActivities,
+                        c => c.SlotId == slotId);
+                    var route = Assert.Single(routes.Routes,
+                        route => route.SlotId == slotId);
+                    Assert.Equal(card.CardId, route.CardId);
+                    Assert.Equal(card.Category, route.Category);
+                    Assert.Equal(board.Slots.Single(s => s.Id == slotId).StreetId,
+                        route.StreetId);
+                }
+            }
+            var publicJson = JsonSerializer.Serialize(state);
+            foreach (var player in state.Players)
+                foreach (var card in match.PrivateHandForActor(player.PlayerId)!.CardIds)
+                    Assert.DoesNotContain(card, publicJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("RemainingDrawPile", publicJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("PrivateDeal", publicJson, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(secretBefore, JsonSerializer.Serialize(match.CaptureCheckpoint().PrivateDeal));
+            Assert.True(match.VerifyPublicAudit().IsValid);
+        }
+
+        AssertPublicAtlas();
+        var actor = before.Players[0];
+        var next = board.Streets.Single(s => s.Id == actor.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(actor.PlayerId, next, match.Revision).Accepted);
+        AssertPublicAtlas();
+        Assert.True(match.TryEndTurn(actor.PlayerId, match.Revision).Accepted);
+        AssertPublicAtlas();
+        Assert.Equal(before.BoardActivities, match.Snapshot().BoardActivities);
+        Assert.Equal(before.ControlledActivities, match.Snapshot().ControlledActivities);
+    }
+
     [Fact]
     public void MinimalTrustedFixtureDoesNotInventMissingPublicCards()
     {

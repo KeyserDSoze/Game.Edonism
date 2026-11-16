@@ -82,7 +82,7 @@ for (const count of [2, 4, 8] as const) {
         duplicatePlayer: tamper(s => { s.players[1].playerId = "alice"; }),
         reservedSeat: tamper(s => { s.players[0].playerId = "system"; }),
         trailingSpaceSeat: tamper(s => { s.players[0].playerId = "alice "; }),
-        unicodeBidiSeat: tamper(s => { s.players[0].playerId = "alice\\u202e"; }),
+        unicodeBidiSeat: tamper(s => { s.players[0].playerId = "alice" + String.fromCodePoint(0x202e); }),
         foreignStreet: tamper(s => { s.players[0].streetId = "fake-road"; }),
         tooSmall: { players: roster.slice(0, 1), assignedCharacters: assignedCharacters.slice(0, 1) },
         missingAssignments: { players: roster },

@@ -90,6 +90,7 @@ type MockOptions = {
   duplicatePublicCardIds?: "unowned-vs-unowned" | "unowned-vs-controlled" | "controlled-vs-controlled"; // #142: distinct canonical slots, cloned physical card.
   publicCardCategory?: "partial-valid" | "partial-foreign" | "partial-casing"
     | "full-valid" | "full-bad-quota"; // #143: category/quota on unowned lots.
+  forgedFullBoardOrigin?: "foreign-card" | "missing-card"; // #145: public starting-card provenance.
   forgedHigherRevisionSnapshot?: boolean; // #112: corrupt first public poll, never a real command.
   forgedNullAuditEventSnapshot?: boolean; // #113: corrupt first poll with events:[null].
   forgedForeignAuditStreetOnce?: boolean; // #125: plausible public 200 with foreign audit road.
@@ -319,7 +320,16 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
             ? "synthetic:character:alice" : `synthetic:character:${playerId}`,
         startingActivityCardId: playerId === "bob"
           && options.forgedAssignedCharacter === "duplicate-starting-activity"
-            ? "synthetic:starting:alice" : `synthetic:starting:${playerId}`,
+            ? "synthetic:starting:alice"
+            : playerId === "alice" && options.forgedFullBoardOrigin
+              ? options.forgedFullBoardOrigin === "foreign-card"
+                ? "synthetic:printed:W-01" : "synthetic:nonexistent"
+            : (options.publicCardCategory === "full-valid"
+              || options.publicCardCategory === "full-bad-quota")
+              ? playerId === "alice" ? "demo:activity:gauss"
+                : playerId === "bob" ? "demo:activity:einstein"
+                  : `synthetic:printed:N-${String(index + 1).padStart(2, "0")}`
+              : `synthetic:starting:${playerId}`,
         printedInitialHearts: playerId === "alice"
           && options.forgedAssignedCharacter === "wrong-hearts" ? 4
           : playerId === "alice"
@@ -6814,5 +6824,58 @@ for (const count of [2, 8] as const) {
             .toContainText("Current atoms:");
         }
       });
+  }
+}
+
+
+// #145: with 30 publicly placed cards the browser must prove that each
+// character's assigned starting activity is the card in its OWN origin lot.
+// A wrong-but-existing unowned card must not create a genuine hearts badge.
+for (const count of [2, 8] as const) {
+  for (const forged of [undefined, "foreign-card", "missing-card"] as const) {
+    test("#145: " + count + "-seat full board character origin=" + (forged ?? "valid")
+      + " keeps independent PvP views", async ({ page }) => {
+      if (count === 2) {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.addInitScript(() => {
+          const original = HTMLCanvasElement.prototype.getContext;
+          HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+            if (kind === "webgl" || kind === "webgl2"
+              || kind === "experimental-webgl") return null;
+            return Reflect.apply(original, this, [kind, ...args]);
+          };
+        });
+      }
+      const { observedHeaders } = await mockMatchApi(page, {
+        playerCount: count, publicCardCategory: "full-valid",
+        forgedFullBoardOrigin: forged,
+      });
+      await page.goto("/");
+      await page.getByTestId("dev-player-count").selectOption(String(count));
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("match-player-legend").locator("li"))
+        .toHaveCount(count);
+      await expect(page.getByTestId("match-board-card-count"))
+        .toContainText("30");
+      for (const id of demoSeats.slice(0, count)) {
+        await expect(page.getByTestId(`match-character-hearts-${id}`))
+          .toHaveCount(forged ? 0 : 1);
+        await expect(page.getByTestId(`match-player-economy-${id}`))
+          .toHaveCount(1);
+        await expect(page.getByTestId(`match-player-resources-${id}`))
+          .toHaveCount(1);
+        await expect(page.getByTestId(`match-inspect-street-${id}`))
+          .toHaveCount(1);
+      }
+      await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+        .toHaveLength(0);
+      if (count === 2 && !forged) {
+        await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+        await expect(page.getByTestId("match-character-hearts-alice"))
+          .toHaveText("Character hearts: 3");
+      }
+    });
   }
 }

@@ -12,7 +12,7 @@ function fixture(count: 2 | 4 | 8) {
     revision: 2, round: 1, phase: 0,
     activePlayerId: "alice" as string | null,
     players: ids.map((playerId, index) => ({
-      playerId, streetId: index % 2 === 0 ? "gauss" : "einstein",
+      playerId, startingSlotId: "N-" + String(index + 1).padStart(2, "0"), streetId: index % 2 === 0 ? "gauss" : "einstein",
       freeMoveUsed: false,
     })),
     turnOrder: [...ids],

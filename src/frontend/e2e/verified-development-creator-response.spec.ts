@@ -12,7 +12,7 @@ function fixture(count: 2 | 4 | 8) {
       boardVersion: "edonism-streets-v1",
       matchId, revision: 0, round: 1, phase: 0, activePlayerId: "alice",
       players: ids.map((playerId, i) => ({
-        playerId, streetId: i % 2 ? "einstein" : "gauss", freeMoveUsed: false,
+        playerId, startingSlotId: "N-" + String(i + 1).padStart(2, "0"), streetId: i % 2 ? "einstein" : "gauss", freeMoveUsed: false,
       })),
       turnOrder: [...ids],
       proposedNextRoundOrder: [...ids.slice(-1), ...ids.slice(0, -1)],

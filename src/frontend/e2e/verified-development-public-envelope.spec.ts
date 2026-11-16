@@ -8,7 +8,7 @@ function fixture(count: 2 | 4 | 8) {
     matchId: "public-envelope-test",
     revision: 3, round: 1, phase: 0, activePlayerId: "alice",
     players: ids.map((playerId, i) => ({
-      playerId, streetId: i % 2 === 0 ? "gauss" : "einstein", freeMoveUsed: false,
+      playerId, startingSlotId: "N-" + String(i + 1).padStart(2, "0"), streetId: i % 2 === 0 ? "gauss" : "einstein", freeMoveUsed: false,
     })),
     turnOrder: [...ids],
     proposedNextRoundOrder: [...ids.slice(-1), ...ids.slice(0, -1)],

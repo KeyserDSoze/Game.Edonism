@@ -10,7 +10,7 @@ function stateFor(count: Count) {
     boardVersion: "edonism-streets-v1",
     revision: 0, round: 1, phase: 0, activePlayerId: seats[0],
     players: seats.map((playerId, index) => ({
-      playerId, streetId: index % 2 ? "einstein" : "gauss", freeMoveUsed: false,
+      playerId, startingSlotId: "N-" + String(index + 1).padStart(2, "0"), streetId: index % 2 ? "einstein" : "gauss", freeMoveUsed: false,
     })),
     turnOrder: seats,
     proposedNextRoundOrder: [...seats.slice(-1), ...seats.slice(0, -1)],

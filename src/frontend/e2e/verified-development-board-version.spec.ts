@@ -11,7 +11,7 @@ function snapshot(count: Count) {
     boardVersion: "edonism-streets-v1",
     revision: 0, round: 1, phase: 0, activePlayerId: "alice" as string | null,
     players: players.map((playerId, index) => ({
-      playerId, streetId: index % 2 ? "einstein" : "gauss",
+      playerId, startingSlotId: "N-" + String(index + 1).padStart(2, "0"), streetId: index % 2 ? "einstein" : "gauss",
       freeMoveUsed: false,
     })),
     turnOrder: players,

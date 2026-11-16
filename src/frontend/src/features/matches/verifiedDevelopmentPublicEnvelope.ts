@@ -16,6 +16,7 @@ import { isValidDevelopmentTechnicalPlayerId } from "./verifiedDevelopmentTechni
  */
 type PublicSeatEnvelope = Readonly<{
   playerId: string;
+  startingSlotId: string;
   streetId: string;
   freeMoveUsed: boolean;
 }>;
@@ -37,6 +38,8 @@ type PublicDevelopmentSnapshotEnvelope = Readonly<{
 // #123: Public street locations must belong to the same printed board.
 // This checks transport compatibility, NOT legal moves or gameplay authority.
 const canonicalStreetIds = new Set(canonicalBoard.streets.map(street => street.id));
+// #129: Printed board source of the 30 legal initial activity lot IDs.
+const canonicalStartingSlotIds = new Set(canonicalBoard.slots.map(slot => slot.id));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -78,15 +81,23 @@ export function hasValidDevelopmentPublicEnvelope(
     return false;
 
   const ids = new Set<string>();
+  const startingSlots = new Set<string>();
   for (const player of value.players) {
     if (!isRecord(player)
       || !isValidDevelopmentTechnicalPlayerId(player.playerId)
       || ids.has(player.playerId)
+      // #129: Initial lot provenance belongs to this exact public board,
+      // and no two players originate from the same printed lot. This does
+      // NOT replay movement or infer the current street from the origin.
+      || typeof player.startingSlotId !== "string"
+      || !canonicalStartingSlotIds.has(player.startingSlotId)
+      || startingSlots.has(player.startingSlotId)
       || typeof player.streetId !== "string"
       || !player.streetId.trim()
       || !canonicalStreetIds.has(player.streetId)
       || typeof player.freeMoveUsed !== "boolean") return false;
     ids.add(player.playerId);
+    startingSlots.add(player.startingSlotId);
   }
 
   const sameSeatSet = (order: readonly unknown[]) => {

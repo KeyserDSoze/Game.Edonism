@@ -21,7 +21,7 @@ function fixture(count: 2 | 4 | 8) {
     matchId: "typed-public-events", revision: 2, round: 1, phase: 0,
     activePlayerId: "bob",
     players: ids.map((playerId, i) => ({
-      playerId, streetId: i % 2 ? "einstein" : "gauss", freeMoveUsed: false,
+      playerId, startingSlotId: "N-" + String(i + 1).padStart(2, "0"), streetId: i % 2 ? "einstein" : "gauss", freeMoveUsed: false,
     })),
     turnOrder: [...ids],
     proposedNextRoundOrder: [...ids.slice(-1), ...ids.slice(0, -1)],

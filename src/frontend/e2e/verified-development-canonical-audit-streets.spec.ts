@@ -11,7 +11,7 @@ function fixture(count: Count) {
     boardVersion: "edonism-streets-v1",
     revision: 1, round: 1, phase: 0, activePlayerId: "alice",
     players: order.map((playerId, i) => ({
-      playerId, streetId: i === 0 ? "planck" : i % 2 ? "einstein" : "gauss",
+      playerId, startingSlotId: "N-" + String(i + 1).padStart(2, "0"), streetId: i === 0 ? "planck" : i % 2 ? "einstein" : "gauss",
       freeMoveUsed: i === 0,
     })),
     turnOrder: order,

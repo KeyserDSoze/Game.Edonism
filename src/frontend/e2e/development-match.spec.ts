@@ -62,6 +62,7 @@ type MockOptions = {
   forgedForeignAuditActorOnce?: boolean; // #126: plausible public 200 with foreign actor.
   forgedUnicodePlayerIdOnce?: boolean; // #127: invisible bidi roster actor in otherwise coherent snapshot.
   forgedSystemSeatOnce?: boolean; // #128: reserved genesis ID impersonates an ordinary seat.
+  forgedStartingSlotOnce?: "duplicate" | "unknown"; // #129: forged origin lot.
   forgedPhaseActorMismatchSnapshot?: boolean; // #116: phase1 with active Alice in forged poll.
   forgedAuditChronologySnapshot?: boolean; // #119: high revision with genesis only.
   forgedPublicTurnOrderOnce?: boolean; // #120: coherent next revision but false order.
@@ -140,6 +141,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let forgedForeignActorIssued = false;
   let forgedUnicodePlayerIdIssued = false;
   let forgedSystemSeatIssued = false;
+  let forgedStartingSlotIssued = false;
   let forgedUnknownStreetIssued = false;
   let forgedJoinedHandIssued = false;
   let forgedBobHandIssued = false;
@@ -811,6 +813,30 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       // revision, but with an invalid invisible Unicode control in the ID.
       // #128: A forged participant reuses the technical "system" genesis ID.
       // Even a coherent 200 must not advance revision, ETag or browser seat.
+      // #129: A fake 200 revision with valid audit, order and player street
+      // but a duplicate/foreign starting lot cannot bind the new ETag.
+      if (options.forgedStartingSlotOnce && !forgedStartingSlotIssued) {
+        forgedStartingSlotIssued = true;
+        const nextRevision = revision + 1;
+        const bogusTag = `W/"edonism-revision-${nextRevision}"`;
+        const honest = snapshot();
+        const forgedSlot = options.forgedStartingSlotOnce === "duplicate"
+          ? "N-01" : "no-such-lot";
+        observedPolls.push({ status: 200, supplied, etag: bogusTag,
+          prefer: request.headers()["prefer"] ?? null });
+        return reply({ status: 200,
+          headers: { ETag: bogusTag, "Cache-Control": "no-store" },
+          json: {
+            ...honest, revision: nextRevision,
+            players: honest.players.map(p => p.playerId === "bob"
+              ? { ...p, startingSlotId: forgedSlot } : p),
+            events: [...auditEvents, {
+              revision: nextRevision, round: 1, kind: "future-public-kind",
+              actorId: "alice", fromStreetId: null, toStreetId: null,
+            }],
+          },
+        });
+      }
       if (options.forgedSystemSeatOnce && !forgedSystemSeatIssued) {
         forgedSystemSeatIssued = true;
         const nextRevision = revision + 1;
@@ -1476,6 +1502,40 @@ test("#119: forged high-revision HTTP 200 with gapped audit cannot poison the ac
   expect(observedHeaders.filter(e => e.path.endsWith("/end-turn"))).toHaveLength(1);
   expect(observedPolls.some(p => p.supplied === 'W/"edonism-revision-96"')).toBe(false);
 });
+
+for (const forgedStartingSlotOnce of ["duplicate", "unknown"] as const) {
+  test("#129: forged " + forgedStartingSlotOnce
+    + " initial lot cannot poison public match revision or ETag", async ({ page }) => {
+    const { observedHeaders, observedPolls } = await mockMatchApi(page,
+      { forgedStartingSlotOnce });
+    await page.goto("/");
+    await page.getByTestId("dev-create").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    const bogusTag = 'W/"edonism-revision-1"';
+    await expect.poll(() => observedPolls.some(p =>
+      p.status === 200 && p.etag === bogusTag)).toBe(true);
+
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    await expect(page.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("match-player-bob"))
+      .toHaveAttribute("data-street-id", "einstein");
+    await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+    await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+    expect(observedPolls.some(p => p.supplied === bogusTag)).toBe(false);
+    expect(observedHeaders.filter(h => h.path.endsWith("/end-turn"))).toHaveLength(0);
+
+    // Genuine end-turn succeeds using the server's actual revision 0.
+    await page.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("match-player-bob"))
+      .toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("dev-audit-event-1"))
+      .toHaveAttribute("data-event-kind", "turn-ended");
+    expect(observedHeaders.filter(h => h.path.endsWith("/end-turn"))).toHaveLength(1);
+  });
+}
 
 test("#128: reserved system seat cannot poison the PvP roster, ETag or private hand",
   async ({ page }) => {

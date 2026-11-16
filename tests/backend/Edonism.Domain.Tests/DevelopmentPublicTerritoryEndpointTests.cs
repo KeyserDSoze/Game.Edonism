@@ -81,6 +81,22 @@ public sealed class DevelopmentPublicTerritoryEndpointTests
             Assert.Equal(count, report.GetProperty("controlledLots").GetInt32());
             Assert.Equal(30 - count, report.GetProperty("freeLots").GetInt32());
 
+            // #159: genuine full-deck participants each begin with exactly
+            // one lot; everyone shares position one (not a victory score).
+            var footprints = report.GetProperty("footprints").EnumerateArray().ToArray();
+            Assert.Equal(count, footprints.Length);
+            Assert.Equal(players,
+                footprints.Select(row => row.GetProperty("playerId").GetString()));
+            Assert.All(footprints, row =>
+            {
+                Assert.Equal(1, row.GetProperty("place").GetInt32());
+                Assert.Equal(1, row.GetProperty("controlledLots").GetInt32());
+                Assert.Equal(1, row.GetProperty("standing").GetInt32());
+                Assert.Equal(0, row.GetProperty("fallen").GetInt32());
+                Assert.Equal(1, row.GetProperty("occupiedStreets").GetInt32());
+            });
+            Assert.Equal(controls.Length, footprints.Sum(row =>
+                row.GetProperty("controlledLots").GetInt32()));
             var roads = report.GetProperty("streets").EnumerateArray().ToArray();
             Assert.Equal(7, roads.Length);
             Assert.Equal(board.Streets.Select(street => street.Id),
@@ -121,6 +137,23 @@ public sealed class DevelopmentPublicTerritoryEndpointTests
                     Assert.Equal(held.Count(c => c.GetProperty("posture").GetInt32() == 1),
                         owner.GetProperty("fallen").GetInt32());
                 }
+            }
+            foreach (var footprint in footprints)
+            {
+                var player = footprint.GetProperty("playerId").GetString();
+                var owned = controls.Where(control =>
+                    control.GetProperty("ownerPlayerId").GetString() == player).ToArray();
+                Assert.Equal(owned.Length, footprint.GetProperty("controlledLots").GetInt32());
+                Assert.Equal(owned.Count(control =>
+                    control.GetProperty("posture").GetInt32() == 0),
+                    footprint.GetProperty("standing").GetInt32());
+                Assert.Equal(owned.Count(control =>
+                    control.GetProperty("posture").GetInt32() == 1),
+                    footprint.GetProperty("fallen").GetInt32());
+                Assert.Equal(owned.Select(control =>
+                    slotStreets[control.GetProperty("slotId").GetString()!])
+                    .Distinct(StringComparer.Ordinal).Count(),
+                    footprint.GetProperty("occupiedStreets").GetInt32());
             }
             var wire = await response.Content.ReadAsStringAsync();
             foreach (var secret in tokens) Assert.DoesNotContain(secret, wire);

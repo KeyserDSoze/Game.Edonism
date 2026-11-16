@@ -7296,3 +7296,32 @@ for (const count of [2, 8] as const) {
       });
   }
 }
+
+
+test("#152: fallen public rival henchman is not counted as standing or an attack option",
+  async ({ page }) => {
+    const { observedHeaders } = await mockMatchApi(page, {
+      playerCount: 2,
+      publicCardCategory: "full-valid",
+      fallenHenchman: true,
+    });
+    await page.goto("/");
+    await page.getByTestId("dev-create").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    const territory = page.getByTestId("public-street-control-details");
+    await territory.locator("summary").click();
+    const einstein = page.getByTestId("public-street-control-einstein");
+    await expect(einstein).toHaveAttribute("data-total-slots", "8");
+    await expect(einstein).toHaveAttribute("data-controlled-count", "1");
+    await expect(einstein).toHaveAttribute("data-standing-count", "0");
+    await expect(einstein).toHaveAttribute("data-fallen-count", "1");
+    await expect(page.getByTestId("public-street-control-einstein-owner-bob"))
+      .toHaveAttribute("data-fallen-count", "1");
+    await expect(page.getByTestId("public-street-control-einstein-owner-alice"))
+      .toHaveAttribute("data-owned-count", "0");
+    await expect(page.getByTestId("match-public-free-activities-list")).toHaveCount(1);
+    await page.getByTestId("public-street-control-inspect-einstein").click();
+    await expect(page.getByTestId("selected-street")).toHaveText("Einstein Avenue");
+    expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+      .toHaveLength(0);
+  });

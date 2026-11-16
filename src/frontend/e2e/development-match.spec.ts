@@ -7121,6 +7121,9 @@ for (const count of [2, 8] as const) {
         const list = page.getByTestId("match-public-free-activities-list");
         if (invalidQuota) {
           await expect(atlas).toHaveCount(0);
+          // #152: a forged full-board quota cannot produce an apparently
+          // valid rival-control matrix with free/owned counts.
+          await expect(page.getByTestId("public-street-control-section")).toHaveCount(0);
           await expect(page.getByTestId("match-board-card-count")).toHaveCount(0);
           // A rejected printed category NEVER suppresses player positions
           // or revokes a valid actor's separate .NET turn command.
@@ -7158,6 +7161,42 @@ for (const count of [2, 8] as const) {
           .toHaveLength(0);
         await expect(page.getByTestId("gross-salary-alice")).toHaveCount(1);
         await expect(page.getByTestId("match-character-hearts-bob")).toHaveCount(1);
+        // #152: territory is public, 30 printed slots in exactly 7 roads,
+        // with owner zero-counts retained in 2- AND 8-player fixtures.
+        const territory = page.getByTestId("public-street-control-details");
+        await expect(territory).toBeVisible();
+        await expect(territory).not.toHaveAttribute("open", "");
+        await territory.locator("summary").click();
+        await expect(territory).toHaveAttribute("open", "");
+        const territoryRows = page.getByTestId("public-street-control-list").locator("li");
+        await expect(territoryRows).toHaveCount(7);
+        const gaussControl = page.getByTestId("public-street-control-gauss");
+        const einsteinControl = page.getByTestId("public-street-control-einstein");
+        const hallControl = page.getByTestId("public-street-control-main-square");
+        await expect(gaussControl).toHaveAttribute("data-total-slots", "8");
+        await expect(gaussControl).toHaveAttribute("data-free-count", "7");
+        await expect(gaussControl).toHaveAttribute("data-controlled-count", "1");
+        await expect(gaussControl).toHaveAttribute("data-standing-count", "1");
+        await expect(gaussControl).toHaveAttribute("data-fallen-count", "0");
+        await expect(einsteinControl).toHaveAttribute("data-free-count", "7");
+        await expect(einsteinControl).toHaveAttribute("data-controlled-count", "1");
+        await expect(hallControl).toHaveAttribute("data-total-slots", "0");
+        await expect(hallControl).toHaveAttribute("data-free-count", "0");
+        await expect(hallControl).toHaveAttribute("data-controlled-count", "0");
+        for (const roadId of ["gauss", "einstein", "newton", "planck", "boson", "meson", "main-square"])
+          await expect(page.getByTestId(`public-street-control-${roadId}`)
+            .locator('[data-testid*="-owner-"]')).toHaveCount(count);
+        await expect(page.getByTestId("public-street-control-gauss-owner-alice"))
+          .toHaveAttribute("data-owned-count", "1");
+        await expect(page.getByTestId("public-street-control-gauss-owner-bob"))
+          .toHaveAttribute("data-owned-count", "0");
+        await expect(page.getByTestId("public-street-control-einstein-owner-bob"))
+          .toHaveAttribute("data-owned-count", "1");
+        await page.getByTestId("public-street-control-inspect-einstein").click();
+        await expect(page.getByTestId("selected-street")).toHaveText("Einstein Avenue");
+        await expect(page.getByTestId("dev-revision")).toHaveText("0");
+        expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+          .toHaveLength(0);
 
         // #150: combining a canonical street with a printed category filters
         // ONLY this verified atlas; public totals, PvP state and choices stay.
@@ -7227,6 +7266,13 @@ for (const count of [2, 8] as const) {
             .toHaveText("28 of 28 free public activities visible");
           await expect(page.getByTestId("public-free-street-distribution"))
             .toContainText("Free public activities by street");
+          await expect(territory.locator("summary"))
+            .toContainText("Public territory: free and controlled lots by street");
+          await expect(page.getByTestId("public-street-control-gauss"))
+            .toContainText("7 free · 1 controlled");
+          await expect(page.getByTestId("public-street-control-inspect-einstein"))
+            .toHaveAttribute("aria-label",
+              "Inspect street Einstein Avenue without executing game actions");
           await expect(page.getByTestId("public-free-street-count-gauss"))
             .toHaveAttribute("aria-label",
               "Show 7 uncontrolled public activities on Gauss Avenue");
@@ -7244,6 +7290,8 @@ for (const count of [2, 8] as const) {
           // No active player is necessary: printed public cards remain.
           await expect(atlas).toBeVisible();
           await expect(list.locator("li")).toHaveCount(28);
+          await expect(territory).toBeVisible();
+          await expect(gaussControl).toHaveAttribute("data-controlled-count", "1");
         }
       });
   }

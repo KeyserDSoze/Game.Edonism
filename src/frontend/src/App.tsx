@@ -10,6 +10,7 @@ import { playerMarkerPlacements } from "@/features/city/playerMarkers";
 import { verifiedPublicStartingLots } from "@/features/city/playerStartingLots";
 import { verifiedPublicFreeMoveUsage } from "@/features/city/playerFreeMoveUsage";
 import { verifiedPublicCharacterHearts, verifiedPublicCharacterRoster } from "@/features/city/playerCharacterHearts";
+import { verifiedActiveTurnRivalProximity } from "@/features/city/activeTurnRivalProximity";
 import { verifiedPublicSeatEconomy } from "@/features/city/publicSeatEconomy";
 import { verifiedPublicSeatResources } from "@/features/city/publicSeatResources";
 import { controlledLotMarkers, publicGrossSalaryQuotes, verifiedPublicBoardCardCount, type PublicMatchSceneState } from "@/features/city/activityMarkers";
@@ -55,6 +56,9 @@ export default function App() {
   // #141: validate each printed heart against its character assigned by
   // this SAME public .NET snapshot, rather than accepting only 1–5.
   const publicCharacterHearts = verifiedPublicCharacterHearts(publicPlayers);
+  // #147: topology only, measured from the server-declared TURN OWNER to
+  // every other public seat. This never implies a move/attack permission.
+  const activeTurnRivalProximity = verifiedActiveTurnRivalProximity(publicPlayers);
   // #146: the technical card IDs are already in the same public .NET
   // character assignment. Show them only after the #141/#145 checks.
   const publicCharacterRoster = verifiedPublicCharacterRoster(publicPlayers);
@@ -349,6 +353,22 @@ export default function App() {
                           className="text-muted-foreground">
                           {t(publicFreeMoveUsage.get(marker.playerId)
                             ? "city.publicFreeMoveUsed" : "city.publicFreeMoveNotUsed")}
+                        </span>
+                      )}
+                      {activeTurnRivalProximity.has(marker.playerId) && (
+                        <span
+                          data-testid={`match-active-rival-steps-${marker.playerId}`}
+                          data-from-player-id={activeTurnRivalProximity.get(marker.playerId)?.fromPlayerId}
+                          data-from-street-id={activeTurnRivalProximity.get(marker.playerId)?.fromStreetId}
+                          data-to-street-id={activeTurnRivalProximity.get(marker.playerId)?.toStreetId}
+                          data-street-steps={activeTurnRivalProximity.get(marker.playerId)?.streetSteps}
+                          data-street-path={activeTurnRivalProximity.get(marker.playerId)?.streetPath.join(",")}
+                          className="text-muted-foreground"
+                        >
+                          {t("city.activeTurnRivalProximity", {
+                            player: activeTurnRivalProximity.get(marker.playerId)?.fromPlayerId,
+                            steps: activeTurnRivalProximity.get(marker.playerId)?.streetSteps,
+                          })}
                         </span>
                       )}
                       {publicCharacterHearts.has(marker.playerId) && (

@@ -89,8 +89,22 @@ for (const count of [2, 4, 8] as const) {
       const output = await page.evaluate(async inputs => {
         const { verifiedPublicUncontrolledBoardActivities: verify } =
           await import("/src/features/city/publicUncontrolledBoardActivities.ts");
+        const { selectVerifiedPublicUncontrolledActivities: select } =
+          await import("/src/features/city/publicUncontrolledActivityFilters.ts");
         return {
           valid: verify(inputs.state),
+          filtered: {
+            all: select(inputs.state, { streetId: "", category: "" }),
+            street: select(inputs.state, { streetId: "gauss", category: "" }),
+            category: select(inputs.state, { streetId: "", category: "sport" }),
+            combined: select(inputs.state, { streetId: "gauss", category: "sport" }),
+            invalidPrefs: select(inputs.state, {
+              streetId: "outer-space", category: "nonexistent",
+            }),
+            invalidBoard: select(inputs.malformed.duplicateCardId, {
+              streetId: "gauss", category: "",
+            }),
+          },
           pending: verify(inputs.afterSettlement),
           invalid: Object.entries(inputs.malformed).map(([id, altered]) =>
             [id, verify(altered).length]),
@@ -111,6 +125,24 @@ for (const count of [2, 4, 8] as const) {
         return slots.map(slot => slotById(slot)?.streetId ?? null);
       }, slots149.slice(count));
       expect(output.valid.map(card => card.streetId)).toEqual(streets);
+      // #150: always filter AFTER the same full-board #149 verification.
+      expect(output.filtered.all.visible).toEqual(output.valid);
+      expect(output.filtered.all.totalCount).toBe(30 - count);
+      expect(output.filtered.street.visible).toEqual(
+        output.valid.filter(x => x.streetId === "gauss"));
+      expect(output.filtered.street.streetId).toBe("gauss");
+      expect(output.filtered.category.visible).toEqual(
+        output.valid.filter(x => x.category === "sport"));
+      expect(output.filtered.category.category).toBe("sport");
+      expect(output.filtered.combined.visible).toEqual([]);
+      expect(output.filtered.combined.visibleCount).toBe(0);
+      expect(output.filtered.combined.totalCount).toBe(30 - count);
+      expect(output.filtered.invalidPrefs.streetId).toBe("");
+      expect(output.filtered.invalidPrefs.category).toBe("");
+      expect(output.filtered.invalidPrefs.visible).toEqual(output.valid);
+      expect(output.filtered.invalidBoard.all).toEqual([]);
+      expect(output.filtered.invalidBoard.visible).toEqual([]);
+      expect(output.filtered.invalidBoard.totalCount).toBe(0);
       expect(output.pending).toEqual(output.valid);
       expect(output.invalid).toEqual(
         Object.keys(malformed).map(id => [id, 0]));

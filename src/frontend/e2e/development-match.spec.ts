@@ -7179,6 +7179,39 @@ for (const count of [2, 8] as const) {
         await expect(page.getByTestId("public-free-filter-empty")).toHaveCount(0);
         await expect(page.getByTestId("public-free-activity-B-02")).toBeVisible();
         await expect(page.getByTestId("public-free-activity-B-03")).toBeVisible();
+        // #151: street count quick-scout must clear the other facet rather
+        // than accidentally showing an unrelated category subset.
+        const streetCounts = page.getByTestId("public-free-street-distribution");
+        const streetButtons = streetCounts.locator('button[data-testid^="public-free-street-count-"]');
+        await expect(streetButtons).toHaveCount(7);
+        const expectedStreetCounts = [
+          ["gauss", 7], ["einstein", 7], ["newton", 3], ["planck", 3],
+          ["boson", 4], ["meson", 4], ["main-square", 0],
+        ] as const;
+        for (let index = 0; index < expectedStreetCounts.length; index++) {
+          const [street, total] = expectedStreetCounts[index];
+          await expect(streetButtons.nth(index)).toHaveAttribute(
+            "data-street-id", street);
+          await expect(streetButtons.nth(index)).toHaveAttribute(
+            "data-free-count", String(total));
+        }
+        await page.getByTestId("public-free-street-count-gauss").click();
+        await expect(streetFilter).toHaveValue("gauss");
+        await expect(categoryFilter).toHaveValue("");
+        await expect(list.locator("li")).toHaveCount(7);
+        await expect(countText).toHaveAttribute("data-total-count", "28");
+        await page.getByTestId("public-free-street-count-main-square").click();
+        await expect(streetFilter).toHaveValue("main-square");
+        await expect(list.locator("li")).toHaveCount(0);
+        await expect(page.getByTestId("public-free-filter-empty")).toBeVisible();
+        await expect(page.getByTestId("public-free-street-count-main-square"))
+          .toHaveAttribute("aria-label",
+            "Mostra 0 attività pubbliche non controllate sulla strada Main Square");
+        await page.getByTestId("public-free-street-count-boson").click();
+        await expect(streetFilter).toHaveValue("boson");
+        await expect(list.locator("li")).toHaveCount(4);
+        await streetFilter.selectOption("");
+        await expect(list.locator("li")).toHaveCount(28);
         await categoryFilter.selectOption("");
         await expect(list.locator("li")).toHaveCount(28);
         expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
@@ -7192,6 +7225,11 @@ for (const count of [2, 8] as const) {
           await expect(page.getByText("Filter by category", { exact: true })).toBeVisible();
           await expect(page.getByTestId("public-free-filter-count"))
             .toHaveText("28 of 28 free public activities visible");
+          await expect(page.getByTestId("public-free-street-distribution"))
+            .toContainText("Free public activities by street");
+          await expect(page.getByTestId("public-free-street-count-gauss"))
+            .toHaveAttribute("aria-label",
+              "Show 7 uncontrolled public activities on Gauss Avenue");
           await expect(page.getByTestId("match-inspect-free-activity-N-02"))
             .toHaveAttribute("aria-label",
               "Inspect uncontrolled activity at lot N-02 on Gauss Avenue");

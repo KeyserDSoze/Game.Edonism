@@ -93,3 +93,44 @@ export function verifiedPublicCharacterHearts(value: unknown): ReadonlyMap<strin
   // a partial list that misrepresents a rival's publicly printed hearts.
   return seenSeats.size === publicHearts.size ? publicHearts : empty();
 }
+
+
+/**
+ * #146: character identity and starting-activity IDs are ALREADY public
+ * attributes of the server's assignedCharacters snapshot. Show them for
+ * PvP scouting only when the entire public heart/origin provenance passes
+ * #141/#145. This NEVER returns a private card hand, power or faction.
+ */
+export type VerifiedPublicCharacterCard = Readonly<{
+  characterId: string;
+  startingActivityCardId: string;
+  printedInitialHearts: number;
+}>;
+
+export function verifiedPublicCharacterRoster(
+  value: unknown,
+): ReadonlyMap<string, VerifiedPublicCharacterCard> {
+  const empty = () => new Map<string, VerifiedPublicCharacterCard>();
+  const verifiedHearts = verifiedPublicCharacterHearts(value);
+  if (verifiedHearts.size === 0 || !isRecord(value)
+    || !Array.isArray(value.assignedCharacters)) return empty();
+
+  const cards = new Map<string, VerifiedPublicCharacterCard>();
+  for (const item of value.assignedCharacters) {
+    // The provenance verifier above guarantees these conditions; recheck
+    // when projecting rather than letting an unexpected payload throw.
+    if (!isRecord(item) || typeof item.playerId !== "string"
+      || !verifiedHearts.has(item.playerId)
+      || typeof item.characterId !== "string" || !item.characterId.trim()
+      || typeof item.startingActivityCardId !== "string"
+      || !item.startingActivityCardId.trim()
+      || cards.has(item.playerId)) return empty();
+
+    cards.set(item.playerId, {
+      characterId: item.characterId,
+      startingActivityCardId: item.startingActivityCardId,
+      printedInitialHearts: verifiedHearts.get(item.playerId)!,
+    });
+  }
+  return cards.size === verifiedHearts.size ? cards : empty();
+}

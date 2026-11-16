@@ -64,11 +64,25 @@ for (const count of [2, 4, 8] as const) {
         }),
         fractionalHearts: tamper(s => { s.players[0].hearts = 2.5; }),
         zeroHearts: tamper(s => { s.players[0].hearts = 0; }),
+        negativeHearts: tamper(s => { s.players[0].hearts = -1; }),
+        abovePrintedMax: tamper(s => { s.players[0].hearts = 6; }),
+        booleanHearts: tamper(s => {
+          s.players[0].hearts = true as unknown as number;
+        }),
         nonNumericHearts: tamper(s => {
           s.players[0].hearts = "3" as unknown as number;
         }),
+        mixedLegacy: tamper(s => {
+          s.players[0].hearts = null as unknown as number;
+          s.assignedCharacters.pop();
+        }),
+        nullPlayer: tamper(s => {
+          s.players[0] = null as unknown as typeof s.players[0];
+        }),
         duplicatePlayer: tamper(s => { s.players[1].playerId = "alice"; }),
         reservedSeat: tamper(s => { s.players[0].playerId = "system"; }),
+        trailingSpaceSeat: tamper(s => { s.players[0].playerId = "alice "; }),
+        unicodeBidiSeat: tamper(s => { s.players[0].playerId = "alice\\u202e"; }),
         foreignStreet: tamper(s => { s.players[0].streetId = "fake-road"; }),
         tooSmall: { players: roster.slice(0, 1), assignedCharacters: assignedCharacters.slice(0, 1) },
         missingAssignments: { players: roster },

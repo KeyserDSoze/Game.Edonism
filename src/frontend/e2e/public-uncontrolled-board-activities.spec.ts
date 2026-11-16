@@ -91,8 +91,14 @@ for (const count of [2, 4, 8] as const) {
           await import("/src/features/city/publicUncontrolledBoardActivities.ts");
         const { selectVerifiedPublicUncontrolledActivities: select } =
           await import("/src/features/city/publicUncontrolledActivityFilters.ts");
+        const { verifiedPublicFreeActivityStreetDistribution: distribute } =
+          await import("/src/features/city/publicFreeActivityStreetDistribution.ts");
         return {
           valid: verify(inputs.state),
+          distribution: distribute(inputs.state),
+          pendingDistribution: distribute(inputs.afterSettlement),
+          invalidDistributions: Object.entries(inputs.malformed).map(([id, altered]) =>
+            [id, distribute(altered).length]),
           filtered: {
             all: select(inputs.state, { streetId: "", category: "" }),
             street: select(inputs.state, { streetId: "gauss", category: "" }),
@@ -112,6 +118,29 @@ for (const count of [2, 4, 8] as const) {
           undefinedInput: verify(undefined).length,
         };
       }, { state, afterSettlement, malformed });
+      // #151: every printed street, including an entirely controlled street
+      // with ZERO free lots in eight-seat fixture, must be in canonical order.
+      const printedStreets = await page.evaluate(async () => {
+        const { cityBoard } = await import("/src/features/city/board.ts");
+        return cityBoard.streets.map(street => ({
+          streetId: street.id, streetName: street.name,
+        }));
+      });
+      expect(output.distribution).toHaveLength(7);
+      expect(output.distribution.map(({ streetId, streetName }) => ({
+        streetId, streetName,
+      }))).toEqual(printedStreets);
+      expect(output.distribution.reduce((sum, street) => sum + street.count, 0))
+        .toBe(30 - count);
+      for (const street of output.distribution)
+        expect(street.count).toBe(
+          output.valid.filter(card => card.streetId === street.streetId).length);
+      if (count === 8)
+        expect(output.distribution.find(x => x.streetId === "gauss")?.count)
+          .toBe(0);
+      expect(output.pendingDistribution).toEqual(output.distribution);
+      expect(output.invalidDistributions).toEqual(
+        Object.keys(malformed).map(id => [id, 0]));
       expect(output.valid).toHaveLength(30 - count);
       expect(output.valid.map(card => card.slotId)).toEqual(slots149.slice(count));
       expect(output.valid.map(card => card.cardId)).toEqual(

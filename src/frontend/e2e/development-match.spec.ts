@@ -6969,7 +6969,8 @@ for (const count of [2, 8] as const) {
         await page.getByTestId("dev-seat-bob").click();
         await page.getByTestId("dev-end-turn").click();
         await expect(page.getByTestId("dev-revision")).toHaveText("2");
-        await expect(page.getByTestId("dev-active-player")).toContainText("In attesa");
+        await expect(page.getByTestId("dev-active-player"))
+          .toHaveText("Waiting for round-settlement rules");
         for (const id of demoSeats.slice(0, count))
           await expect(page.getByTestId(`match-active-rival-steps-${id}`))
             .toHaveCount(0);

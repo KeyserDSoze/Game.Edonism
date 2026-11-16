@@ -151,3 +151,84 @@ test("#105: malformed public quote projections never throw or display gross valu
   expect(results).toHaveLength(12);
   for (const result of results) expect(result).toEqual([]);
 });
+
+// #140: a forged UNCONTROLLED card previously escaped the salary view even
+// though #111 correctly hid the board card count. Test the REAL coupled
+// guard path through Vite; no client economy is recreated in this fixture.
+for (const count of [2, 4, 8] as const) {
+  test(`#140: ${count}-seat full-board card integrity gates all public economic views`,
+    async ({ page }) => {
+      const sample = fixture(count);
+      const baseline = {
+        ...sample,
+        players: sample.players.map(p => ({
+          ...p, atoms: 4, diplomacyTokens: 2,
+          henchmenTotal: 16, henchmenAvailable: 15,
+        })),
+      };
+      // N-08 is canonical and intentionally does not belong to any
+      // controlled owner in this 2/4/8-seat synthetic snapshot.
+      const good = structuredClone(baseline);
+      good.boardActivities.push({
+        slotId: "N-08", cardId: "synthetic:uncontrolled:valid", category: "culture",
+      });
+      const tamper = (mutate: (s: typeof good) => void) => {
+        const next = structuredClone(good);
+        mutate(next);
+        return next;
+      };
+      const invalid = {
+        duplicateUncontrolled: tamper(s => {
+          s.boardActivities.push({ ...s.boardActivities[s.boardActivities.length - 1] });
+        }),
+        foreignUncontrolled: tamper(s => {
+          s.boardActivities[s.boardActivities.length - 1].slotId = "not-printed";
+        }),
+        malformedUncontrolledCategory: tamper(s => {
+          s.boardActivities[s.boardActivities.length - 1].category = 42 as unknown as string;
+        }),
+        malformedUncontrolledId: tamper(s => {
+          s.boardActivities[s.boardActivities.length - 1].cardId = null as unknown as string;
+        }),
+        noncanonicalUncontrolledSlotType: tamper(s => {
+          s.boardActivities[s.boardActivities.length - 1].slotId = 3 as unknown as string;
+        }),
+      };
+      const before = JSON.stringify({ good, invalid });
+      await page.goto("/");
+      const result = await page.evaluate(async ({ good, invalid }) => {
+        const m = await import("/src/features/city/activityMarkers.ts");
+        const { verifiedPublicSeatEconomy } =
+          await import("/src/features/city/publicSeatEconomy.ts");
+        const { verifiedPublicSeatResources } =
+          await import("/src/features/city/publicSeatResources.ts");
+        const summary = (s: typeof good) => ({
+          cards: m.verifiedPublicBoardCardCount(s),
+          salary: m.publicGrossSalaryQuotes(s),
+          economy: verifiedPublicSeatEconomy(s).size,
+          resources: verifiedPublicSeatResources(s).size,
+          independentControlled: m.controlledLotMarkers(s).length,
+        });
+        return {
+          valid: summary(good),
+          forged: Object.fromEntries(Object.entries(invalid)
+            .map(([key, item]) => [key, summary(item)])),
+        };
+      }, { good, invalid });
+      expect(result.valid.cards).toBe(count + 1);
+      expect(result.valid.salary).toEqual(good.grossSalaryQuotes);
+      expect(result.valid.economy).toBe(count);
+      expect(result.valid.resources).toBe(count);
+      expect(result.valid.independentControlled).toBe(count);
+      for (const [name, forged] of Object.entries(result.forged)) {
+        expect(forged.cards, name).toBeNull();
+        expect(forged.salary, name).toEqual([]);
+        expect(forged.economy, name).toBe(0);
+        expect(forged.resources, name).toBe(0);
+        // Correctly verified controlled markers are independent; an
+        // unrelated malformed board slot MUST NOT erase these markers.
+        expect(forged.independentControlled, name).toBe(count);
+      }
+      expect(JSON.stringify({ good, invalid })).toBe(before);
+    });
+}

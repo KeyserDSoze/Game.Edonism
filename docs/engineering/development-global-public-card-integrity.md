@@ -1,0 +1,60 @@
+# Fail-closed gross/resource scouting on forged uncontrolled board cards (#140)
+
+## Demonstrated discrepancy
+
+`verifiedPublicBoardCardCount` (#111) verifies the **complete**
+`boardActivities` list against the one printed canonical 30-slot board:
+unique real slot IDs, nonempty string card IDs and categories and valid
+record shape. It returns `null` on any duplicate, foreign or malformed
+board card, including a card in an otherwise uncontrolled printed lot.
+
+Previously `publicGrossSalaryQuotes` (#105/#107) independently accepted
+quote arithmetic and the subset of printed cards associated with public
+`controlledActivities`, by calling `controlledLotMarkers`. Uncontrolled
+cards were not included in that per-owner check. A forged extra/duplicate
+card on a free/uncontrolled lot could therefore leave verified-looking
+salary rows (#105), per-player economy (#138) and resources (#139) visible
+while the board-card count badge correctly disappeared.
+
+## Resolution
+
+Reuse `verifiedPublicBoardCardCount(state)` *inside*
+`publicGrossSalaryQuotes(state)` after basic array checks. Any `null`
+makes the gross quote projection return `[]` — transitively hiding
+both #138 and #139 read-only summaries because they depend on the same
+complete verified gross quote set. Valid **uncontrolled** cards still
+succeed: for a real synthetic full-deck .NET Development match, the
+server places 30 printed cards on 30 canonical slots, of which 28 are
+uncontrolled for 2 seats or 22 for 8 seats. Salary gross quotes remain
+the original server data, not a new browser calculation.
+
+Keep `hasValidDevelopmentPublicEnvelope` intentionally narrow:
+malformed view-only card payloads must **not** revoke a bearer, clear a
+private hand, prevent a valid turn or erase independently verified
+controlled markers/pawns. The Domain `.NET 10 GrossSalaryRules`
+remains sole authority for the gross pre-tax 2+upright controlled lot
+quote and no salaries are credited in first-round Development.
+No new endpoints, Production routes, client action rules or secrets.
+
+## Regression coverage
+
+- xUnit 2/4/8 with actual .NET `GameMatch` character/catalog setup,
+  30 unique canonical publicly placed cards and genuine uncontrolled
+  cards: no board, quote or wallet mutations after move/end turn.
+- Actual Vite Playwright 2/4/8: legitimate extra unowned card preserves
+  count, gross quote, economy and resources; duplicate, foreign, bad
+  category/card/slot type at *only* unowned printed lot hide all
+  financial summaries and board count without erasing valid controlled
+  markers. Verify input immutability.
+- Full React mocked Playwright 2/8 on true rendered city: legitimate
+  extra unowned card preserves 3-card count and rows; bad card hides
+  card count, quote, public economy and resources for all seats but
+  retains legal turn, pawn inspection and real controlled markers.
+  Narrow screen/no-WebGL and IT/EN included.
+- Real browser + actual .NET API full-deck 2/8: 30 unique printed
+  slots; 28/22 unowned and all true public summaries shown; move
+  cannot mutate board slots/quotes or unexpectedly suppress display.
+
+[GitHub #140](https://github.com/KeyserDSoze/Game.Edonism/issues/140).
+Issue-first. Direct `main` commits. Close only after all three
+GitHub Actions jobs are green on **exact final main HEAD**.

@@ -57,3 +57,24 @@ Each player row has a readable IT/EN accessible text and stable
 Issue [#138](https://github.com/KeyserDSoze/Game.Edonism/issues/138).
 0.0.2 Development only, direct `main`; close after all 3 GitHub CI
 jobs pass on the exact final HEAD.
+
+## #140 — Global unowned-card consistency gate
+
+The initial `#138` documentation was too broad when it implied all
+board cards were checked by `controlledLotMarkers`: that helper validates
+cards **associated with controlled lots**, but could ignore duplicate,
+foreign or malformed cards on otherwise uncontrolled slots. The existing
+`verifiedPublicBoardCardCount` (#111) already rejects these bad cards
+in the **complete** board-card list, while hiding the UI count badge.
+
+The #140 correction **composes** that existing global check inside
+`publicGrossSalaryQuotes`: on `null` (unverified card list), return
+`[]`, which automatically hides both #138 public economic summaries and
+#139 public resources. A legitimate uncontrolled card (or all 30 real
+full-deck cards) continues to produce the existing gross quotes, and
+renderable controlled-lot markers and pawn/turn status remain independent.
+This checks consistency of public transport data, not player-wallet
+income or game/legal action semantics.
+
+Validation/test details and exact release gate:
+[issue #140](https://github.com/KeyserDSoze/Game.Edonism/issues/140).

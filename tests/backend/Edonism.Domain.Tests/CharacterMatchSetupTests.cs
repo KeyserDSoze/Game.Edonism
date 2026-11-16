@@ -6,6 +6,48 @@ namespace Edonism.Domain.Tests;
 
 public sealed class CharacterMatchSetupTests
 {
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void PublicFullDeckContainsThirtyCanonicalDistinctLotsIncludingUncontrolledCards(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = GameMatch.CreateFromTrustedCharacterCatalog(
+            Guid.NewGuid(), board,
+            Enumerable.Range(0, count).Select(i => $"player-{i}").ToArray(),
+            CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(), 140 + count);
+        var before = match.Snapshot();
+        Assert.Equal(30, before.BoardActivities.Count);
+        Assert.Equal(30, before.BoardActivities.Select(card => card.SlotId)
+            .Distinct(StringComparer.Ordinal).Count());
+        var canonical = board.Slots.Select(slot => slot.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.All(before.BoardActivities, card =>
+        {
+            Assert.Contains(card.SlotId, canonical);
+            Assert.False(string.IsNullOrWhiteSpace(card.CardId));
+            Assert.False(string.IsNullOrWhiteSpace(card.Category));
+        });
+        Assert.Equal(count, before.ControlledActivities.Count);
+        Assert.Equal(30 - count, before.BoardActivities.Count(card =>
+            !before.ControlledActivities.Any(lot => lot.SlotId == card.SlotId)));
+        Assert.Equal(count, before.GrossSalaryQuotes.Count);
+        Assert.All(before.GrossSalaryQuotes, quote => Assert.Equal(3, quote.GrossAtoms));
+
+        var actor = before.Players[0];
+        var next = board.Streets.Single(s => s.Id == actor.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(actor.PlayerId, next, before.Revision).Accepted);
+        Assert.True(match.TryEndTurn(actor.PlayerId, match.Revision).Accepted);
+        var after = match.Snapshot();
+        Assert.Equal(before.BoardActivities, after.BoardActivities);
+        Assert.Equal(before.ControlledActivities, after.ControlledActivities);
+        Assert.Equal(before.GrossSalaryQuotes, after.GrossSalaryQuotes);
+        Assert.Equal(before.Players.Select(p => p.Atoms),
+            after.Players.Select(p => p.Atoms));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
     [Fact]
     public void DrawnCharacterDeterminesStartingLotStreetAndPublicHearts()
     {

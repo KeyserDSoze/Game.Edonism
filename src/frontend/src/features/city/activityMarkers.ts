@@ -141,6 +141,14 @@ export function publicGrossSalaryQuotes(state: PublicMatchSceneState): PublicGro
       || !Array.isArray(state.controlledActivities)
       || !Array.isArray(state.grossSalaryQuotes)) return [];
 
+    // #140: check ALL printed board-card slots, including unowned lots.
+    // controlledLotMarkers only inspects cards linked to occupied controls,
+    // so a duplicate/foreign/malformed UNCONTROLLED card could otherwise
+    // leave apparently verified salary, economy and resources visible while
+    // the separate #111 board count rightly disappeared. Reuse the SAME
+    // entire-board transport validator, without implementing game rules.
+    if (verifiedPublicBoardCardCount(state) === null) return [];
+
     const knownOwners = new Set<string>();
     for (const player of state.players) {
       if (!player || typeof player.playerId !== "string"

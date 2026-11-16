@@ -97,6 +97,11 @@ async function startRealMatch(page: Page): Promise<CreatedMatch> {
   await expect(page.getByTestId("match-activity-roster")).toBeVisible();
   expect(match.state.boardActivities).toHaveLength(30);
   expect(match.state.controlledActivities).toHaveLength(2);
+  // #140: actual server full-deck contains many UNCONTROLLED cards;
+  // their printed lots are unique and do not invalidate financial views.
+  expect(new Set(match.state.boardActivities.map(a => a.slotId)).size).toBe(30);
+  expect(match.state.boardActivities.filter(a =>
+    !match.state.controlledActivities.some(l => l.slotId === a.slotId))).toHaveLength(28);
   await expect(page.getByTestId("match-board-card-count")).toContainText("30");
   for (const control of match.state.controlledActivities) {
     const lot = page.getByTestId(`controlled-lot-${control.slotId}`);
@@ -329,6 +334,11 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   await expect(page.getByTestId("match-player-alice"))
     .toHaveAttribute("data-street-id", aliceDestination);
   expect(afterMove.players[0].freeMoveUsed).toBe(true);
+  // #140: a real legal movement cannot forge board-wide unowned cards,
+  // alter the 30 canonical printed slots or suppress a legitimate quote.
+  expect(afterMove.boardActivities).toEqual(created.state.boardActivities);
+  expect(new Set(afterMove.boardActivities.map(a => a.slotId)).size).toBe(30);
+  await expect(page.getByTestId("match-board-card-count")).toContainText("30");
   // #139: the real server movement cannot spend/credit player resources;
   // every city display must retain the same authoritative counts.
   for (const seat of afterMove.players) {
@@ -721,6 +731,12 @@ test("real .NET eight-seat match supports private join and all sequential turns"
   expect(created.credentials.map((p) => p.playerId)).toEqual(seatIds);
   expect(created.state.boardActivities).toHaveLength(30);
   expect(created.state.controlledActivities).toHaveLength(8);
+  // #140: 22 cards are deliberately UNCONTROLLED; legitimate complete
+  // 30-card board keeps wages/scouting/resources visible to all eight seats.
+  expect(new Set(created.state.boardActivities.map(a => a.slotId)).size).toBe(30);
+  expect(created.state.boardActivities.filter(a =>
+    !created.state.controlledActivities.some(l => l.slotId === a.slotId))).toHaveLength(22);
+  await expect(page.getByTestId("match-board-card-count")).toContainText("30");
   expect(created.state.assignedCharacters).toHaveLength(8);
   expect(created.state.grossSalaryQuotes).toHaveLength(8);
   await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(8);

@@ -57,6 +57,7 @@ type MockOptions = {
   invalidGrossQuote?: boolean; // #105: forged public total, never server wallet state.
   missingGrossQuote?: boolean; // #107: a forged incomplete public quote set.
   malformedReserve?: boolean; // #139: public henchmen reserve contradicts owned lots.
+  unownedBoardCard?: "valid" | "duplicate" | "foreign" | "bad-category" | "bad-id"; // #140: untouched controlled cards.
   forgedHigherRevisionSnapshot?: boolean; // #112: corrupt first public poll, never a real command.
   forgedNullAuditEventSnapshot?: boolean; // #113: corrupt first poll with events:[null].
   forgedForeignAuditStreetOnce?: boolean; // #125: plausible public 200 with foreign audit road.
@@ -229,6 +230,21 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         ? []
         : [{ slotId: bobLotSlot, cardId: options.malformedPublicCardId
           ? (42 as unknown as string) : "demo:activity:einstein", category: "transport" }]),
+      // #140: all these extras occupy only an UNCONTROLLED lot, so every
+      // previous controlledLotMarkers() still succeeds. Two N-08 cards,
+      // a foreign slot or bad metadata must invalidate board totals AND
+      // all finance/resource views without disabling valid game commands.
+      ...(options.unownedBoardCard === "duplicate" ? [
+        { slotId: "N-08", cardId: "demo:unowned:a", category: "culture" },
+        { slotId: "N-08", cardId: "demo:unowned:b", category: "culture" },
+      ] : options.unownedBoardCard ? [
+        { slotId: options.unownedBoardCard === "foreign"
+            ? "not-printed" : "N-08",
+          cardId: options.unownedBoardCard === "bad-id"
+            ? 42 as unknown as string : "demo:unowned:valid",
+          category: options.unownedBoardCard === "bad-category"
+            ? 42 as unknown as string : "culture" },
+      ] : []),
     ],
     controlledActivities: [
       { slotId: "N-01", ownerPlayerId: "alice", posture: 0 },
@@ -6500,4 +6516,63 @@ for (const malformed of [false, true] as const) {
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
     });
+}
+
+// #140: an invalid card on an UNCONTROLLED lot hides the complete economic
+// readouts, but must NOT suppress a genuine game turn or public pawn/lot.
+// In the valid case the extra unowned card is harmless to finance views.
+for (const count of [2, 8] as const) {
+  for (const extra of ["valid", "duplicate", "foreign", "bad-category", "bad-id"] as const) {
+    test(`#140: ${count}-seat unowned-card=${extra} keeps only verified economic data`,
+      async ({ page }) => {
+        if (count === 2) {
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.addInitScript(() => {
+            const original = HTMLCanvasElement.prototype.getContext;
+            HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+              if (kind === "webgl" || kind === "webgl2"
+                || kind === "experimental-webgl") return null;
+              return Reflect.apply(original, this, [kind, ...args]);
+            };
+          });
+        }
+        const { observedHeaders } = await mockMatchApi(page,
+          { playerCount: count, unownedBoardCard: extra });
+        await page.goto("/");
+        await page.getByTestId("dev-player-count").selectOption(String(count));
+        await page.getByTestId("dev-create").click();
+        await expect(page.getByTestId("match-player-legend").locator("li"))
+          .toHaveCount(count);
+        await expect(page.getByTestId("controlled-lot-N-01")).toBeVisible();
+        await expect(page.getByTestId("controlled-lot-S-01")).toBeVisible();
+        await expect(page.getByTestId("dev-revision")).toHaveText("0");
+        await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+        const trustworthy = extra === "valid";
+        await expect(page.getByTestId("match-board-card-count"))
+          .toHaveCount(trustworthy ? 1 : 0);
+        if (trustworthy) {
+          await expect(page.getByTestId("match-board-card-count"))
+            .toContainText("3");
+        }
+        for (const actor of demoSeats.slice(0, count)) {
+          await expect(page.getByTestId(`gross-salary-${actor}`))
+            .toHaveCount(trustworthy ? 1 : 0);
+          await expect(page.getByTestId(`match-player-economy-${actor}`))
+            .toHaveCount(trustworthy ? 1 : 0);
+          await expect(page.getByTestId(`match-player-resources-${actor}`))
+            .toHaveCount(trustworthy ? 1 : 0);
+          await expect(page.getByTestId(`match-inspect-street-${actor}`))
+            .toHaveCount(1);
+        }
+        expect(observedHeaders.filter(h =>
+          /\/(free-move|end-turn)$/.test(h.path))).toHaveLength(0);
+        if (count === 2 && extra === "valid") {
+          await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+          await expect(page.getByTestId("match-player-economy-alice"))
+            .toContainText("gross quote:");
+          await expect(page.getByTestId("match-player-resources-alice"))
+            .toContainText("Current atoms:");
+        }
+      });
+  }
 }

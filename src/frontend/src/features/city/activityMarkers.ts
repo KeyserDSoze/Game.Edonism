@@ -124,7 +124,7 @@ export function controlledLotMarkers(state: PublicMatchSceneState): ControlledLo
  * partial Development fixtures (0–29 cards) are not full-deck claims.
  * Never use these UI checks to select cards, move pawns or pay salary.
  */
-const printedActivityCategoryQuotas = new Map<string, number>([
+export const printedActivityCategoryQuotas: ReadonlyMap<string, number> = new Map<string, number>([
   ["public-financing", 5],
   ["private-financing", 5],
   ["black-market", 4],

@@ -256,7 +256,66 @@ for (const count of [2, 4, 8] as const) {
         const { cityBoard } = await import("/src/features/city/board.ts");
         const { verifiedPublicTerritoryFootprints: footprints } =
           await import("/src/features/city/publicTerritoryFootprints.ts");
+        const {
+          verifiedPublicDevelopmentSeatRoster: validRoster,
+          verifiedPublicUncontrolledBoardActivities: freeAtlas,
+        } = await import("/src/features/city/publicUncontrolledBoardActivities.ts");
+
+        // #155: 30/30 valid ownership means zero unowned activities. A
+        // malicious source can also return [] after rejecting the seat.
+        // Spoof BOTH roster and owners to reproduce the real ambiguous case.
+        const impersonate = (id: string) => {
+          const forged = structuredClone(args.allOwned);
+          forged.players[0].playerId = id;
+          forged.activePlayerId = id;
+          for (const control of forged.controlledActivities)
+            if (control.ownerPlayerId === "alice") control.ownerPlayerId = id;
+          return forged;
+        };
+        const maliciousIds = [
+          "system", " alice", "alice ", "alice\nother",
+          "alice\u202Eother", "alice\u200Bother",
+          "A".repeat(65), String.fromCharCode(0xd800),
+        ];
+        const allOwnedForgeries = maliciousIds.map(id => {
+          const forged = impersonate(id);
+          return {
+            rosterAccepted: validRoster(forged),
+            roads: verify(forged).length,
+            footprints: footprints(forged).length,
+            free: freeAtlas(forged).length,
+          };
+        });
+        const ghostActive = structuredClone(args.allOwned);
+        ghostActive.activePlayerId = "ghost";
+        const missingActive = { ...args.allOwned, activePlayerId: undefined };
+        const reservedActiveWithFree = {
+          ...args.snapshot, activePlayerId: "system",
+        };
+        const caseSensitiveValid = impersonate("System");
         return {
+          allOwnedForgeries,
+          ghostActive: {
+            roads: verify(ghostActive).length,
+            footprints: footprints(ghostActive).length,
+          },
+          missingActive: {
+            roads: verify(missingActive).length,
+            footprints: footprints(missingActive).length,
+          },
+          reservedActiveWithFree: {
+            roads: verify(reservedActiveWithFree).length,
+            footprints: footprints(reservedActiveWithFree).length,
+            free: freeAtlas(reservedActiveWithFree).length,
+          },
+          validSystemCased: {
+            roads: verify(caseSensitiveValid).length,
+            footprints: footprints(caseSensitiveValid).length,
+            free: freeAtlas(caseSensitiveValid).length,
+            rosterAccepted: validRoster(caseSensitiveValid),
+          },
+          validAllOwnedRoster: validRoster(args.allOwned),
+          validSettledRoster: validRoster(args.settlement),
           rows: verify(args.snapshot),
           standings: footprints(args.snapshot),
           standingsSettled: footprints(args.settlement),
@@ -315,6 +374,28 @@ for (const count of [2, 4, 8] as const) {
       expect(data.allOwned).toHaveLength(7);
       expect(data.allOwned.every(x => x.freeLots === 0)).toBe(true);
       expect(data.allOwned.reduce((sum, x) => sum + x.controlledLots, 0)).toBe(30);
+      // #155: reserved genesis actor, malformed/oversized/bidi IDs and
+      // ghost/missing active actor must fail CLOSED even if no free lots
+      // remain and every occupied slot appears otherwise legitimate.
+      expect(data.validAllOwnedRoster).toBe(true);
+      expect(data.validSettledRoster).toBe(true);
+      expect(data.allOwnedForgeries).toHaveLength(8);
+      for (const forged of data.allOwnedForgeries) {
+        expect(forged.rosterAccepted).toBe(false);
+        expect(forged.roads).toBe(0);
+        expect(forged.footprints).toBe(0);
+        expect(forged.free).toBe(0);
+      }
+      expect(data.ghostActive).toEqual({ roads: 0, footprints: 0 });
+      expect(data.missingActive).toEqual({ roads: 0, footprints: 0 });
+      expect(data.reservedActiveWithFree).toEqual({
+        roads: 0, footprints: 0, free: 0,
+      });
+      // "system" is reserved EXACT-casing; "System" is a printable,
+      // perfectly legal real technical actor ID under the .NET protocol.
+      expect(data.validSystemCased).toEqual({
+        roads: 7, footprints: count, free: 0, rosterAccepted: true,
+      });
       expect(data.bad).toEqual(Object.keys(invalid).map(id => [id, 0]));
       expect(data.nullInput).toBe(0);
       // #153: public footprint is NOT a victory/win rank. Every 1-lot

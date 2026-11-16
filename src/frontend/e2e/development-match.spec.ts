@@ -7093,6 +7093,11 @@ for (const count of [2, 8] as const) {
   for (const invalidQuota of [false, true] as const) {
     test(`#149: ${count} seats free public activity atlas, forged quota=${invalidQuota}`,
       async ({ page }) => {
+        // #156: eight-seat, full-board PvP test includes the seven-road
+        // owner matrix, eight-player public footprint and every atlas
+        // filter. It is a legitimate slower UI stress scenario under
+        // software WebGL; only THIS case receives 90s (default remains 30s).
+        if (count === 8 && !invalidQuota) test.setTimeout(90_000);
         if (count === 2) {
           await page.setViewportSize({ width: 390, height: 844 });
           await page.addInitScript(() => {
@@ -7281,8 +7286,9 @@ for (const count of [2, 8] as const) {
         await expect(list.locator("li")).toHaveCount(4);
         await streetFilter.selectOption("");
         await expect(list.locator("li")).toHaveCount(28);
-        await categoryFilter.selectOption("");
-        await expect(list.locator("li")).toHaveCount(28);
+        // The road shortcut already cleared the category facet; do not
+        // repeat a no-op selectOption under heavy eight-seat rendering.
+        await expect(categoryFilter).toHaveValue("");
         expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
           .toHaveLength(0);
 

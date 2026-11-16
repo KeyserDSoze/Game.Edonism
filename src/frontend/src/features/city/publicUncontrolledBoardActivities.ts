@@ -23,6 +23,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * #155: Verify EVERY participant against the .NET technical-ID protocol
+ * even if a fully occupied board has no remaining free lots. The 0-free
+ * result is otherwise ambiguous with an invalid/forged public snapshot.
+ */
+export function verifiedPublicDevelopmentSeatRoster(value: unknown): boolean {
+  if (!isRecord(value) || !Array.isArray(value.players)
+    || value.players.length < 2 || value.players.length > 8) return false;
+  const ids = new Set<string>();
+  for (const player of value.players) {
+    if (!isRecord(player)
+      || !isValidDevelopmentTechnicalPlayerId(player.playerId)
+      || ids.has(player.playerId)) return false;
+    ids.add(player.playerId);
+  }
+  // Authoritative .NET snapshots contain the current seat OR a settled null.
+  // Undefined, invented "system", cross-match or ghost owners fail closed.
+  return value.activePlayerId === null
+    || (typeof value.activePlayerId === "string"
+      && ids.has(value.activePlayerId));
+}
+
+/**
  * Full 30-card board only. Reuse the #140–#143 whole-board validation and
  * the existing controlled-lot verifier, so a malformed owner/slot cannot
  * accidentally be shown as "uncontrolled". Partial Development fixtures
@@ -31,19 +53,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function verifiedPublicUncontrolledBoardActivities(
   value: unknown,
 ): readonly PublicUncontrolledBoardActivity[] {
-  if (!isRecord(value) || !Array.isArray(value.players)
-    || value.players.length < 2 || value.players.length > 8
+  if (!verifiedPublicDevelopmentSeatRoster(value)
+    || !isRecord(value)
     || !Array.isArray(value.boardActivities)
     || !Array.isArray(value.controlledActivities))
     return [];
-
-  const seenPlayers = new Set<string>();
-  for (const p of value.players) {
-    if (!isRecord(p)
-      || !isValidDevelopmentTechnicalPlayerId(p.playerId)
-      || seenPlayers.has(p.playerId)) return [];
-    seenPlayers.add(p.playerId);
-  }
 
   const state = value as unknown as PublicMatchSceneState;
   if (playerMarkerPlacements(state.players, state.activePlayerId).length

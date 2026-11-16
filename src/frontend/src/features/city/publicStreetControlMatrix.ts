@@ -1,6 +1,9 @@
 import { cityBoard } from "./board";
 import { controlledLotMarkers, verifiedPublicBoardCardCount, type PublicMatchSceneState } from "./activityMarkers";
-import { verifiedPublicUncontrolledBoardActivities } from "./publicUncontrolledBoardActivities";
+import {
+  verifiedPublicDevelopmentSeatRoster,
+  verifiedPublicUncontrolledBoardActivities,
+} from "./publicUncontrolledBoardActivities";
 import { playerMarkerPlacements } from "./playerMarkers";
 
 /**
@@ -40,7 +43,7 @@ export function verifiedPublicStreetControlMatrix(
   if (!Array.isArray(state.players)
     || !Array.isArray(state.boardActivities)
     || !Array.isArray(state.controlledActivities)
-    || state.players.length < 2 || state.players.length > 8
+    || !verifiedPublicDevelopmentSeatRoster(state)
     || playerMarkerPlacements(state.players, state.activePlayerId).length !== state.players.length
     || verifiedPublicBoardCardCount(state) !== cityBoard.slots.length)
     return [];

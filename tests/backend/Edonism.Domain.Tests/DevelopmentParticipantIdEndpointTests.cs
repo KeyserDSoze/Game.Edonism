@@ -118,6 +118,53 @@ public sealed class DevelopmentParticipantIdEndpointTests
         Assert.Equal(HttpStatusCode.OK, read.StatusCode);
     }
 
+    // #155: even under an 8-seat, full 30-card HTTP creator, the
+    // lower-case genesis actor cannot obtain any private seat credentials.
+    // Case-sensitive printable "System" is a legitimate technical player.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public async Task FullDeckCreatorNeverMintsSystemSeatEvenWithManyPlayers(int count)
+    {
+        using var host = Host();
+        using var client = host.CreateClient();
+        var ids = Enumerable.Range(0, count).Select(i => $"player-{i}").ToArray();
+        ids[0] = "system";
+        object Payload() => new
+        {
+            playerIds = ids,
+            characters = CharacterSetupFixture.Catalog(),
+            availableActivities = ActivitySetupFixture.Catalog(),
+            actionCardIds = ActionDeckFixture.ActionIds(),
+            electionDayCardId = ActionDeckFixture.ElectionDayId,
+            seed = 2026,
+        };
+        using (var denied = await client.PostAsJsonAsync(Path("full"), Payload()))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
+            Assert.Equal("no-store", denied.Headers.CacheControl?.ToString());
+            using var json = await denied.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.NotNull(json);
+            Assert.False(json.RootElement.TryGetProperty("credentials", out _));
+            Assert.False(json.RootElement.TryGetProperty("state", out _));
+        }
+
+        ids[0] = "System";
+        using var accepted = await client.PostAsJsonAsync(Path("full"), Payload());
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+        using var body = await accepted.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert.NotNull(body);
+        Assert.Equal(count, body.RootElement.GetProperty("credentials").GetArrayLength());
+        var publicState = body.RootElement.GetProperty("state");
+        Assert.Equal(count, publicState.GetProperty("players").GetArrayLength());
+        Assert.Equal(30, publicState.GetProperty("boardActivities").GetArrayLength());
+        Assert.Equal("System", publicState.GetProperty("players")[0]
+            .GetProperty("playerId").GetString());
+        Assert.False(publicState.TryGetProperty("credentials", out _));
+        Assert.False(publicState.TryGetProperty("privateDeal", out _));
+    }
+
     [Fact]
     public async Task MaximumLengthUnicodeActorCanStillUseBearerAndMove()
     {

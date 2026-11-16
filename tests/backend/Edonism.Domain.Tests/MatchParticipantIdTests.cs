@@ -128,6 +128,50 @@ public sealed class MatchParticipantIdTests
             [bad, "bob"], 2026));
     }
 
+    // #155: public all-owned clients must never treat a reserved or
+    // unprintable actor as a real technical seat. All authoritative full-deck
+    // creator paths already enforce this even with 2, 4 or 8 participants.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void FullyComposedTwoToEightSeatMatchesNeverAcceptUnsafeActors(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var ids = Enumerable.Range(0, count)
+            .Select(i => $"player-{i}").ToArray();
+        var invalid = new[]
+        {
+            "system", " alice", "alice ", "alice\\nother",
+            "alice\\u202Eevil", "alice\\u200Bghost",
+            new string('A', 65), new string((char)0xD800, 1),
+        };
+        foreach (var bad in invalid)
+        {
+            var forged = ids.ToArray();
+            forged[0] = bad;
+            Assert.Throws<ArgumentException>(() =>
+                GameMatch.CreateFromTrustedFullDeckSetup(
+                    Guid.NewGuid(), board, forged,
+                    CharacterSetupFixture.Catalog(),
+                    ActivitySetupFixture.Catalog(),
+                    ActionDeckFixture.ActionIds(),
+                    ActionDeckFixture.ElectionDayId, 2026));
+        }
+
+        // Protocol IDs are exact-casing: System is a valid real actor,
+        // while lowercase system is the reserved genesis actor.
+        ids[0] = "System";
+        var accepted = GameMatch.CreateFromTrustedFullDeckSetup(
+            Guid.NewGuid(), board, ids,
+            CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(),
+            ActionDeckFixture.ActionIds(), ActionDeckFixture.ElectionDayId, 2026);
+        Assert.Equal(count, accepted.Snapshot().Players.Count);
+        Assert.Equal(30, accepted.Snapshot().BoardActivities.Count);
+        Assert.Equal("System", accepted.Snapshot().Players[0].PlayerId);
+        Assert.True(accepted.VerifyPublicAudit().IsValid);
+    }
+
     [Fact]
     public void IdentityRemainsOrdinalCaseSensitiveAndDuplicateSeatsAreRejected()
     {

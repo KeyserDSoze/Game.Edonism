@@ -200,6 +200,52 @@ function auth(token: string) {
   return { "X-Edonism-Dev-Token": token };
 }
 
+
+// #147: the browser's active-turn street-hop labels must agree EXACTLY
+// with .NET's bearer-protected audited other-player route projection.
+// The extra read does not cause a move, attack or expose hidden action cards.
+async function assertPublicActiveTurnProximityMatchesDotNet(
+  page: Page, created: CreatedMatch, activePlayerId: string,
+) {
+  const endpoint =
+    `http://127.0.0.1:5080/api/dev/matches/${created.matchId}/other-player-routes`;
+  const token = tokenFor(created, activePlayerId);
+  const reply = await page.request.get(endpoint, { headers: auth(token) });
+  expect(reply.status()).toBe(200);
+  expect(reply.headers()["cache-control"]).toContain("no-store");
+  const plan = await reply.json() as {
+    playerId: string;
+    verifiedRevision: number;
+    fromStreetId: string;
+    others: {
+      otherPlayerId: string;
+      streetId: string;
+      streetSteps: number;
+      streetPath: string[];
+    }[];
+  };
+  expect(plan.playerId).toBe(activePlayerId);
+  expect(plan.others).toHaveLength(created.state.players.length - 1);
+  await expect(page.getByTestId("dev-revision"))
+    .toHaveText(String(plan.verifiedRevision));
+  await expect(page.getByTestId(`match-active-rival-steps-${activePlayerId}`))
+    .toHaveCount(0);
+  for (const other of plan.others) {
+    const badge = page.getByTestId(
+      `match-active-rival-steps-${other.otherPlayerId}`);
+    await expect(badge).toHaveAttribute("data-from-player-id", activePlayerId);
+    await expect(badge).toHaveAttribute("data-from-street-id", plan.fromStreetId);
+    await expect(badge).toHaveAttribute("data-to-street-id", other.streetId);
+    await expect(badge).toHaveAttribute("data-street-steps",
+      String(other.streetSteps));
+    await expect(badge).toHaveAttribute("data-street-path",
+      other.streetPath.join(","));
+  }
+  const rosterText = await page.getByTestId("match-player-legend").innerText();
+  expect(rosterText).not.toContain(token);
+  expect(rosterText).not.toContain("demo:action:");
+}
+
 test("real .NET + React: server draws a match, moves two players and stops before settlement", async ({
   page,
   request,
@@ -796,6 +842,10 @@ test("real .NET eight-seat match supports private join and all sequential turns"
   expect(created.state.boardActivities.filter(a =>
     !created.state.controlledActivities.some(l => l.slotId === a.slotId))).toHaveLength(22);
   await expect(page.getByTestId("match-board-card-count")).toContainText("30");
+  // #147: compare every one of seven active-turn rival paths against
+  // the real Domain HTTP projection; no guessed distances or permissions.
+  await assertPublicActiveTurnProximityMatchesDotNet(
+    page, created, created.state.activePlayerId!);
   expect(created.state.assignedCharacters).toHaveLength(8);
   expect(created.state.grossSalaryQuotes).toHaveLength(8);
   // #145: eight authentic assigned character starting cards also match
@@ -3577,3 +3627,37 @@ test("#90: two real .NET browser seats show canonical nearest rival lot and filt
   expect(await auditAfterReply.json()).toEqual(auditBefore);
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
 });
+
+
+test("#147: real .NET active-turn rival distances follow move, turn rotation and settlement",
+  async ({ page }) => {
+    const created = await startRealMatch(page);
+    const alice = created.state.activePlayerId;
+    expect(alice).toBe("alice");
+    await assertPublicActiveTurnProximityMatchesDotNet(page, created, alice!);
+
+    // Use the actual .NET-scoped enabled first-round option. The browser
+    // never decides whether this route is legal from the visual hop count.
+    const legalMove = page.locator(
+      'button[data-testid^="dev-move-"]:not([disabled])').first();
+    await expect(legalMove).toBeVisible();
+    await legalMove.click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await assertPublicActiveTurnProximityMatchesDotNet(page, created, "alice");
+
+    await page.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("2");
+    await expect(page.getByTestId("dev-active-player")).toHaveText("bob");
+    await assertPublicActiveTurnProximityMatchesDotNet(page, created, "bob");
+
+    await page.getByTestId("dev-seat-bob").click();
+    await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+    await page.getByTestId("dev-end-turn").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("3");
+    for (const seat of created.state.players)
+      await expect(page.getByTestId(
+        `match-active-rival-steps-${seat.playerId}`)).toHaveCount(0);
+    await expect(page.getByTestId("match-player-legend").locator("li"))
+      .toHaveCount(2);
+    await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+  });

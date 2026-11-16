@@ -634,6 +634,25 @@ public sealed class DevelopmentMatchStore
     }
 
     /// <summary>
+    /// #158: authenticated, audited public seven-road board, one match lock.
+    /// A null report is an authentic partial fixture; bearer rejection occurs
+    /// BEFORE reporting that fact (HTTP 404 vs authenticated 409).
+    /// </summary>
+    public bool TryReadPublicTerritory(Guid matchId, string? token,
+        out MatchPublicTerritoryReport? report)
+    {
+        report = null;
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            var actor = entry.ResolveActor(token);
+            if (actor is null) return false;
+            report = entry.Match.VerifiedPublicTerritoryForActor(actor);
+            return true;
+        }
+    }
+
+    /// <summary>
     /// #87: compose three previously verified PUBLIC tactical perspectives
     /// for the same bearer-derived actor under one match lock and revision.
     /// None are permissions to move, attack, or purchase; no private cards.

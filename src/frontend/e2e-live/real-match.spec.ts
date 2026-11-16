@@ -393,7 +393,12 @@ async function assertLivePublicStreetControlMatrix(
   const before = await page.getByTestId("dev-revision").textContent();
   const requests: string[] = [];
   const onRequest = (request: { method(): string; url(): string }) => {
-    if (request.method() === "POST") requests.push(request.url());
+    // The Development tab sends an unrelated background *presence* POST.
+    // Forbid game/credential mutations, not independent heartbeats.
+    if (request.method() === "POST"
+      && /\/(free-move|end-turn|rotate-token)$/.test(
+        new URL(request.url()).pathname))
+      requests.push(request.url());
   };
   page.on("request", onRequest);
   try {

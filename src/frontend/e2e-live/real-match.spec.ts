@@ -241,6 +241,26 @@ async function assertPublicActiveTurnProximityMatchesDotNet(
     await expect(badge).toHaveAttribute("data-street-path",
       other.streetPath.join(","));
   }
+  // #148: all nearest public opponents (including ties) must match the
+  // minimum distance of the REAL actor-scoped .NET endpoint, not a guessed
+  // client authority or a filtered list that silently drops one rival.
+  const minimum = Math.min(...plan.others.map(other => other.streetSteps));
+  const nearest = plan.others.filter(other => other.streetSteps === minimum)
+    .sort((a, b) => a.otherPlayerId < b.otherPlayerId ? -1
+      : a.otherPlayerId > b.otherPlayerId ? 1 : 0);
+  const nearestUi = page.getByTestId("city-nearest-rivals")
+    .locator('button[data-testid^="city-nearest-rival-"]');
+  await expect(nearestUi).toHaveCount(nearest.length);
+  for (let i = 0; i < nearest.length; i++) {
+    await expect(nearestUi.nth(i)).toHaveAttribute(
+      "data-from-player-id", activePlayerId);
+    await expect(nearestUi.nth(i)).toHaveAttribute(
+      "data-street-steps", String(nearest[i].streetSteps));
+    await expect(nearestUi.nth(i)).toHaveAttribute(
+      "data-target-street-id", nearest[i].streetId);
+    await expect(nearestUi.nth(i)).toHaveAttribute(
+      "data-testid", `city-nearest-rival-${nearest[i].otherPlayerId}`);
+  }
   const rosterText = await page.getByTestId("match-player-legend").innerText();
   expect(rosterText).not.toContain(token);
   expect(rosterText).not.toContain("demo:action:");
@@ -3635,6 +3655,23 @@ test("#147: real .NET active-turn rival distances follow move, turn rotation and
     const alice = created.state.activePlayerId;
     expect(alice).toBe("alice");
     await assertPublicActiveTurnProximityMatchesDotNet(page, created, alice!);
+    // #148: a real nearest-rival click ONLY changes the inspected street;
+    // neither the match revision nor the authenticated actor changes.
+    const firstRival = page.getByTestId("city-nearest-rivals")
+      .locator('button[data-testid^="city-nearest-rival-"]').first();
+    const target = await firstRival.getAttribute("data-target-street-id");
+    expect(target).toBeTruthy();
+    await firstRival.click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    await expect(page.getByTestId("dev-active-player")).toHaveText("alice");
+    const streetNames = {
+      gauss: "Gauss Avenue", einstein: "Einstein Avenue",
+      newton: "Newton Avenue", planck: "Planck Avenue",
+      boson: "Boson Avenue", meson: "Meson Avenue",
+      "main-square": "Main Square",
+    } as const;
+    await expect(page.getByTestId("selected-street")).toHaveText(
+      streetNames[target as keyof typeof streetNames]);
 
     // Use the actual .NET-scoped enabled first-round option. The browser
     // never decides whether this route is legal from the visual hop count.

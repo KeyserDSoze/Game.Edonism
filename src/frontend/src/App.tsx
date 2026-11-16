@@ -9,6 +9,7 @@ import { cityBoard, slotById, slotsOnStreet, streetById } from "@/features/city/
 import { playerMarkerPlacements } from "@/features/city/playerMarkers";
 import { verifiedPublicStartingLots } from "@/features/city/playerStartingLots";
 import { verifiedPublicFreeMoveUsage } from "@/features/city/playerFreeMoveUsage";
+import { verifiedPublicCharacterHearts } from "@/features/city/playerCharacterHearts";
 import { controlledLotMarkers, publicGrossSalaryQuotes, verifiedPublicBoardCardCount, type PublicMatchSceneState } from "@/features/city/activityMarkers";
 import { verifiedTacticalFocus, type TacticalFocus } from "@/features/city/tacticalFocus";
 import { verifiedHistoricalStreetFocus, type HistoricalStreetFocus } from "@/features/city/historicalStreetFocus";
@@ -47,6 +48,9 @@ export default function App() {
   // #136: public server-confirmed history flag, not a move availability
   // calculation or permission to call the Development API.
   const publicFreeMoveUsage = verifiedPublicFreeMoveUsage(publicPlayers?.players);
+  // #137: the server's printed public character hearts only. Never infer
+  // live damage, win/loss, combat targets or authority from the city roster.
+  const publicCharacterHearts = verifiedPublicCharacterHearts(publicPlayers?.players);
   const controlMarkers = publicPlayers ? controlledLotMarkers(publicPlayers) : [];
   const grossQuotes = publicPlayers ? publicGrossSalaryQuotes(publicPlayers) : [];
   const verifiedBoardCardCount = verifiedPublicBoardCardCount(publicPlayers);
@@ -332,6 +336,15 @@ export default function App() {
                           className="text-muted-foreground">
                           {t(publicFreeMoveUsage.get(marker.playerId)
                             ? "city.publicFreeMoveUsed" : "city.publicFreeMoveNotUsed")}
+                        </span>
+                      )}
+                      {publicCharacterHearts.has(marker.playerId) && (
+                        <span data-testid={`match-character-hearts-${marker.playerId}`}
+                          data-character-hearts={publicCharacterHearts.get(marker.playerId)}
+                          className="text-muted-foreground">
+                          {t("city.publicCharacterHearts", {
+                            hearts: publicCharacterHearts.get(marker.playerId),
+                          })}
                         </span>
                       )}
                       {startingLotsByPlayer.has(marker.playerId) && (

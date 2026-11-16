@@ -112,6 +112,13 @@ async function startRealMatch(page: Page): Promise<CreatedMatch> {
     // #136: same public server field, no derived move permission.
     await expect(page.getByTestId(`match-free-move-${player.playerId}`))
       .toHaveAttribute("data-free-move-used", String(player.freeMoveUsed));
+    // #137: real printed, public character hearts (not a client estimate).
+    expect(player.hearts).toBeGreaterThanOrEqual(1);
+    expect(player.hearts).toBeLessThanOrEqual(5);
+    await expect(page.getByTestId(`match-character-hearts-${player.playerId}`))
+      .toHaveAttribute("data-character-hearts", String(player.hearts));
+    await expect(page.getByTestId(`match-character-hearts-${player.playerId}`))
+      .toHaveText(`Cuori personaggio: ${player.hearts}`);
   }
   return match;
 }
@@ -293,6 +300,13 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   await expect(page.getByTestId("match-player-alice"))
     .toHaveAttribute("data-street-id", aliceDestination);
   expect(afterMove.players[0].freeMoveUsed).toBe(true);
+  // #137: moving with the actual .NET API does not modify printed hearts.
+  for (const player of afterMove.players) {
+    const original = created.state.players.find(p => p.playerId === player.playerId);
+    expect(player.hearts).toBe(original?.hearts);
+    await expect(page.getByTestId(`match-character-hearts-${player.playerId}`))
+      .toHaveAttribute("data-character-hearts", String(player.hearts));
+  }
   await expect(page.getByTestId("match-free-move-alice"))
     .toHaveAttribute("data-free-move-used", "true");
   await expect(page.getByTestId("match-free-move-bob"))

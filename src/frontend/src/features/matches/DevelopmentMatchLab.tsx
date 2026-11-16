@@ -637,6 +637,9 @@ export function DevelopmentMatchLab({
             startingSlotId: seat.startingSlotId,
             // #136: already-public server flag; never compute move legality.
             freeMoveUsed: seat.freeMoveUsed,
+            // #137: preserve the public .NET character heart count; nullable
+            // legacy snapshots have no character card and must show no hearts.
+            hearts: seat.hearts,
           })),
           boardActivities: state.boardActivities ?? [],
           controlledActivities: state.controlledActivities ?? [],

@@ -79,6 +79,41 @@ public sealed class CharacterMatchSetupTests
         Assert.Equal(1, moved.Revision);
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void PublicCharacterHeartsMatchPrintedCardsAndStayStableAfterMoveAndEndTurn(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = GameMatch.CreateFromTrustedCharacterCatalog(
+            Guid.NewGuid(), board,
+            Enumerable.Range(0, count).Select(i => $"player-{i}").ToArray(),
+            CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(), 137 + count);
+        var before = match.Snapshot();
+        Assert.Equal(count, before.Players.Count);
+        Assert.Equal(count, before.AssignedCharacters.Count);
+        foreach (var player in before.Players)
+        {
+            var printed = before.AssignedCharacters.Single(c => c.PlayerId == player.PlayerId);
+            Assert.Equal(printed.PrintedInitialHearts, player.Hearts);
+            Assert.True(player.Hearts is >= 1 and <= 5);
+        }
+
+        var mover = before.Players[0];
+        var target = board.Streets.Single(s => s.Id == mover.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(mover.PlayerId, target, before.Revision).Accepted);
+        var moved = match.Snapshot();
+        Assert.Equal(before.Players.Select(p => p.Hearts),
+            moved.Players.Select(p => p.Hearts));
+        Assert.True(match.TryEndTurn(mover.PlayerId, moved.Revision).Accepted);
+        var ended = match.Snapshot();
+        Assert.Equal(before.Players.Select(p => p.Hearts),
+            ended.Players.Select(p => p.Hearts));
+        Assert.Equal(before.AssignedCharacters, ended.AssignedCharacters);
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
     [Fact]
     public void LegacyDevelopmentFixtureHasNoInventedCharacterOrHearts()
     {

@@ -6293,3 +6293,56 @@ for (const count of [2, 8] as const) {
       await expect(page.getByTestId("match-free-move-alice")).toHaveCount(0);
     });
 }
+
+// #137: Already-public character card hearts stay on the city legend.
+// They are not damage, attack permissions or new API capabilities.
+for (const count of [2, 8] as const) {
+  test(`#137: ${count}-seat public hearts survive real-shaped movement, seat/locale changes and leave`,
+    async ({ page }) => {
+      if (count === 2) {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.addInitScript(() => {
+          const original = HTMLCanvasElement.prototype.getContext;
+          HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+            if (kind === "webgl" || kind === "webgl2"
+              || kind === "experimental-webgl") return null;
+            return Reflect.apply(original, this, [kind, ...args]);
+          };
+        });
+      }
+      const { observedHeaders } = await mockMatchApi(page, { playerCount: count });
+      await page.goto("/");
+      await page.getByTestId("dev-player-count").selectOption(String(count));
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(count);
+      for (const playerId of demoSeats.slice(0, count)) {
+        await expect(page.getByTestId(`match-character-hearts-${playerId}`))
+          .toHaveAttribute("data-character-hearts", "3");
+        await expect(page.getByTestId(`match-character-hearts-${playerId}`))
+          .toHaveText("Cuori personaggio: 3");
+      }
+      expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+        .toHaveLength(0);
+
+      await page.getByTestId("dev-move-planck").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("1");
+      for (const playerId of demoSeats.slice(0, count)) {
+        await expect(page.getByTestId(`match-character-hearts-${playerId}`))
+          .toHaveAttribute("data-character-hearts", "3");
+      }
+      await page.getByTestId("match-inspect-street-bob").click();
+      await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+      await expect(page.getByTestId("match-character-hearts-alice"))
+        .toHaveText("Character hearts: 3");
+      await expect(page.getByTestId("match-character-hearts-bob"))
+        .toHaveText("Character hearts: 3");
+      await page.getByTestId("dev-seat-bob").click();
+      await expect(page.getByTestId("match-character-hearts-alice"))
+        .toHaveAttribute("data-character-hearts", "3");
+      expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+        .toHaveLength(1);
+      await expect(page.getByTestId("dev-revision")).toHaveText("1");
+      await page.getByTestId("dev-leave").click();
+      await expect(page.getByTestId("match-character-hearts-alice")).toHaveCount(0);
+    });
+}

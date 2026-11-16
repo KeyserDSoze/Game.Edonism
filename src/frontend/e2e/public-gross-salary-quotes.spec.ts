@@ -422,3 +422,65 @@ for (const count of [2, 4, 8] as const) {
         .toBe(unchanged);
     });
 }
+
+
+// #144: a rival without controlled lots must still be a locatable 2–8-seat
+// participant before any gross wage list may be shown as complete.
+for (const count of [2, 4, 8] as const) {
+  test("#144: " + count + "-seat wages reject forged no-lot players and rosters",
+    async ({ page }) => {
+      const healthy = fixture(count);
+      const last = count - 1; // even seat counts: final seat has base-only salary.
+      healthy.controlledActivities.pop(); // legitimate zero-lot rival.
+      const edit = (change: (s: ReturnType<typeof fixture>) => void) => {
+        const s = structuredClone(healthy);
+        change(s);
+        return s;
+      };
+      const relabel = (id: string) => edit(s => {
+        s.players[last].playerId = id;
+        s.grossSalaryQuotes[last].playerId = id;
+      });
+      // Actor IDs are ordinal: only lowercase "system" is reserved.
+      const acceptedCaseSensitive = relabel("System");
+      const invalid = {
+        unknownStreet: edit(s => { s.players[last].streetId = "outside-board"; }),
+        blankStreet: edit(s => { s.players[last].streetId = ""; }),
+        reservedSystemActor: relabel("system"),
+        trailingSpace: relabel("heidi "),
+        bidiSpoof: relabel("heidi" + String.fromCodePoint(0x202e)),
+        controlCharacter: relabel("heidi" + String.fromCodePoint(10)),
+        overlongActor: relabel("a".repeat(65)),
+        oneSeatRoster: edit(s => {
+          s.players.splice(1);
+          s.grossSalaryQuotes.splice(1);
+          s.controlledActivities.splice(1);
+        }),
+        nineSeatRoster: edit(s => {
+          for (let i = s.players.length; i < 9; i++) {
+            const id = "extra-" + i;
+            s.players.push({ playerId: id, streetId: "gauss" });
+            s.grossSalaryQuotes.push({
+              playerId: id, baseAtoms: 2, standingActivityAtoms: 0, grossAtoms: 2,
+            });
+          }
+        }),
+      };
+      const before = JSON.stringify({ healthy, acceptedCaseSensitive, invalid });
+      await page.goto("/");
+      const result = await page.evaluate(async ({ healthy, acceptedCaseSensitive, invalid }) => {
+        const { publicGrossSalaryQuotes } =
+          await import("/src/features/city/activityMarkers.ts");
+        return {
+          valid: publicGrossSalaryQuotes(healthy),
+          caseSensitive: publicGrossSalaryQuotes(acceptedCaseSensitive),
+          forged: Object.entries(invalid).map(([name, state]) =>
+            [name, publicGrossSalaryQuotes(state)]),
+        };
+      }, { healthy, acceptedCaseSensitive, invalid });
+      expect(result.valid).toEqual(healthy.grossSalaryQuotes);
+      expect(result.caseSensitive).toEqual(acceptedCaseSensitive.grossSalaryQuotes);
+      expect(result.forged).toEqual(Object.keys(invalid).map(name => [name, []]));
+      expect(JSON.stringify({ healthy, acceptedCaseSensitive, invalid })).toBe(before);
+    });
+}

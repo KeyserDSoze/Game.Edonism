@@ -1,5 +1,6 @@
 import { cityBoard, slotById, toScene } from "./board";
 import { playerMarkerPlacements, type PublicPlayerPositions } from "./playerMarkers";
+import { isValidDevelopmentTechnicalPlayerId } from "../matches/verifiedDevelopmentTechnicalPlayerId";
 
 /** Serialized .NET public MatchSnapshot fields. No secret hands or access tokens. */
 export type PublicBoardActivity = Readonly<{
@@ -188,6 +189,12 @@ export function publicGrossSalaryQuotes(state: PublicMatchSceneState): PublicGro
       || !Array.isArray(state.controlledActivities)
       || !Array.isArray(state.grossSalaryQuotes)) return [];
 
+    // #144: every seat must be locatable, including rivals with zero lots.
+    // This is a read-only public roster check, not movement or salary logic.
+    if (state.players.length < 2 || state.players.length > 8
+      || playerMarkerPlacements(state.players, state.activePlayerId).length
+        !== state.players.length) return [];
+
     // #140: check ALL printed board-card slots, including unowned lots.
     // controlledLotMarkers only inspects cards linked to occupied controls,
     // so a duplicate/foreign/malformed UNCONTROLLED card could otherwise
@@ -198,8 +205,8 @@ export function publicGrossSalaryQuotes(state: PublicMatchSceneState): PublicGro
 
     const knownOwners = new Set<string>();
     for (const player of state.players) {
-      if (!player || typeof player.playerId !== "string"
-        || !player.playerId.trim() || knownOwners.has(player.playerId)) return [];
+      if (!player || !isValidDevelopmentTechnicalPlayerId(player.playerId)
+        || knownOwners.has(player.playerId)) return [];
       knownOwners.add(player.playerId);
     }
 

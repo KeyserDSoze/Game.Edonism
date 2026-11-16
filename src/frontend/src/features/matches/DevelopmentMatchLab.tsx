@@ -634,6 +634,7 @@ export function DevelopmentMatchLab({
           players: state.players.map((seat) => ({
             playerId: seat.playerId,
             streetId: seat.streetId,
+            startingSlotId: seat.startingSlotId,
           })),
           boardActivities: state.boardActivities ?? [],
           controlledActivities: state.controlledActivities ?? [],

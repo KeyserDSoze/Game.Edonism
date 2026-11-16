@@ -1266,6 +1266,85 @@ test("Development match HUD is accessible on mobile and translated to English", 
   expect(overflow).toBe(false);
 });
 
+for (const count of [2, 8] as const) {
+  test("#130: public origin labels survive move and actor switch for "
+    + count + " PvP seats", async ({ page }) => {
+    const { observedHeaders } = await mockMatchApi(page, { playerCount: count });
+    await page.goto("/");
+    await page.getByTestId("dev-player-count").selectOption(String(count));
+    await page.getByTestId("dev-create").click();
+    await expect(page.getByTestId("match-player-legend").locator("li"))
+      .toHaveCount(count);
+    const alice = page.getByTestId("match-player-alice");
+    const bob = page.getByTestId("match-player-bob");
+    await expect(alice).toHaveAttribute("data-street-id", "gauss");
+    await expect(alice).toHaveAttribute("data-starting-slot-id", "N-01");
+    await expect(page.getByTestId("match-origin-alice"))
+      .toHaveText("Lotto iniziale: N-01");
+    await expect(bob).toHaveAttribute("data-starting-slot-id", "S-01");
+    await expect(page.getByTestId("match-origin-bob"))
+      .toHaveText("Lotto iniziale: S-01");
+    if (count === 8) {
+      await expect(page.getByTestId("match-player-heidi"))
+        .toHaveAttribute("data-starting-slot-id", "N-08");
+      const starting = await page.getByTestId("match-player-legend")
+        .locator("li").evaluateAll(items =>
+          items.map(item => item.getAttribute("data-starting-slot-id")));
+      expect(new Set(starting).size).toBe(8);
+    }
+    // Inspecting a different seat must never shift initial activities.
+    await page.getByTestId("dev-seat-bob").click();
+    await expect(alice).toHaveAttribute("data-starting-slot-id", "N-01");
+    await expect(bob).toHaveAttribute("data-starting-slot-id", "S-01");
+    await page.getByTestId("dev-seat-alice").click();
+
+    await page.getByTestId("dev-move-planck").click();
+    await expect(alice).toHaveAttribute("data-street-id", "planck");
+    await expect(alice).toHaveAttribute("data-starting-slot-id", "N-01");
+    await expect(page.getByTestId("match-origin-alice"))
+      .toHaveText("Lotto iniziale: N-01");
+    await page.getByTestId("dev-end-turn").click();
+    await expect(bob).toHaveAttribute("data-active", "true");
+    await expect(alice).toHaveAttribute("data-starting-slot-id", "N-01");
+
+    // The new roster is strictly public; neither tokens nor hand IDs
+    // become available in the city legend through this projection.
+    const visible = await page.getByTestId("match-player-legend").innerText();
+    expect(visible).not.toContain("demo:action:");
+    expect(observedHeaders.filter(x => x.path.endsWith("/end-turn")))
+      .toHaveLength(1);
+    await page.getByTestId("dev-leave").click();
+    await expect(page.getByTestId("match-player-legend")).toHaveCount(0);
+  });
+}
+
+test("#130: starting lot roster stays accessible in English/mobile/WebGL fallback",
+  async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+      if (kind === "webgl" || kind === "webgl2"
+        || kind === "experimental-webgl") return null;
+      return Reflect.apply(original, this, [kind, ...args]);
+    };
+  });
+  await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("match-origin-alice"))
+    .toHaveText("Starting lot: N-01");
+  await expect(page.getByTestId("match-origin-bob"))
+    .toHaveText("Starting lot: S-01");
+  await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(2);
+  const overflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth > window.innerWidth + 2);
+  expect(overflow).toBe(false);
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("match-origin-alice")).toHaveCount(0);
+});
+
 test("public match markers follow only server-confirmed streets, not local seat selection", async ({ page }) => {
   await mockMatchApi(page);
   await page.goto("/");

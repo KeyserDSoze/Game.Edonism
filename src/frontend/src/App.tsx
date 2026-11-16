@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CityScene } from "@/features/city/CityScene";
 import { cityBoard, slotById, slotsOnStreet, streetById } from "@/features/city/board";
 import { playerMarkerPlacements } from "@/features/city/playerMarkers";
+import { verifiedPublicStartingLots } from "@/features/city/playerStartingLots";
 import { controlledLotMarkers, publicGrossSalaryQuotes, verifiedPublicBoardCardCount, type PublicMatchSceneState } from "@/features/city/activityMarkers";
 import { verifiedTacticalFocus, type TacticalFocus } from "@/features/city/tacticalFocus";
 import { verifiedHistoricalStreetFocus, type HistoricalStreetFocus } from "@/features/city/historicalStreetFocus";
@@ -39,6 +40,9 @@ export default function App() {
   const playerMarkers = publicPlayers
     ? playerMarkerPlacements(publicPlayers.players, publicPlayers.activePlayerId)
     : [];
+  // #130: show an initial activity lot without guessing ownership or current
+  // position. This comes only from verified public Development match JSON.
+  const startingLotsByPlayer = verifiedPublicStartingLots(publicPlayers?.players);
   const controlMarkers = publicPlayers ? controlledLotMarkers(publicPlayers) : [];
   const grossQuotes = publicPlayers ? publicGrossSalaryQuotes(publicPlayers) : [];
   const verifiedBoardCardCount = verifiedPublicBoardCardCount(publicPlayers);
@@ -295,12 +299,19 @@ export default function App() {
                       key={marker.playerId}
                       data-testid={`match-player-${marker.playerId}`}
                       data-street-id={marker.streetId}
+                      data-starting-slot-id={startingLotsByPlayer.get(marker.playerId) ?? undefined}
                       data-active={marker.isActive ? "true" : "false"}
-                      className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-2 text-xs"
+                      className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-2 text-xs"
                     >
                       <span aria-hidden="true" className="size-3 shrink-0 rounded-full" style={{ backgroundColor: marker.color }} />
                       <strong>{marker.playerId}</strong>
                       <span className="text-muted-foreground">{streetById(marker.streetId)?.name}</span>
+                      {startingLotsByPlayer.has(marker.playerId) && (
+                        <span className="text-muted-foreground"
+                          data-testid={`match-origin-${marker.playerId}`}>
+                          {t("city.startingLot")}: {startingLotsByPlayer.get(marker.playerId)}
+                        </span>
+                      )}
                       {marker.isActive && <span className="font-semibold text-primary">{t("city.activePlayerMarker")}</span>}
                     </li>
                   ))}

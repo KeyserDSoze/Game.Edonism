@@ -155,6 +155,25 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   expect(created.state.players.map((p) => p.playerId)).toEqual(["alice", "bob"]);
   expect(created.state.revision).toBe(0);
 
+  // #130: origin lot is a PUBLIC immutable tactical reference, distinct
+  // from the pawn's current street. This assertion uses the actual .NET
+  // response, no fixed demo fixture and no copied board geometry.
+  expect(new Set(created.state.players.map(p => p.startingSlotId)).size)
+    .toBe(created.state.players.length);
+  const slotSource = (await readFile(
+    new URL("../../shared/board/edonism-board.v1.json", import.meta.url), "utf8",
+  ));
+  const printedSlots = new Set(
+    (JSON.parse(slotSource) as { slots: { id: string }[] }).slots.map(s => s.id));
+  expect(printedSlots.size).toBe(30);
+  for (const p of created.state.players) {
+    expect(printedSlots.has(p.startingSlotId)).toBe(true);
+    await expect(page.getByTestId("match-player-" + p.playerId))
+      .toHaveAttribute("data-starting-slot-id", p.startingSlotId);
+    await expect(page.getByTestId("match-origin-" + p.playerId))
+      .toContainText(p.startingSlotId);
+  }
+
   const aliceToken = tokenFor(created, "alice");
   const bobToken = tokenFor(created, "bob");
 
@@ -183,6 +202,10 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   const aliceDestination = (await moveAlice.getAttribute("data-testid"))!.replace("dev-move-", "");
   expect(aliceDestination).not.toBe(aliceStart);
   await moveAlice.click();
+  await expect(page.getByTestId("match-player-alice"))
+    .toHaveAttribute("data-starting-slot-id", created.state.players[0].startingSlotId);
+  await expect(page.getByTestId("match-origin-alice"))
+    .toContainText(created.state.players[0].startingSlotId);
   await expect(page.getByTestId("dev-revision")).toHaveText("1");
   await expect(page.getByTestId("dev-position")).not.toBeEmpty();
   const aliceRead = await request.get(`http://127.0.0.1:5080/api/dev/matches/${matchId}`, {

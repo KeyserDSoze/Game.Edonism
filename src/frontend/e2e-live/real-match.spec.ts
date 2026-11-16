@@ -453,6 +453,51 @@ async function assertLivePublicStreetControlMatrix(
   expect(observedFootprints).toEqual(expectedFootprints);
   expect(rawFootprints.reduce((sum, item) => sum + item.owned, 0))
     .toBe(created.state.controlledActivities.length);
+
+  // #157: compare one DOM frame with the REAL authenticated public routes
+  // and original .NET board facts. No new HTTP or gameplay rules.
+  const expectedShared = expected.flatMap(street => {
+    const members = street.owners.filter(owner => Number(owner.controlled) > 0);
+    if (members.length < 2) return [];
+    return [{
+      id: street.id.replace("public-street-control-", "public-shared-ownership-"),
+      owners: String(members.length),
+      free: street.freeLots,
+      controlled: street.controlledLots,
+      standing: street.standing,
+      fallen: street.fallen,
+      members: members.map(owner => ({
+        ...owner,
+        id: owner.id.replace("public-street-control-", "public-shared-ownership-"),
+      })),
+    }];
+  });
+  const sharedPanel = page.getByTestId("public-shared-ownership-details");
+  await expect(sharedPanel).toBeVisible();
+  if (await sharedPanel.getAttribute("open") === null)
+    await sharedPanel.locator("summary").click();
+  if (expectedShared.length === 0) {
+    await expect(page.getByTestId("public-shared-ownership-empty")).toBeVisible();
+    await expect(page.getByTestId("public-shared-ownership-list")).toHaveCount(0);
+  } else {
+    const rows = page.getByTestId("public-shared-ownership-list").locator("li");
+    await expect(rows).toHaveCount(expectedShared.length);
+    const observedShared = await rows.evaluateAll(nodes => nodes.map(row => ({
+      id: row.getAttribute("data-testid"),
+      owners: row.getAttribute("data-owner-count"),
+      free: row.getAttribute("data-free-count"),
+      controlled: row.getAttribute("data-controlled-count"),
+      standing: row.getAttribute("data-standing-count"),
+      fallen: row.getAttribute("data-fallen-count"),
+      members: Array.from(row.querySelectorAll('[data-testid*="-owner-"]')).map(owner => ({
+        id: owner.getAttribute("data-testid"),
+        controlled: owner.getAttribute("data-owned-count"),
+        standing: owner.getAttribute("data-standing-count"),
+        fallen: owner.getAttribute("data-fallen-count"),
+      })),
+    })));
+    expect(observedShared).toEqual(expectedShared);
+  }
   const before = await page.getByTestId("dev-revision").textContent();
   const requests: string[] = [];
   const onRequest = (request: { method(): string; url(): string }) => {
@@ -470,6 +515,13 @@ async function assertLivePublicStreetControlMatrix(
     await expect(page.getByTestId("selected-street")).toHaveText(
       board.streets[1].name);
     await expect(page.getByTestId("dev-revision")).toHaveText(before ?? "0");
+    if (expectedShared.length > 0) {
+      const streetId = expectedShared[0].id.replace("public-shared-ownership-", "");
+      await page.getByTestId("public-shared-ownership-inspect-" + streetId).click();
+      await expect(page.getByTestId("selected-street")).toHaveText(
+        board.streets.find(street => street.id === streetId)!.name);
+      await expect(page.getByTestId("dev-revision")).toHaveText(before ?? "0");
+    }
     expect(requests).toEqual([]);
   } finally {
     page.off("request", onRequest);

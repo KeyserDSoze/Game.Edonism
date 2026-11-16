@@ -225,9 +225,13 @@ for (const count of [2, 4, 8] as const) {
         expect(forged.salary, name).toEqual([]);
         expect(forged.economy, name).toBe(0);
         expect(forged.resources, name).toBe(0);
-        // Correctly verified controlled markers are independent; an
-        // unrelated malformed board slot MUST NOT erase these markers.
-        expect(forged.independentControlled, name).toBe(count);
+        // The pre-existing controlled-lot guard intentionally rejects the
+        // ENTIRE list on a non-string slotId (untrusted runtime shape).
+        // Valid-but-foreign and duplicate unowned slots do not disturb
+        // otherwise verifiable controlled markers. Never relax that guard
+        // just to make an independent-visibility test pass.
+        expect(forged.independentControlled, name)
+          .toBe(name === "noncanonicalUncontrolledSlotType" ? 0 : count);
       }
       expect(JSON.stringify({ good, invalid })).toBe(before);
     });

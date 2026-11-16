@@ -142,8 +142,8 @@ public sealed class MatchParticipantIdTests
             .Select(i => $"player-{i}").ToArray();
         var invalid = new[]
         {
-            "system", " alice", "alice ", "alice\\nother",
-            "alice\\u202Eevil", "alice\\u200Bghost",
+            "system", " alice", "alice ", "alice\nother",
+            "alice\u202Eevil", "alice\u200Bghost",
             new string('A', 65), new string((char)0xD800, 1),
         };
         foreach (var bad in invalid)

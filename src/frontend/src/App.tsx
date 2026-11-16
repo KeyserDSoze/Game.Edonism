@@ -16,6 +16,7 @@ import { selectVerifiedPublicUncontrolledActivities } from "@/features/city/publ
 import { verifiedPublicFreeActivityStreetDistribution } from "@/features/city/publicFreeActivityStreetDistribution";
 import { verifiedPublicStreetControlMatrix } from "@/features/city/publicStreetControlMatrix";
 import { verifiedPublicTerritoryFootprints } from "@/features/city/publicTerritoryFootprints";
+import { verifiedPublicSharedOwnershipStreets } from "@/features/city/publicSharedOwnershipStreets";
 import { printedActivityCategoryQuotas } from "@/features/city/activityMarkers";
 import { verifiedPublicSeatEconomy } from "@/features/city/publicSeatEconomy";
 import { verifiedPublicSeatResources } from "@/features/city/publicSeatResources";
@@ -109,6 +110,8 @@ export default function App() {
   const streetControlMatrix = verifiedPublicStreetControlMatrix(publicPlayers);
   // #153: public territorial comparison, NOT a victory or PvP score.
   const publicTerritoryFootprints = verifiedPublicTerritoryFootprints(publicPlayers);
+  // #157: null means invalid board; [] is an authentic zero shared street count.
+  const publicSharedOwnershipStreets = verifiedPublicSharedOwnershipStreets(publicPlayers);
   const currentStreet = streetById(selectedStreetId) ?? cityBoard.streets[0];
   const currentSlot = selectedSlotId ? slotById(selectedSlotId) : undefined;
   const streetSlots = slotsOnStreet(selectedStreetId);
@@ -833,6 +836,77 @@ export default function App() {
                       </li>
                     ))}
                   </ol>
+                </details>
+              </section>
+            )}
+            {publicSharedOwnershipStreets !== null && (
+              <section className="mx-3 mb-4 rounded-xl border border-border bg-muted/30 p-3 sm:mx-5"
+                data-testid="public-shared-ownership-section"
+                aria-label={t("city.publicSharedOwnershipTitle")}>
+                <details data-testid="public-shared-ownership-details">
+                  <summary className="cursor-pointer rounded-sm text-xs font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                    {t("city.publicSharedOwnershipTitle")}
+                  </summary>
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    {t("city.publicSharedOwnershipNote")}
+                  </p>
+                  {publicSharedOwnershipStreets.length === 0 ? (
+                    <p data-testid="public-shared-ownership-empty"
+                      className="mt-3 text-xs text-muted-foreground">
+                      {t("city.publicSharedOwnershipEmpty")}
+                    </p>
+                  ) : (
+                    <ol data-testid="public-shared-ownership-list" className="mt-3 grid gap-2">
+                      {publicSharedOwnershipStreets.map(street => (
+                        <li key={street.streetId}
+                          data-testid={`public-shared-ownership-${street.streetId}`}
+                          data-owner-count={street.ownerCount}
+                          data-free-count={street.freeLots}
+                          data-controlled-count={street.controlledLots}
+                          data-standing-count={street.standing}
+                          data-fallen-count={street.fallen}
+                          className="min-w-0 rounded-lg border border-border bg-card p-3 text-xs">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button type="button"
+                              data-testid={`public-shared-ownership-inspect-${street.streetId}`}
+                              aria-label={t("city.publicSharedOwnershipInspect", {
+                                street: street.streetName,
+                              })}
+                              onClick={() => chooseStreet(street.streetId)}
+                              className="rounded-sm font-semibold underline decoration-dotted underline-offset-2 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                              {street.streetName}
+                            </button>
+                            <span className="text-muted-foreground">
+                              {t("city.publicSharedOwnershipLine", {
+                                owners: street.ownerCount,
+                                free: street.freeLots,
+                                controlled: street.controlledLots,
+                                standing: street.standing,
+                                fallen: street.fallen,
+                              })}
+                            </span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                            {street.owners.map(owner => (
+                              <span key={owner.playerId}
+                                data-testid={`public-shared-ownership-${street.streetId}-owner-${owner.playerId}`}
+                                data-owned-count={owner.controlled}
+                                data-standing-count={owner.standing}
+                                data-fallen-count={owner.fallen}
+                                className="break-all text-[11px] text-muted-foreground">
+                                {t("city.publicStreetControlOwner", {
+                                  player: owner.playerId,
+                                  owned: owner.controlled,
+                                  standing: owner.standing,
+                                  fallen: owner.fallen,
+                                })}
+                              </span>
+                            ))}
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
                 </details>
               </section>
             )}

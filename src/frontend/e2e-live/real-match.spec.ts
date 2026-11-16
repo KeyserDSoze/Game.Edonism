@@ -220,6 +220,17 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
   expect(serverCommands).toHaveLength(0);
 
+  // #133: This is the TRUE public current road, not Bob's starting
+  // slot/control. Inspecting must not issue a move or change revision.
+  const bobCurrentStreet = created.state.players[1].streetId;
+  await page.getByTestId("match-inspect-street-bob").click();
+  await expect(page.getByTestId("street-picker-" + bobCurrentStreet))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("match-inspect-street-bob"))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(serverCommands).toHaveLength(0);
+
   const aliceToken = tokenFor(created, "alice");
   const bobToken = tokenFor(created, "bob");
 
@@ -248,6 +259,14 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   const aliceDestination = (await moveAlice.getAttribute("data-testid"))!.replace("dev-move-", "");
   expect(aliceDestination).not.toBe(aliceStart);
   await moveAlice.click();
+  // #133: the current-street target must follow the server-authored move.
+  await expect(page.getByTestId("match-inspect-street-alice"))
+    .toHaveAttribute("aria-label", /alice.*|.*alice/);
+  await page.getByTestId("match-inspect-street-alice").click();
+  await expect(page.getByTestId("street-picker-" + aliceDestination))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("dev-revision")).toHaveText("1");
+  expect(serverCommands.filter(p => p.endsWith("/free-move"))).toHaveLength(1);
   await expect(page.getByTestId("match-player-alice"))
     .toHaveAttribute("data-starting-slot-id", created.state.players[0].startingSlotId);
   // #131: Inspect Alice's ORIGINAL lot after her pawn left its road.

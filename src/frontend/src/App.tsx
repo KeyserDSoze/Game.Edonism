@@ -305,7 +305,23 @@ export default function App() {
                     >
                       <span aria-hidden="true" className="size-3 shrink-0 rounded-full" style={{ backgroundColor: marker.color }} />
                       <strong>{marker.playerId}</strong>
-                      <span className="text-muted-foreground">{streetById(marker.streetId)?.name}</span>
+                      <button
+                        type="button"
+                        data-testid={`match-inspect-street-${marker.playerId}`}
+                        aria-label={t("city.inspectCurrentPlayerStreet", {
+                          player: marker.playerId,
+                          street: streetById(marker.streetId)?.name,
+                        })}
+                        aria-pressed={selectedStreetId === marker.streetId}
+                        onClick={() => {
+                          // #133: marker comes from verified server-public
+                          // positions; select the VIEWER street only.
+                          chooseStreet(marker.streetId);
+                        }}
+                        className="rounded-sm text-muted-foreground font-medium underline decoration-dotted underline-offset-2 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                      >
+                        {streetById(marker.streetId)?.name}
+                      </button>
                       {startingLotsByPlayer.has(marker.playerId) && (
                         <span className="text-muted-foreground"
                           data-testid={`match-origin-${marker.playerId}`}>

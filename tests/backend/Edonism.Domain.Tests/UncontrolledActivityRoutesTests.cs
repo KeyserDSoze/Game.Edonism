@@ -306,6 +306,94 @@ public sealed class UncontrolledActivityRoutesTests
         AssertStreetCounts();
     }
 
+    // #152: show ownership, deployed henchman posture and *free* lots on
+    // each printed road, from the same audited .NET public snapshot only.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void PublicStreetControlMatrixBalancesAllLotsAndOwnersAcrossTurn(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = NewMatch(count);
+        var before = match.Snapshot();
+        var privateBefore = JsonSerializer.Serialize(match.CaptureCheckpoint().PrivateDeal);
+        var cardsBefore = JsonSerializer.Serialize(before.BoardActivities);
+        var controlsBefore = JsonSerializer.Serialize(before.ControlledActivities);
+
+        void Verify()
+        {
+            var state = match.Snapshot();
+            Assert.Equal(30, state.BoardActivities.Count);
+            Assert.Equal(count, state.ControlledActivities.Count);
+            var occupiedIds = state.ControlledActivities
+                .Select(lot => lot.SlotId).ToHashSet(StringComparer.Ordinal);
+            var free = state.BoardActivities
+                .Where(card => !occupiedIds.Contains(card.SlotId)).ToArray();
+            Assert.Equal(30 - count, free.Length);
+
+            foreach (var actor in state.Players)
+            {
+                var publicFree = Assert.IsType<MatchUncontrolledRoutes>(
+                    match.VerifiedUncontrolledRoutesForActor(actor.PlayerId));
+                var publicOpponents = Assert.IsType<MatchOpponentControlledLotRoutes>(
+                    match.VerifiedOpponentControlledLotsForActor(actor.PlayerId));
+                Assert.Equal(free.Length, publicFree.Routes.Count);
+                Assert.Equal(count - 1, publicOpponents.Routes.Count);
+                foreach (var street in board.Streets)
+                {
+                    var slots = board.Slots.Where(slot => slot.StreetId == street.Id)
+                        .Select(slot => slot.Id).ToHashSet(StringComparer.Ordinal);
+                    var controlled = state.ControlledActivities
+                        .Where(lot => slots.Contains(lot.SlotId)).ToArray();
+                    var unowned = free.Where(card => slots.Contains(card.SlotId)).ToArray();
+                    var standing = controlled.Count(lot =>
+                        lot.Posture == HenchmanPosture.Standing);
+                    var fallen = controlled.Count(lot =>
+                        lot.Posture == HenchmanPosture.Fallen);
+                    Assert.Equal(slots.Count, controlled.Length + unowned.Length);
+                    Assert.Equal(controlled.Length, standing + fallen);
+                    Assert.Equal(unowned.Length, publicFree.Routes.Count(route =>
+                        route.StreetId == street.Id));
+                    Assert.Equal(controlled.Count(lot => lot.OwnerPlayerId != actor.PlayerId),
+                        publicOpponents.Routes.Count(route => route.StreetId == street.Id));
+                    foreach (var owner in state.Players)
+                    {
+                        var ownerLots = controlled
+                            .Where(lot => lot.OwnerPlayerId == owner.PlayerId).ToArray();
+                        var ownerStanding = ownerLots.Count(lot =>
+                            lot.Posture == HenchmanPosture.Standing);
+                        var ownerFallen = ownerLots.Count(lot =>
+                            lot.Posture == HenchmanPosture.Fallen);
+                        Assert.Equal(ownerLots.Length, ownerStanding + ownerFallen);
+                        if (owner.PlayerId != actor.PlayerId)
+                        {
+                            Assert.Equal(ownerLots.Length, publicOpponents.Routes.Count(route =>
+                                route.StreetId == street.Id && route.OwnerPlayerId == owner.PlayerId));
+                        }
+                    }
+                }
+                var projection = JsonSerializer.Serialize(publicOpponents);
+                foreach (var hand in state.Players)
+                    foreach (var cardId in match.PrivateHandForActor(hand.PlayerId)!.CardIds)
+                        Assert.DoesNotContain(cardId, projection, StringComparison.Ordinal);
+            }
+            Assert.Equal(cardsBefore, JsonSerializer.Serialize(state.BoardActivities));
+            Assert.Equal(controlsBefore, JsonSerializer.Serialize(state.ControlledActivities));
+            Assert.Equal(privateBefore, JsonSerializer.Serialize(match.CaptureCheckpoint().PrivateDeal));
+            Assert.True(match.VerifyPublicAudit().IsValid);
+        }
+
+        Verify();
+        var activeId = before.Players[0].PlayerId;
+        var origin = before.Players[0].StreetId;
+        var neighbor = board.Streets.Single(street => street.Id == origin).Neighbors[0];
+        Assert.True(match.TryFreeMove(activeId, neighbor, match.Revision).Accepted);
+        Verify();
+        Assert.True(match.TryEndTurn(activeId, match.Revision).Accepted);
+        Verify();
+    }
+
     [Fact]
     public void MinimalTrustedFixtureDoesNotInventMissingPublicCards()
     {

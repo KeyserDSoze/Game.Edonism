@@ -236,3 +236,87 @@ for (const count of [2, 4, 8] as const) {
       expect(JSON.stringify({ good, invalid })).toBe(before);
     });
 }
+
+// #142: printed card identity, not just printed slot identity, must be
+// one-to-one. These Vite-browser assertions call the REAL production TS
+// validators, including the gross/economy/resources transitive guards.
+for (const count of [2, 4, 8] as const) {
+  test(`#142: ${count} seats reject duplicated physical activity card IDs across distinct slots`,
+    async ({ page }) => {
+      const original = fixture(count);
+      const legitimate = {
+        ...original,
+        players: original.players.map(p => ({
+          ...p, atoms: 4, diplomacyTokens: 2,
+          henchmenTotal: 16, henchmenAvailable: 15,
+        })),
+        boardActivities: [
+          ...original.boardActivities,
+          // Neither N-07 nor N-08 is controlled in this fixture.
+          { slotId: "N-07", cardId: "synthetic:card:case", category: "culture" },
+          { slotId: "N-08", cardId: "synthetic:card:CASE", category: "culture" },
+        ],
+      };
+      const tamper = (edit: (s: typeof legitimate) => void) => {
+        const cloned = structuredClone(legitimate);
+        edit(cloned);
+        return cloned;
+      };
+      const forged = {
+        unownedVsUnowned: tamper(s => {
+          s.boardActivities[s.boardActivities.length - 1].cardId =
+            s.boardActivities[s.boardActivities.length - 2].cardId;
+        }),
+        unownedVsControlled: tamper(s => {
+          s.boardActivities[s.boardActivities.length - 1].cardId =
+            s.boardActivities[0].cardId;
+        }),
+        controlledVsControlled: tamper(s => {
+          s.boardActivities[1].cardId = s.boardActivities[0].cardId;
+        }),
+        malformedId: tamper(s => {
+          s.boardActivities[s.boardActivities.length - 1].cardId = " ";
+        }),
+      };
+      const unchanged = JSON.stringify({ legitimate, forged });
+      await page.goto("/");
+      const result = await page.evaluate(async ({ legitimate, forged }) => {
+        const { verifiedPublicBoardCardCount: countCards,
+          publicGrossSalaryQuotes: wages, controlledLotMarkers: controls } =
+          await import("/src/features/city/activityMarkers.ts");
+        const { verifiedPublicSeatEconomy: economy } =
+          await import("/src/features/city/publicSeatEconomy.ts");
+        const { verifiedPublicSeatResources: resources } =
+          await import("/src/features/city/publicSeatResources.ts");
+        const project = (state: typeof legitimate) => ({
+          boardCount: countCards(state),
+          quoteCount: wages(state).length,
+          economicSeats: economy(state).size,
+          resourceSeats: resources(state).size,
+          independentControls: controls(state).length,
+        });
+        return {
+          valid: project(legitimate),
+          forged: Object.fromEntries(Object.entries(forged)
+            .map(([key, state]) => [key, project(state)])),
+          emptyBoard: countCards({ boardActivities: [] }),
+        };
+      }, { legitimate, forged });
+      expect(result.valid).toEqual({
+        boardCount: count + 2, quoteCount: count,
+        economicSeats: count, resourceSeats: count, independentControls: count,
+      });
+      expect(result.emptyBoard).toBe(0);
+      for (const [name, value] of Object.entries(result.forged)) {
+        expect(value.boardCount, name).toBeNull();
+        expect(value.quoteCount, name).toBe(0);
+        expect(value.economicSeats, name).toBe(0);
+        expect(value.resourceSeats, name).toBe(0);
+        // The legacy #108 owned-lot renderer separately validates slot,
+        // owner, posture and local card shape; never erase a valid pawn
+        // or grant a game command just because the global count fails.
+        expect(value.independentControls, name).toBe(count);
+      }
+      expect(JSON.stringify({ legitimate, forged })).toBe(unchanged);
+    });
+}

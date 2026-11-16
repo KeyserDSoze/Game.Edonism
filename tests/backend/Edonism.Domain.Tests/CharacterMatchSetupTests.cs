@@ -52,6 +52,36 @@ public sealed class CharacterMatchSetupTests
     [InlineData(2)]
     [InlineData(4)]
     [InlineData(8)]
+    public void FullDeckPublicActivityCardIdsAreDistinctBeforeAndAfterTurn(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = GameMatch.CreateFromTrustedCharacterCatalog(
+            Guid.NewGuid(), board,
+            Enumerable.Range(0, count).Select(i => $"player-{i}").ToArray(),
+            CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(), 142 + count);
+        var before = match.Snapshot();
+        Assert.Equal(30, before.BoardActivities.Count);
+        Assert.Equal(30, before.BoardActivities.Select(card => card.CardId)
+            .Distinct(StringComparer.Ordinal).Count());
+        Assert.All(before.BoardActivities,
+            card => Assert.False(string.IsNullOrWhiteSpace(card.CardId)));
+
+        var actor = before.Players[0];
+        var destination = board.Streets.Single(s => s.Id == actor.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(actor.PlayerId, destination, before.Revision).Accepted);
+        Assert.True(match.TryEndTurn(actor.PlayerId, match.Revision).Accepted);
+        var after = match.Snapshot();
+        Assert.Equal(before.BoardActivities, after.BoardActivities);
+        Assert.Equal(30, after.BoardActivities.Select(card => card.CardId)
+            .Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(before.GrossSalaryQuotes, after.GrossSalaryQuotes);
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
     public void AllPublicFirstRoundHeartsProveTheirUniqueAssignedCharacterAndOriginCard(int count)
     {
         var board = BoardCatalog.LoadDefault();

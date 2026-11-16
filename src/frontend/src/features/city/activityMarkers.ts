@@ -118,7 +118,8 @@ export function controlledLotMarkers(state: PublicMatchSceneState): ControlledLo
 
 /**
  * #111 — A board card count is trustworthy only for a complete, well-shaped
- * PUBLIC card list with unique canonical printed slots. This is display-only:
+ * PUBLIC card list with unique canonical printed slots AND unique physical
+ * activity card IDs (ordinal exact match; #142). This is display-only:
  * never synthesize a card count, game action, or payout from a malformed
  * server snapshot. `null` means "unverified" (hide the badge), NOT zero.
  */
@@ -127,14 +128,19 @@ export function verifiedPublicBoardCardCount(
 ): number | null {
   if (!state || !Array.isArray(state.boardActivities)) return null;
   const occupiedSlots = new Set<string>();
+  // #142: 30 separate printed cards cannot occupy different slots under
+  // one repeated physical CardId; match .NET's ordinal-unique deck contract.
+  const physicalCardIds = new Set<string>();
   for (const card of state.boardActivities) {
     if (!card || typeof card !== "object" || Array.isArray(card)
       || typeof card.slotId !== "string" || !slotById(card.slotId)
       || occupiedSlots.has(card.slotId)
       || typeof card.cardId !== "string" || !card.cardId.trim()
+      || physicalCardIds.has(card.cardId)
       || typeof card.category !== "string" || !card.category.trim())
       return null;
     occupiedSlots.add(card.slotId);
+    physicalCardIds.add(card.cardId);
   }
   return occupiedSlots.size;
 }

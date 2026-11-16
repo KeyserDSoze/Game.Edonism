@@ -66,3 +66,34 @@ No new endpoints, Production routes, client action rules or secrets.
 [GitHub #140](https://github.com/KeyserDSoze/Game.Edonism/issues/140).
 Issue-first. Direct `main` commits. Close only after all three
 GitHub Actions jobs are green on **exact final main HEAD**.
+
+## #142 — Cloned physical activity identity on separate printed lots
+
+The #111/#140 global public `verifiedPublicBoardCardCount` checked
+canonical printed **slot** uniqueness but did not enforce the distinct
+**physical CardId** guarantee of the trusted .NET activity deck. Two
+`boardActivities` entries on different canonical slots could reuse
+the exact same public `cardId` and incorrectly pass the board-count
+and gross/economic/resource presentations. The .NET Domain draws 30
+separate cards from 46 unique catalog IDs; none may be duplicated.
+
+The #142 correction adds one exact, ordinal `cardId` Set check inside
+the already-used full-board validator. No other runtime behavior is
+weakened: legitimate different-case IDs remain distinct, and a truly
+empty valid list still reports 0 (not `null`). Cloned IDs report
+`null`, which hides the count and, via `publicGrossSalaryQuotes`,
+hides every #138 and #139 seat-finance projection. A valid controlled
+lot's owner/posture/marker and pawn/turn remain independently verifiable;
+this never turns the client into a source of salary, combat, or game
+authorization.
+
+Regression gate: actual Vite TS 2/4/8 with two distinct valid unowned
+cards, cloned unowned-vs-unowned, unowned-vs-controlled,
+controlled-vs-controlled and malformed IDs, plus salary/economy/resources;
+mocked React Playwright 2/8 mobile/no WebGL and language change;
+xUnit actual .NET 2/4/8 seeded 30-card distinct IDs stable through real
+move and end turn; live real .NET 2/8 30 distinct card IDs and visible
+board/economic projections.
+
+[GitHub #142](https://github.com/KeyserDSoze/Game.Edonism/issues/142);
+close only after 3/3 CI jobs green on the exact current `main` SHA.

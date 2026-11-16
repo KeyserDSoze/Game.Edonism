@@ -744,6 +744,9 @@ test("real .NET eight-seat match supports private join and all sequential turns"
   // #140: 22 cards are deliberately UNCONTROLLED; legitimate complete
   // 30-card board keeps wages/scouting/resources visible to all eight seats.
   expect(new Set(created.state.boardActivities.map(a => a.slotId)).size).toBe(30);
+  // #142: no physical activity may occupy multiple canonical slots,
+  // even if the server's printed slot set itself remains unique.
+  expect(new Set(created.state.boardActivities.map(a => a.cardId)).size).toBe(30);
   expect(created.state.boardActivities.filter(a =>
     !created.state.controlledActivities.some(l => l.slotId === a.slotId))).toHaveLength(22);
   await expect(page.getByTestId("match-board-card-count")).toContainText("30");

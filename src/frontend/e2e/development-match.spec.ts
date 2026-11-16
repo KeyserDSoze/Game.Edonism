@@ -60,6 +60,7 @@ type MockOptions = {
   forgedAssignedCharacter?: "wrong-hearts" | "forged-seat-hearts" | "duplicate-character"
     | "duplicate-starting-activity" | "missing-seat" | "foreign-actor" | "bad-heart"; // #141.
   unownedBoardCard?: "valid" | "duplicate" | "foreign" | "bad-category" | "bad-id"; // #140: untouched controlled cards.
+  duplicatePublicCardIds?: "unowned-vs-unowned" | "unowned-vs-controlled" | "controlled-vs-controlled"; // #142: distinct canonical slots, cloned physical card.
   forgedHigherRevisionSnapshot?: boolean; // #112: corrupt first public poll, never a real command.
   forgedNullAuditEventSnapshot?: boolean; // #113: corrupt first poll with events:[null].
   forgedForeignAuditStreetOnce?: boolean; // #125: plausible public 200 with foreign audit road.
@@ -232,7 +233,9 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       ...(options.missingBoardCard
         ? []
         : [{ slotId: bobLotSlot, cardId: options.malformedPublicCardId
-          ? (42 as unknown as string) : "demo:activity:einstein", category: "transport" }]),
+          ? (42 as unknown as string)
+          : options.duplicatePublicCardIds === "controlled-vs-controlled"
+            ? "demo:activity:gauss" : "demo:activity:einstein", category: "transport" }]),
       // #140: all these extras occupy only an UNCONTROLLED lot, so every
       // previous controlledLotMarkers() still succeeds. Two N-08 cards,
       // a foreign slot or bad metadata must invalidate board totals AND
@@ -247,6 +250,14 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
             ? 42 as unknown as string : "demo:unowned:valid",
           category: options.unownedBoardCard === "bad-category"
             ? 42 as unknown as string : "culture" },
+      ] : []),
+      // #142: separate, canonical FREE slots with one cloned physical
+      // activity ID; independent controlled-lot and pawn projections remain.
+      ...(options.duplicatePublicCardIds === "unowned-vs-controlled" ? [
+        { slotId: "N-07", cardId: "demo:activity:gauss", category: "culture" },
+      ] : options.duplicatePublicCardIds === "unowned-vs-unowned" ? [
+        { slotId: "N-07", cardId: "demo:free:duplicated-id", category: "culture" },
+        { slotId: "N-08", cardId: "demo:free:duplicated-id", category: "culture" },
       ] : []),
     ],
     // #141: these are PUBLIC server-assigned card facts, not private hands.
@@ -6645,6 +6656,55 @@ for (const count of [2, 8] as const) {
           await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
           await expect(page.getByTestId("match-player-resources-alice"))
             .toContainText("Current atoms:");
+        }
+      });
+  }
+}
+
+// #142: a cloned physical public card across *distinct printed slots*
+// must NOT make the city economic/finance data look verified. Valid
+// independent pawns, controlled lot markers and server turn remain usable.
+for (const count of [2, 8] as const) {
+  for (const duplicate of ["unowned-vs-unowned",
+    "unowned-vs-controlled", "controlled-vs-controlled"] as const) {
+    test(`#142: ${count}-seat cloned public ${duplicate} hides board/finance, not live actors`,
+      async ({ page }) => {
+        if (count === 2) {
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.addInitScript(() => {
+            const original = HTMLCanvasElement.prototype.getContext;
+            HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+              if (kind === "webgl" || kind === "webgl2"
+                || kind === "experimental-webgl") return null;
+              return Reflect.apply(original, this, [kind, ...args]);
+            };
+          });
+        }
+        const { observedHeaders } = await mockMatchApi(page,
+          { playerCount: count, duplicatePublicCardIds: duplicate });
+        await page.goto("/");
+        await page.getByTestId("dev-player-count").selectOption(String(count));
+        await page.getByTestId("dev-create").click();
+        await expect(page.getByTestId("match-player-legend").locator("li"))
+          .toHaveCount(count);
+        await expect(page.getByTestId("match-board-card-count")).toHaveCount(0);
+        await expect(page.getByTestId("controlled-lot-N-01")).toBeVisible();
+        await expect(page.getByTestId("controlled-lot-S-01")).toBeVisible();
+        await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+        await expect(page.getByTestId("dev-revision")).toHaveText("0");
+        for (const seat of demoSeats.slice(0, count)) {
+          await expect(page.getByTestId(`gross-salary-${seat}`)).toHaveCount(0);
+          await expect(page.getByTestId(`match-player-economy-${seat}`)).toHaveCount(0);
+          await expect(page.getByTestId(`match-player-resources-${seat}`)).toHaveCount(0);
+          await expect(page.getByTestId(`match-inspect-street-${seat}`)).toHaveCount(1);
+        }
+        expect(observedHeaders.filter(r =>
+          /\/(free-move|end-turn)$/.test(r.path))).toHaveLength(0);
+        if (count === 2 && duplicate === "unowned-vs-unowned") {
+          await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+          await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+          await expect(page.getByTestId("match-player-legend").locator("li"))
+            .toHaveCount(2);
         }
       });
   }

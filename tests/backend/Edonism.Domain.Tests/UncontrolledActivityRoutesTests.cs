@@ -428,8 +428,8 @@ public sealed class UncontrolledActivityRoutesTests
                 var fallen = own.Count(lot =>
                     lot.Posture == HenchmanPosture.Fallen);
                 Assert.Equal(own.Length, standing + fallen);
-                Assert.Equal(1, own.Length);
-                Assert.Equal(1, streets.Length);
+                Assert.Single(own);
+                Assert.Single(streets);
                 Assert.Equal(1, standing);
                 Assert.Equal(0, fallen);
                 return (player.PlayerId, Controlled: own.Length,

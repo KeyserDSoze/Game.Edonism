@@ -6860,6 +6860,21 @@ for (const count of [2, 8] as const) {
       for (const id of demoSeats.slice(0, count)) {
         await expect(page.getByTestId(`match-character-hearts-${id}`))
           .toHaveCount(forged ? 0 : 1);
+        // #146: the same verified character gate guards BOTH publicly
+        // assigned technical card IDs, not only the printed hearts.
+        const publicCharacter = page.getByTestId(`match-character-card-${id}`);
+        const publicStartingCard = page.getByTestId(`match-character-starting-card-${id}`);
+        await expect(publicCharacter).toHaveCount(forged ? 0 : 1);
+        await expect(publicStartingCard).toHaveCount(forged ? 0 : 1);
+        if (!forged) {
+          await expect(publicCharacter).toHaveAttribute(
+            "data-character-card-id", `synthetic:character:${id}`);
+          const startingId = id === "alice" ? "demo:activity:gauss"
+            : id === "bob" ? "demo:activity:einstein"
+              : `synthetic:printed:N-${String(demoSeats.indexOf(id) + 1).padStart(2, "0")}`;
+          await expect(publicStartingCard).toHaveAttribute(
+            "data-starting-activity-card-id", startingId);
+        }
         await expect(page.getByTestId(`match-player-economy-${id}`))
           .toHaveCount(1);
         await expect(page.getByTestId(`match-player-resources-${id}`))
@@ -6875,6 +6890,10 @@ for (const count of [2, 8] as const) {
         await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
         await expect(page.getByTestId("match-character-hearts-alice"))
           .toHaveText("Character hearts: 3");
+        await expect(page.getByTestId("match-character-card-alice"))
+          .toHaveText("Character card (public ID): synthetic:character:alice");
+        await expect(page.getByTestId("match-character-starting-card-alice"))
+          .toHaveText("Starting activity (public ID): demo:activity:gauss");
       }
     });
   }

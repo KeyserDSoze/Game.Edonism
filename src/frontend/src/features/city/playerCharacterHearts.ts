@@ -80,7 +80,7 @@ export function verifiedPublicCharacterHearts(value: unknown): ReadonlyMap<strin
       const byCard = fullBoardCards.filter(card => isRecord(card)
         && card.cardId === raw.startingActivityCardId);
       const bySlot = fullBoardCards.filter(card => isRecord(card)
-        && card.slotId === startingSlots.get(raw.playerId));
+        && card.slotId === startingSlots.get(raw.playerId as string));
       if (byCard.length !== 1 || bySlot.length !== 1 || byCard[0] !== bySlot[0])
         return empty();
     }

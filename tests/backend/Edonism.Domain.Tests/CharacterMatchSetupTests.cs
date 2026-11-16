@@ -202,7 +202,7 @@ public sealed class CharacterMatchSetupTests
         var match = GameMatch.CreateFromTrustedCharacterCatalog(
             Guid.NewGuid(), board,
             Enumerable.Range(0, count).Select(i => $"player-{i}").ToArray(),
-            CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(), 145 + count);
+            CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(), 143 + count);
 
         static void AssertOrigins(MatchSnapshot snapshot, int expectedCount)
         {

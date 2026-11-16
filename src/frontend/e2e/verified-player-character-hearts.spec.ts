@@ -301,11 +301,12 @@ for (const count of [2, 4, 8] as const) {
       ]);
       expect(result.good).toEqual(expected);
       expect(result.forged).toEqual(Object.keys(forged).map(name => [name, 0]));
-      expect(result.partial).toEqual(expected.map(([id, card], i) => [
-        id, i === 0 ? {
-          ...(card as typeof expected[number][1]),
-          startingActivityCardId: "synthetic:partial",
-        } : card,
+      expect(result.partial).toEqual(genuine.assignedCharacters.map((a, i) => [
+        a.playerId, {
+          characterId: a.characterId,
+          startingActivityCardId: i === 0 ? "synthetic:partial" : a.startingActivityCardId,
+          printedInitialHearts: a.printedInitialHearts,
+        },
       ]));
       expect(result.legacy).toBe(0);
       expect(result.noInput).toBe(0);

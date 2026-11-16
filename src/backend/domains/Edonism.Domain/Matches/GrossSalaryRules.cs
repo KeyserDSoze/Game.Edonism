@@ -34,6 +34,10 @@ public sealed record MatchGrossSalaryQuote(
 public static class GrossSalaryRules
 {
     public const int PrintedBaseAtoms = 2;
+    // Rulebook2 pp.3–4: printed player colors and per-seat reserve.
+    private const int MaxPrintedSeats = 8;
+    private const int PrintedHenchmenPerSeat = 16;
+    private const int MaxPrintedInitialHearts = 5;
 
     public static IReadOnlyList<MatchGrossSalaryQuote> Quote(
         BoardDefinition board,
@@ -45,20 +49,35 @@ public static class GrossSalaryRules
         ArgumentNullException.ThrowIfNull(controlledActivities);
         board.Validate();
 
-        if (players.Count == 0 || players.Any(p => p is null ||
-            string.IsNullOrWhiteSpace(p.PlayerId) ||
-            p.HenchmenTotal < 0 || p.HenchmenAvailable < 0))
-        {
-            throw new ArgumentException("Salary requires valid players and nonnegative henchmen.", nameof(players));
-        }
+        // #160: this is a PUBLIC Domain quote, not an economic right
+        // to pay the salary. Never present an apparently authoritative
+        // amount for an impossible player roster supplied by an internal
+        // caller or future checkpoint. The actor ID policy is shared with
+        // the match commands and the first-round audit verifier.
+        var streetIds = board.Streets.Select(street => street.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        var boardSlots = board.Slots.Select(slot => slot.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        if (players.Count is < 2 or > MaxPrintedSeats || players.Any(p =>
+                p is null || !MatchParticipantId.IsValid(p.PlayerId)
+                || !boardSlots.Contains(p.StartingSlotId)
+                || !streetIds.Contains(p.StreetId)
+                || p.Atoms < 0 || p.DiplomacyTokens < 0
+                || p.HenchmenTotal != PrintedHenchmenPerSeat
+                || p.HenchmenAvailable is < 0 or > PrintedHenchmenPerSeat
+                || p.Hearts is < 1 or > MaxPrintedInitialHearts))
+            throw new ArgumentException(
+                "Salary requires 2–8 canonical players with valid public resources.",
+                nameof(players));
 
         var playerIds = players.Select(p => p.PlayerId).ToHashSet(StringComparer.Ordinal);
-        if (playerIds.Count != players.Count)
-        {
-            throw new ArgumentException("Player IDs must be distinct.", nameof(players));
-        }
+        if (playerIds.Count != players.Count
+            || players.Select(p => p.StartingSlotId)
+                .Distinct(StringComparer.Ordinal).Count() != players.Count)
+            throw new ArgumentException(
+                "Salary requires distinct player IDs and printed starting slots.",
+                nameof(players));
 
-        var boardSlots = board.Slots.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
         var occupiedSlots = new HashSet<string>(StringComparer.Ordinal);
         foreach (var activity in controlledActivities)
         {

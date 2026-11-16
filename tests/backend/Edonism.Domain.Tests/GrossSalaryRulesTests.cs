@@ -109,6 +109,75 @@ public sealed class GrossSalaryRulesTests
         Assert.Equal(3, quote[1].GrossAtoms);
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void FullDeckQuotesStayReadOnlyAndConsistentThroughMovementAndRestore(int seats)
+    {
+        var match = GameMatch.CreateFromTrustedFullDeckSetup(
+            Guid.NewGuid(), Board,
+            Enumerable.Range(0, seats).Select(i => $"player-{i}").ToArray(),
+            CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(),
+            ActionDeckFixture.ActionIds(), ActionDeckFixture.ElectionDayId, 2026);
+        var before = match.Snapshot();
+        Assert.Equal(seats, before.GrossSalaryQuotes.Count);
+        Assert.All(before.GrossSalaryQuotes, quote =>
+        {
+            Assert.Equal(2, quote.BaseAtoms);
+            Assert.Equal(1, quote.StandingActivityAtoms);
+            Assert.Equal(3, quote.GrossAtoms);
+        });
+        var actor = before.Players[0];
+        var adjacent = Board.Streets.Single(street => street.Id == actor.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(actor.PlayerId, adjacent, match.Revision).Accepted);
+        foreach (var player in before.Players)
+            Assert.True(match.TryEndTurn(player.PlayerId, match.Revision).Accepted);
+        var after = match.Snapshot();
+        Assert.Equal(MatchPhase.AwaitingRoundSettlement, after.Phase);
+        Assert.Equal(before.GrossSalaryQuotes, after.GrossSalaryQuotes);
+        Assert.Equal(before.Players.Select(p => p.Atoms),
+            after.Players.Select(p => p.Atoms));
+        var restored = GameMatch.RestoreFromCheckpoint(Board, match.CaptureCheckpoint());
+        Assert.Equal(after.GrossSalaryQuotes, restored.Snapshot().GrossSalaryQuotes);
+        Assert.True(restored.VerifyPublicAudit().IsValid);
+    }
+
+    [Fact]
+    public void GrossSalaryRejectsForgedRosterAndImpossiblePlayerResources()
+    {
+        var actual = NewMatch().Snapshot();
+        var valid = actual.Players.ToArray();
+        var controls = actual.ControlledActivities;
+        void Bad(params MatchPlayerSnapshot[] players) =>
+            Assert.Throws<ArgumentException>(() => GrossSalaryRules.Quote(Board, players, controls));
+        Bad([]);
+        Bad([valid[0]]);
+        Bad(Enumerable.Range(0, 9)
+            .Select(i => valid[0] with
+            {
+                PlayerId = $"player-{i}", StartingSlotId = Board.Slots[i].Id
+            }).ToArray());
+        Bad([valid[0], valid[0]]);
+        Bad([valid[0], valid[1] with { PlayerId = "system" }]);
+        Bad([valid[0], valid[1] with { PlayerId = new string('x', 65) }]);
+        Bad([valid[0], valid[1] with { PlayerId = "bad\\u202Eactor" }]);
+        Bad([valid[0], valid[1] with { StartingSlotId = valid[0].StartingSlotId }]);
+        Bad([valid[0], valid[1] with { StartingSlotId = "invalid-slot" }]);
+        Bad([valid[0], valid[1] with { StreetId = "invalid-road" }]);
+        Bad([valid[0], valid[1] with { Atoms = -1 }]);
+        Bad([valid[0], valid[1] with { DiplomacyTokens = -1 }]);
+        Bad([valid[0], valid[1] with { Hearts = 0 }]);
+        Bad([valid[0], valid[1] with { Hearts = 6 }]);
+        Bad([valid[0], valid[1] with { HenchmenTotal = 15 }]);
+        Bad([valid[0], valid[1] with { HenchmenTotal = 17 }]);
+        Bad([valid[0], valid[1] with { HenchmenAvailable = 17 }]);
+        // No side effects from failures on an otherwise valid match.
+        Assert.Equal(actual.GrossSalaryQuotes,
+            GrossSalaryRules.Quote(Board, actual.Players, controls));
+        Assert.True(NewMatch().VerifyPublicAudit().IsValid);
+    }
+
     [Fact]
     public void InvalidControlOwnershipAndUnknownLotsAreRejected()
     {

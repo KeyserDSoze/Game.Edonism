@@ -337,6 +337,28 @@ async function assertLivePublicStreetControlMatrix(
     created.state.controlledActivities.filter(x => x.ownerPlayerId !== actorId).length);
   expect(opponents.routes.every(route => route.ownerPlayerId !== actorId)).toBe(true);
 
+  // #160: .NET's public salary quote is valid only for an actual 2–8
+  // seat printed roster. Check every seat's own standing controlled lots,
+  // printed per-seat resources and that a quote is NOT a wallet credit.
+  expect(created.state.players.length).toBeGreaterThanOrEqual(2);
+  expect(created.state.players.length).toBeLessThanOrEqual(8);
+  expect(created.state.grossSalaryQuotes).toHaveLength(created.state.players.length);
+  for (const player of created.state.players) {
+    const own = created.state.controlledActivities.filter(lot =>
+      lot.ownerPlayerId === player.playerId);
+    const standing = own.filter(lot => lot.posture === 0).length;
+    const quote = created.state.grossSalaryQuotes.find(entry =>
+      entry.playerId === player.playerId);
+    expect(quote).toBeDefined();
+    expect(quote!.baseAtoms).toBe(2);
+    expect(quote!.standingActivityAtoms).toBe(standing);
+    expect(quote!.grossAtoms).toBe(2 + standing);
+    expect(player.atoms).toBe(4);
+    expect(player.diplomacyTokens).toBe(2);
+    expect(player.henchmenTotal).toBe(16);
+    expect(player.henchmenAvailable).toBe(16 - own.length);
+  }
+
   const board = JSON.parse(await readFile(
     new URL("../../shared/board/edonism-board.v1.json", import.meta.url), "utf8",
   )) as {

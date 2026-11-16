@@ -308,6 +308,106 @@ async function assertLivePublicUncontrolledAtlas(
 }
 
 
+// #152: end-to-end parity against the ACTUAL ASP.NET Core bearer-scoped
+// public free/opponent-lot routes, with zero-count owners and roads intact.
+async function assertLivePublicStreetControlMatrix(
+  page: Page,
+  created: CreatedMatch,
+  actorId: string,
+) {
+  const token = tokenFor(created, actorId);
+  const endpoint = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`;
+  const [freeReply, opponentReply] = await Promise.all([
+    page.request.get(endpoint + "/uncontrolled-routes", { headers: auth(token) }),
+    page.request.get(endpoint + "/opponent-controlled-routes", { headers: auth(token) }),
+  ]);
+  expect(freeReply.status()).toBe(200);
+  expect(opponentReply.status()).toBe(200);
+  expect(freeReply.headers()["cache-control"]).toContain("no-store");
+  expect(opponentReply.headers()["cache-control"]).toContain("no-store");
+  const freePlan = await freeReply.json() as {
+    routes: { slotId: string; streetId: string }[];
+  };
+  const opponents = await opponentReply.json() as {
+    routes: { slotId: string; streetId: string; ownerPlayerId: string; posture: number }[];
+  };
+  expect(freePlan.routes).toHaveLength(
+    created.state.boardActivities.length - created.state.controlledActivities.length);
+  expect(opponents.routes).toHaveLength(
+    created.state.controlledActivities.filter(x => x.ownerPlayerId !== actorId).length);
+  expect(opponents.routes.every(route => route.ownerPlayerId !== actorId)).toBe(true);
+
+  const board = JSON.parse(await readFile(
+    new URL("../../shared/board/edonism-board.v1.json", import.meta.url), "utf8",
+  )) as {
+    streets: { id: string; name: string }[];
+    slots: { id: string; streetId: string }[];
+  };
+  const bySlot = new Map(board.slots.map(slot => [slot.id, slot.streetId]));
+  const matrix = page.getByTestId("public-street-control-details");
+  await expect(matrix).toBeVisible();
+  if (await matrix.getAttribute("open") === null)
+    await matrix.locator("summary").click();
+  const rows = page.getByTestId("public-street-control-list").locator("li");
+  await expect(rows).toHaveCount(board.streets.length);
+  let total = 0;
+  let available = 0;
+  let controlledTotal = 0;
+  for (let i = 0; i < board.streets.length; i++) {
+    const street = board.streets[i];
+    const slots = board.slots.filter(slot => slot.streetId === street.id);
+    const control = created.state.controlledActivities.filter(x =>
+      bySlot.get(x.slotId) === street.id);
+    const free = freePlan.routes.filter(route => route.streetId === street.id);
+    const rival = opponents.routes.filter(route => route.streetId === street.id);
+    total += slots.length;
+    available += free.length;
+    controlledTotal += control.length;
+    const row = rows.nth(i);
+    await expect(row).toHaveAttribute(
+      "data-testid", `public-street-control-${street.id}`);
+    await expect(row).toHaveAttribute("data-total-slots", String(slots.length));
+    await expect(row).toHaveAttribute("data-free-count", String(free.length));
+    await expect(row).toHaveAttribute("data-controlled-count", String(control.length));
+    await expect(row).toHaveAttribute("data-standing-count",
+      String(control.filter(x => x.posture === 0).length));
+    await expect(row).toHaveAttribute("data-fallen-count",
+      String(control.filter(x => x.posture === 1).length));
+    expect(rival).toHaveLength(control.filter(x =>
+      x.ownerPlayerId !== actorId).length);
+    for (const [j, actor] of created.state.players.entries()) {
+      const one = control.filter(x => x.ownerPlayerId === actor.playerId);
+      const tag = row.locator('[data-testid*="-owner-"]').nth(j);
+      await expect(tag).toHaveAttribute("data-testid",
+        `public-street-control-${street.id}-owner-${actor.playerId}`);
+      await expect(tag).toHaveAttribute("data-owned-count", String(one.length));
+      await expect(tag).toHaveAttribute("data-standing-count",
+        String(one.filter(x => x.posture === 0).length));
+      await expect(tag).toHaveAttribute("data-fallen-count",
+        String(one.filter(x => x.posture === 1).length));
+    }
+  }
+  expect(total).toBe(30);
+  expect(available).toBe(freePlan.routes.length);
+  expect(controlledTotal).toBe(created.state.controlledActivities.length);
+  const before = await page.getByTestId("dev-revision").textContent();
+  const requests: string[] = [];
+  const onRequest = (request: { method(): string; url(): string }) => {
+    if (request.method() === "POST") requests.push(request.url());
+  };
+  page.on("request", onRequest);
+  try {
+    await page.getByTestId(
+      `public-street-control-inspect-${board.streets[1].id}`).click();
+    await expect(page.getByTestId("selected-street")).toHaveText(
+      board.streets[1].name);
+    await expect(page.getByTestId("dev-revision")).toHaveText(before ?? "0");
+    expect(requests).toEqual([]);
+  } finally {
+    page.off("request", onRequest);
+  }
+}
+
 // #147: the browser's active-turn street-hop labels must agree EXACTLY
 // with .NET's bearer-protected audited other-player route projection.
 // The extra read does not cause a move, attack or expose hidden action cards.
@@ -958,6 +1058,7 @@ test("real .NET eight-seat match supports private join and all sequential turns"
   };
   expect(freePlan.routes).toHaveLength(22);
   await assertLivePublicUncontrolledAtlas(page, freePlan.routes);
+  await assertLivePublicStreetControlMatrix(page, created, "alice");
   // #140: 22 cards are deliberately UNCONTROLLED; legitimate complete
   // 30-card board keeps wages/scouting/resources visible to all eight seats.
   expect(new Set(created.state.boardActivities.map(a => a.slotId)).size).toBe(30);
@@ -2926,6 +3027,7 @@ test("real .NET: two browser street route plans follow public activity ownership
   // #149: compare all 28 public face-up FREE cards against real .NET
   // bearer-scoped audited route data. A click is inspection, not a move.
   await assertLivePublicUncontrolledAtlas(page, firstPlan.routes, true);
+  await assertLivePublicStreetControlMatrix(page, created, "alice");
   for (const route of firstPlan.routes) {
     expect(route.streetPath[0]).toBe(firstPlan.fromStreetId);
     expect(route.streetPath.at(-1)).toBe(route.streetId);

@@ -224,3 +224,92 @@ for (const count of [2, 4, 8] as const) {
       })).toBe(immutable);
     });
 }
+
+
+// #146: PvP scouting may show ONLY the public character/origin technical
+// IDs after #141/#145 has established complete, genuine provenance.
+// A synthetic private hand/token field must never be copied into the UI.
+for (const count of [2, 4, 8] as const) {
+  test("#146: " + count + "-seat verified public card identities never leak private fields",
+    async ({ page }) => {
+      const roster = players.slice(0, count).map((playerId, i) => ({
+        playerId, streetId: i % 2 ? "einstein" : "gauss",
+        startingSlotId: fullBoardSlots145[i], hearts: i % 5 + 1,
+      }));
+      const genuine = {
+        players: roster,
+        boardActivities: fullBoardSlots145.map(slotId => ({
+          slotId, cardId: "synthetic:origin:" + slotId, category: "culture",
+        })),
+        assignedCharacters: roster.map((p, i) => ({
+          playerId: p.playerId, characterId: "public:character:" + i,
+          startingActivityCardId: "synthetic:origin:" + p.startingSlotId,
+          printedInitialHearts: p.hearts,
+        })),
+        privateHand: { token: "NEVER_EXPOSE_TOKEN", cards: ["NEVER_EXPOSE_HAND"] },
+      };
+      const tamper = (edit: (s: typeof genuine) => void) => {
+        const s = structuredClone(genuine);
+        edit(s);
+        return s;
+      };
+      const forged = {
+        swappedOrigin: tamper(s => {
+          const id = s.assignedCharacters[0].startingActivityCardId;
+          s.assignedCharacters[0].startingActivityCardId =
+            s.assignedCharacters[1].startingActivityCardId;
+          s.assignedCharacters[1].startingActivityCardId = id;
+        }),
+        missingCharacter: tamper(s => { s.assignedCharacters.pop(); }),
+        duplicatedCharacter: tamper(s => {
+          s.assignedCharacters[1].characterId = s.assignedCharacters[0].characterId;
+        }),
+        forgedHearts: tamper(s => { s.assignedCharacters[0].printedInitialHearts = 99; }),
+        wrongOrigin: tamper(s => { s.players[0].startingSlotId = "M-04"; }),
+        reservedSeat: tamper(s => { s.players[0].playerId = "system"; }),
+        duplicatePlayerId: tamper(s => { s.players[1].playerId = "alice"; }),
+      };
+      const partial = tamper(s => {
+        s.boardActivities.pop();
+        // The #141 partial Development fixture remains valid.
+        s.assignedCharacters[0].startingActivityCardId = "synthetic:partial";
+      });
+      const legacy = tamper(s => {
+        s.assignedCharacters = [];
+        s.players.forEach(p => { p.hearts = null as unknown as number; });
+      });
+      const immutable = JSON.stringify({ genuine, forged, partial, legacy });
+      await page.goto("/");
+      const result = await page.evaluate(async data => {
+        const { verifiedPublicCharacterRoster: verify } =
+          await import("/src/features/city/playerCharacterHearts.ts");
+        return {
+          good: [...verify(data.genuine)],
+          forged: Object.entries(data.forged)
+            .map(([name, input]) => [name, verify(input).size]),
+          partial: [...verify(data.partial)],
+          legacy: verify(data.legacy).size,
+          noInput: verify(null).size,
+        };
+      }, { genuine, forged, partial, legacy });
+      const expected = genuine.assignedCharacters.map(a => [
+        a.playerId, {
+          characterId: a.characterId,
+          startingActivityCardId: a.startingActivityCardId,
+          printedInitialHearts: a.printedInitialHearts,
+        },
+      ]);
+      expect(result.good).toEqual(expected);
+      expect(result.forged).toEqual(Object.keys(forged).map(name => [name, 0]));
+      expect(result.partial).toEqual(expected.map(([id, card], i) => [
+        id, i === 0 ? {
+          ...(card as typeof expected[number][1]),
+          startingActivityCardId: "synthetic:partial",
+        } : card,
+      ]));
+      expect(result.legacy).toBe(0);
+      expect(result.noInput).toBe(0);
+      expect(JSON.stringify(result)).not.toMatch(/NEVER_EXPOSE/);
+      expect(JSON.stringify({ genuine, forged, partial, legacy })).toBe(immutable);
+    });
+}

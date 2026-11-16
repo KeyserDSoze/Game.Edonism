@@ -153,6 +153,14 @@ public static class MatchAuditReplay
                 p.StreetId != positions[p.PlayerId] || p.FreeMoveUsed != moved[p.PlayerId]))
             return Fail("snapshot_position_mismatch", revision);
 
+        // #161: an event log can replay perfectly while the public genesis
+        // economy, 30-card placement, control postures or gross salary have
+        // been forged. Never certify that snapshot or publish even a genesis
+        // frame. The verifier deliberately does NOT inspect private hands.
+        var publicError = MatchFirstRoundPublicSnapshot.Validate(board, snapshot);
+        if (publicError is not null)
+            return Fail(publicError, revision);
+
         return new MatchAuditReplayResult(true, "ok", revision, phase, active,
             Array.AsReadOnly(snapshot.TurnOrder
                 .Select(id => new ReplayedMatchPlayer(id, positions[id], moved[id]))

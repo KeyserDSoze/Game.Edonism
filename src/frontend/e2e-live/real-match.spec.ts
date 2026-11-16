@@ -112,6 +112,13 @@ async function startRealMatch(page: Page): Promise<CreatedMatch> {
     await expect(lot).toHaveAttribute("data-card-id", card!.cardId);
     await expect(lot).toHaveAttribute("data-posture", control.posture === 0 ? "standing" : "fallen");
   }
+  // #144: the actual Vite projector agrees with a real 2-seat .NET roster.
+  const projectedGross = await page.evaluate(async state => {
+    const { publicGrossSalaryQuotes } =
+      await import("/src/features/city/activityMarkers.ts");
+    return publicGrossSalaryQuotes(state);
+  }, match.state);
+  expect(projectedGross).toEqual(match.state.grossSalaryQuotes);
   for (const quote of match.state.grossSalaryQuotes) {
     await expect(page.getByTestId(`gross-salary-${quote.playerId}`))
       .toHaveAttribute("data-gross-atoms", String(quote.grossAtoms));
@@ -363,6 +370,13 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   for (const quote of afterMove.grossSalaryQuotes)
     await expect(page.getByTestId(`match-player-economy-${quote.playerId}`))
       .toHaveAttribute("data-gross-atoms", String(quote.grossAtoms));
+  // #144: canonical gross rows remain verifiable after the .NET street move.
+  const movedGross = await page.evaluate(async state => {
+    const { publicGrossSalaryQuotes } =
+      await import("/src/features/city/activityMarkers.ts");
+    return publicGrossSalaryQuotes(state);
+  }, afterMove);
+  expect(movedGross).toEqual(afterMove.grossSalaryQuotes);
   // #141: the real public assigned-character provenance is immutable
   // across the movement; no client hp/attack rule is involved.
   expect(afterMove.assignedCharacters).toEqual(created.state.assignedCharacters);
@@ -776,6 +790,13 @@ test("real .NET eight-seat match supports private join and all sequential turns"
   }
   await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(8);
   await expect(page.getByTestId("match-activity-roster").locator("li[data-owner-id]")).toHaveCount(8);
+  // #144: test the actual Vite projector against the real 8-seat .NET roster.
+  const projectedEightSeatGross = await page.evaluate(async state => {
+    const { publicGrossSalaryQuotes } =
+      await import("/src/features/city/activityMarkers.ts");
+    return publicGrossSalaryQuotes(state);
+  }, created.state);
+  expect(projectedEightSeatGross).toEqual(created.state.grossSalaryQuotes);
   // #138: all eight public economic rows equal authoritative read-only
   // gross quote/controlled lots; no private data, payout or new API call.
   for (const quote of created.state.grossSalaryQuotes) {

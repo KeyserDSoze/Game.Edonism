@@ -419,6 +419,10 @@ async function assertLivePublicStreetControlMatrix(
     matchId: string; playerId: string; round: number; verifiedRevision: number;
     totalSlots: number; freeLots: number; controlledLots: number;
     sharedStreetCount: number;
+    footprints: {
+      playerId: string; place: number; controlledLots: number;
+      standing: number; fallen: number; occupiedStreets: number;
+    }[];
     streets: {
       streetId: string; streetName: string; totalSlots: number; freeLots: number;
       controlledLots: number; standing: number; fallen: number;
@@ -505,6 +509,21 @@ async function assertLivePublicStreetControlMatrix(
     };
   });
   expect(observedFootprints).toEqual(expectedFootprints);
+  // #159: the exact same audited .NET report must reproduce every
+  // real React footprint, including all public seats and competition ties.
+  const serverFootprints = report.footprints.map(player => ({
+    id: `public-territory-footprint-${player.playerId}`,
+    place: String(player.place),
+    owned: String(player.controlledLots),
+    standing: String(player.standing),
+    fallen: String(player.fallen),
+    roads: String(player.occupiedStreets),
+  }));
+  expect(serverFootprints).toHaveLength(created.state.players.length);
+  expect(serverFootprints).toEqual(expectedFootprints);
+  expect(serverFootprints).toEqual(observedFootprints);
+  expect(report.footprints.reduce((sum, player) =>
+    sum + player.controlledLots, 0)).toBe(report.controlledLots);
   expect(rawFootprints.reduce((sum, item) => sum + item.owned, 0))
     .toBe(created.state.controlledActivities.length);
 

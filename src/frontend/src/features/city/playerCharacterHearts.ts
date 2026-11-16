@@ -12,6 +12,9 @@ import { isValidDevelopmentTechnicalPlayerId } from "../matches/verifiedDevelopm
  * until the original files are provided (#19).
  */
 const canonicalStreets = new Set(cityBoard.streets.map(street => street.id));
+// #145: the full 30-card board has immutable printed starting slots. This is
+// provenance for public badges ONLY, not a card-play or ownership rule.
+const printedActivitySlots = new Set(cityBoard.slots.map(slot => slot.id));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -28,6 +31,13 @@ export function verifiedPublicCharacterHearts(value: unknown): ReadonlyMap<strin
     || value.assignedCharacters.length !== value.players.length)
     return empty();
 
+  // #145: In a real fully placed 30-card match, assignment IDs must resolve
+  // to the player's own printed starting slot. Partial synthetic/legacy
+  // Development fixtures retain the previous #141 behavior.
+  const fullBoardCards = Array.isArray(value.boardActivities)
+    && value.boardActivities.length === cityBoard.slots.length
+      ? value.boardActivities : null;
+  const startingSlots = new Map<string, string>();
   const publicHearts = new Map<string, number>();
   for (const raw of value.players) {
     if (!isRecord(raw)
@@ -35,10 +45,15 @@ export function verifiedPublicCharacterHearts(value: unknown): ReadonlyMap<strin
       || publicHearts.has(raw.playerId)
       || typeof raw.streetId !== "string"
       || !canonicalStreets.has(raw.streetId)
+      || (fullBoardCards !== null
+        && (typeof raw.startingSlotId !== "string"
+          || !printedActivitySlots.has(raw.startingSlotId)))
       || !Number.isSafeInteger(raw.hearts)
       || (raw.hearts as number) < 1 || (raw.hearts as number) > 5)
       return empty();
     publicHearts.set(raw.playerId, raw.hearts as number);
+    if (fullBoardCards !== null)
+      startingSlots.set(raw.playerId, raw.startingSlotId as string);
   }
 
   const seenSeats = new Set<string>();
@@ -56,6 +71,19 @@ export function verifiedPublicCharacterHearts(value: unknown): ReadonlyMap<strin
       || !Number.isSafeInteger(raw.printedInitialHearts)
       || raw.printedInitialHearts !== publicHearts.get(raw.playerId))
       return empty();
+
+    if (fullBoardCards !== null) {
+      // Never accept a matching card ID in a rival's lot, a duplicate ID,
+      // or two cards occupying this seat's printed origin. Ignore unrelated
+      // cards' attributes: independently validated board/economy views remain
+      // separate from a character's genuine origin proof.
+      const byCard = fullBoardCards.filter(card => isRecord(card)
+        && card.cardId === raw.startingActivityCardId);
+      const bySlot = fullBoardCards.filter(card => isRecord(card)
+        && card.slotId === startingSlots.get(raw.playerId));
+      if (byCard.length !== 1 || bySlot.length !== 1 || byCard[0] !== bySlot[0])
+        return empty();
+    }
 
     seenSeats.add(raw.playerId);
     seenCharacters.add(raw.characterId);

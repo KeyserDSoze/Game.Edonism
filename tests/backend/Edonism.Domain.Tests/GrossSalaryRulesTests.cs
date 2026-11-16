@@ -12,6 +12,47 @@ public sealed class GrossSalaryRulesTests
         GameMatch.CreateFromTrustedSetup(Guid.NewGuid(), Board,
         [new("alice", "N-01"), new("bob", "S-01")]);
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void PublicEconomicScoutingQuotesCoverEverySeatWithoutPayingSalary(int count)
+    {
+        var players = Board.Slots.Take(count)
+            .Select((slot, i) => new MatchParticipantSeed($"player-{i}", slot.Id))
+            .ToArray();
+        var match = GameMatch.CreateFromTrustedSetup(Guid.NewGuid(), Board, players);
+        var before = match.Snapshot();
+        Assert.Equal(count, before.GrossSalaryQuotes.Count);
+        Assert.Equal(count, before.ControlledActivities.Count);
+        Assert.Equal(count, before.GrossSalaryQuotes.Select(q => q.PlayerId).Distinct().Count());
+        foreach (var player in before.Players)
+        {
+            var owned = before.ControlledActivities
+                .Where(lot => lot.OwnerPlayerId == player.PlayerId).ToArray();
+            var standing = owned.Count(lot => lot.Posture == HenchmanPosture.Standing);
+            var quote = Assert.Single(before.GrossSalaryQuotes.Where(q =>
+                q.PlayerId == player.PlayerId));
+            Assert.Single(owned);
+            Assert.Equal(1, standing);
+            Assert.Equal(2, quote.BaseAtoms);
+            Assert.Equal(standing, quote.StandingActivityAtoms);
+            Assert.Equal(3, quote.GrossAtoms);
+            Assert.Equal(4, player.Atoms);
+        }
+
+        var actor = before.Players[0];
+        var target = Board.Streets.Single(street => street.Id == actor.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(actor.PlayerId, target, match.Revision).Accepted);
+        Assert.True(match.TryEndTurn(actor.PlayerId, match.Revision).Accepted);
+        var after = match.Snapshot();
+        Assert.Equal(before.GrossSalaryQuotes, after.GrossSalaryQuotes);
+        Assert.Equal(before.ControlledActivities, after.ControlledActivities);
+        Assert.Equal(before.Players.Select(p => p.Atoms),
+            after.Players.Select(p => p.Atoms));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
     [Fact]
     public void TrustedStartControlsOneRealLotWithStandingHenchmanPerPlayer()
     {

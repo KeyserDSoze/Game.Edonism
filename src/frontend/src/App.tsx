@@ -10,6 +10,7 @@ import { playerMarkerPlacements } from "@/features/city/playerMarkers";
 import { verifiedPublicStartingLots } from "@/features/city/playerStartingLots";
 import { verifiedPublicFreeMoveUsage } from "@/features/city/playerFreeMoveUsage";
 import { verifiedPublicCharacterHearts } from "@/features/city/playerCharacterHearts";
+import { verifiedPublicSeatEconomy } from "@/features/city/publicSeatEconomy";
 import { controlledLotMarkers, publicGrossSalaryQuotes, verifiedPublicBoardCardCount, type PublicMatchSceneState } from "@/features/city/activityMarkers";
 import { verifiedTacticalFocus, type TacticalFocus } from "@/features/city/tacticalFocus";
 import { verifiedHistoricalStreetFocus, type HistoricalStreetFocus } from "@/features/city/historicalStreetFocus";
@@ -53,6 +54,9 @@ export default function App() {
   const publicCharacterHearts = verifiedPublicCharacterHearts(publicPlayers?.players);
   const controlMarkers = publicPlayers ? controlledLotMarkers(publicPlayers) : [];
   const grossQuotes = publicPlayers ? publicGrossSalaryQuotes(publicPlayers) : [];
+  // #138: same server-confirmed public lots and verified GROSS quote as
+  // the activity roster below; never infer paid atoms or legal attacks.
+  const publicSeatEconomy = verifiedPublicSeatEconomy(publicPlayers);
   const verifiedBoardCardCount = verifiedPublicBoardCardCount(publicPlayers);
   const currentStreet = streetById(selectedStreetId) ?? cityBoard.streets[0];
   const currentSlot = selectedSlotId ? slotById(selectedSlotId) : undefined;
@@ -344,6 +348,23 @@ export default function App() {
                           className="text-muted-foreground">
                           {t("city.publicCharacterHearts", {
                             hearts: publicCharacterHearts.get(marker.playerId),
+                          })}
+                        </span>
+                      )}
+                      {publicSeatEconomy.has(marker.playerId) && (
+                        <span
+                          data-testid={`match-player-economy-${marker.playerId}`}
+                          data-controlled-lots={publicSeatEconomy.get(marker.playerId)?.controlledLots}
+                          data-standing={publicSeatEconomy.get(marker.playerId)?.standing}
+                          data-fallen={publicSeatEconomy.get(marker.playerId)?.fallen}
+                          data-gross-atoms={publicSeatEconomy.get(marker.playerId)?.grossAtoms}
+                          className="text-muted-foreground"
+                        >
+                          {t("city.publicSeatEconomy", {
+                            lots: publicSeatEconomy.get(marker.playerId)?.controlledLots,
+                            standing: publicSeatEconomy.get(marker.playerId)?.standing,
+                            fallen: publicSeatEconomy.get(marker.playerId)?.fallen,
+                            gross: publicSeatEconomy.get(marker.playerId)?.grossAtoms,
                           })}
                         </span>
                       )}

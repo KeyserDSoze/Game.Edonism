@@ -105,6 +105,17 @@ async function startRealMatch(page: Page): Promise<CreatedMatch> {
   for (const quote of match.state.grossSalaryQuotes) {
     await expect(page.getByTestId(`gross-salary-${quote.playerId}`))
       .toHaveAttribute("data-gross-atoms", String(quote.grossAtoms));
+    // #138: read-only city summary must equal the actual .NET public quote
+    // and its authoritative controlled-lot posture records for this seat.
+    const owned = match.state.controlledActivities.filter(
+      lot => lot.ownerPlayerId === quote.playerId);
+    const standing = owned.filter(lot => lot.posture === 0).length;
+    const summary = page.getByTestId(`match-player-economy-${quote.playerId}`);
+    await expect(summary).toHaveAttribute("data-gross-atoms", String(quote.grossAtoms));
+    await expect(summary).toHaveAttribute("data-controlled-lots", String(owned.length));
+    await expect(summary).toHaveAttribute("data-standing", String(standing));
+    await expect(summary).toHaveAttribute("data-fallen", String(owned.length - standing));
+    await expect(summary).toContainText(`preventivo lordo: ${quote.grossAtoms} atomi`);
   }
   for (const player of match.state.players) {
     await expect(page.getByTestId(`match-player-${player.playerId}`))
@@ -300,6 +311,12 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   await expect(page.getByTestId("match-player-alice"))
     .toHaveAttribute("data-street-id", aliceDestination);
   expect(afterMove.players[0].freeMoveUsed).toBe(true);
+  // #138: the only move cannot credit atoms, buy new lots or change quote.
+  expect(afterMove.grossSalaryQuotes).toEqual(created.state.grossSalaryQuotes);
+  expect(afterMove.controlledActivities).toEqual(created.state.controlledActivities);
+  for (const quote of afterMove.grossSalaryQuotes)
+    await expect(page.getByTestId(`match-player-economy-${quote.playerId}`))
+      .toHaveAttribute("data-gross-atoms", String(quote.grossAtoms));
   // #137: moving with the actual .NET API does not modify printed hearts.
   for (const player of afterMove.players) {
     const original = created.state.players.find(p => p.playerId === player.playerId);
@@ -679,6 +696,18 @@ test("real .NET eight-seat match supports private join and all sequential turns"
   expect(created.state.grossSalaryQuotes).toHaveLength(8);
   await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(8);
   await expect(page.getByTestId("match-activity-roster").locator("li[data-owner-id]")).toHaveCount(8);
+  // #138: all eight public economic rows equal authoritative read-only
+  // gross quote/controlled lots; no private data, payout or new API call.
+  for (const quote of created.state.grossSalaryQuotes) {
+    const owned = created.state.controlledActivities.filter(
+      lot => lot.ownerPlayerId === quote.playerId);
+    const standing = owned.filter(lot => lot.posture === 0).length;
+    const summary = page.getByTestId(`match-player-economy-${quote.playerId}`);
+    await expect(summary).toHaveAttribute("data-gross-atoms", String(quote.grossAtoms));
+    await expect(summary).toHaveAttribute("data-controlled-lots", String(owned.length));
+    await expect(summary).toHaveAttribute("data-standing", String(standing));
+    await expect(summary).toHaveAttribute("data-fallen", String(owned.length - standing));
+  }
 
   const guestContext = await browser.newContext();
   try {

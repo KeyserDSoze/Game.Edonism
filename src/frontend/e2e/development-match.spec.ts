@@ -6346,3 +6346,75 @@ for (const count of [2, 8] as const) {
       await expect(page.getByTestId("match-character-hearts-alice")).toHaveCount(0);
     });
 }
+
+// #138: city scouting copies the existing validated PUBLIC quote only.
+for (const count of [2, 8] as const) {
+  for (const fallen of [false, true] as const) {
+    test(`#138: ${count}-seat public city economy with fallen=${fallen} is read-only in IT/EN`,
+      async ({ page }) => {
+        if (count === 2) {
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.addInitScript(() => {
+            const original = HTMLCanvasElement.prototype.getContext;
+            HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+              if (kind === "webgl" || kind === "webgl2"
+                || kind === "experimental-webgl") return null;
+              return Reflect.apply(original, this, [kind, ...args]);
+            };
+          });
+        }
+        const { observedHeaders } = await mockMatchApi(page,
+          { playerCount: count, fallenHenchman: fallen });
+        await page.goto("/");
+        await page.getByTestId("dev-player-count").selectOption(String(count));
+        await page.getByTestId("dev-create").click();
+        await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(count);
+        for (const playerId of demoSeats.slice(0, count)) {
+          const economy = page.getByTestId(`match-player-economy-${playerId}`);
+          const alice = playerId === "alice";
+          const bob = playerId === "bob";
+          const gross = alice || (bob && !fallen) ? 3 : 2;
+          await expect(economy).toHaveAttribute("data-controlled-lots", alice || bob ? "1" : "0");
+          await expect(economy).toHaveAttribute("data-standing", alice || (bob && !fallen) ? "1" : "0");
+          await expect(economy).toHaveAttribute("data-fallen", bob && fallen ? "1" : "0");
+          await expect(economy).toHaveAttribute("data-gross-atoms", String(gross));
+          await expect(economy).toContainText(`preventivo lordo: ${gross} atomi`);
+        }
+        expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+          .toHaveLength(0);
+        await page.getByTestId("dev-move-planck").click();
+        await expect(page.getByTestId("dev-revision")).toHaveText("1");
+        await expect(page.getByTestId("match-player-economy-alice"))
+          .toHaveAttribute("data-gross-atoms", "3");
+        await page.getByTestId("match-inspect-street-bob").click();
+        await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+        await expect(page.getByTestId("match-player-economy-bob"))
+          .toContainText(`gross quote: ${fallen ? 2 : 3} atoms`);
+        await page.getByTestId("dev-seat-bob").click();
+        await expect(page.getByTestId("match-player-economy-bob"))
+          .toHaveAttribute("data-gross-atoms", fallen ? "2" : "3");
+        expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+          .toHaveLength(1);
+        await page.getByTestId("dev-leave").click();
+        await expect(page.getByTestId("match-player-economy-alice")).toHaveCount(0);
+      });
+  }
+}
+
+for (const kind of ["missingGrossQuote", "invalidGrossQuote", "missingBoardCard",
+  "badControlSlot", "unknownOwner"] as const) {
+  test(`#138: forged ${kind} hides every public economic city label without affecting turn`,
+    async ({ page }) => {
+      await mockMatchApi(page, { [kind]: true, playerCount: 8 });
+      await page.goto("/");
+      await page.getByTestId("dev-player-count").selectOption("8");
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(8);
+      for (const playerId of demoSeats) {
+        await expect(page.getByTestId(`match-player-economy-${playerId}`)).toHaveCount(0);
+        await expect(page.getByTestId(`gross-salary-${playerId}`)).toHaveCount(0);
+      }
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+    });
+}

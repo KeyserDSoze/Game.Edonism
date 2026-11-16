@@ -31,8 +31,8 @@ public sealed class GrossSalaryRulesTests
             var owned = before.ControlledActivities
                 .Where(lot => lot.OwnerPlayerId == player.PlayerId).ToArray();
             var standing = owned.Count(lot => lot.Posture == HenchmanPosture.Standing);
-            var quote = Assert.Single(before.GrossSalaryQuotes.Where(q =>
-                q.PlayerId == player.PlayerId));
+            var quote = Assert.Single(before.GrossSalaryQuotes,
+                q => q.PlayerId == player.PlayerId);
             Assert.Single(owned);
             Assert.Equal(1, standing);
             Assert.Equal(2, quote.BaseAtoms);

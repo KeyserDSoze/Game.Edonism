@@ -192,6 +192,18 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "match_not_found" });
         });
 
+        // #158: full, audit-verified .NET territory (read-only, Development
+        // only). Anonymous, forged or revoked bearers always get 404.
+        group.MapGet("/{matchId:guid}/public-territory",
+            (Guid matchId, HttpContext context, DevelopmentMatchStore store) =>
+        {
+            if (!store.TryReadPublicTerritory(matchId, Token(context), out var territory))
+                return Results.NotFound(new { code = "match_not_found" });
+            return territory is null
+                ? Results.Conflict(new { code = "full_board_required" })
+                : Results.Ok(territory);
+        });
+
         // #87: one atomic, actor-bound read of the three already-audited
         // public tactical routes. Existing individual endpoints are unchanged.
         // No new gameplay decisions or permissions can come from this DTO.

@@ -30,8 +30,14 @@ the original server data, not a new browser calculation.
 
 Keep `hasValidDevelopmentPublicEnvelope` intentionally narrow:
 malformed view-only card payloads must **not** revoke a bearer, clear a
-private hand, prevent a valid turn or erase independently verified
-controlled markers/pawns. The Domain `.NET 10 GrossSalaryRules`
+private hand, prevent a valid turn or erase genuine public pawns.
+**Exception for controlled-lot rendering:** the pre-existing #108
+`controlledLotMarkers` safely rejects *all* lot markers when **any**
+`boardActivities[*].slotId` is a non-string runtime value, even on
+an uncontrolled lot. This is an intentional fail-closed rule, not a
+regression. With well-shaped string slots, unrelated foreign or
+duplicate unowned lots may still leave genuinely verified controlled
+markers visible. The Domain `.NET 10 GrossSalaryRules`
 remains sole authority for the gross pre-tax 2+upright controlled lot
 quote and no salaries are credited in first-round Development.
 No new endpoints, Production routes, client action rules or secrets.
@@ -44,8 +50,10 @@ No new endpoints, Production routes, client action rules or secrets.
 - Actual Vite Playwright 2/4/8: legitimate extra unowned card preserves
   count, gross quote, economy and resources; duplicate, foreign, bad
   category/card/slot type at *only* unowned printed lot hide all
-  financial summaries and board count without erasing valid controlled
-  markers. Verify input immutability.
+  financial summaries and board count. Existing controlled markers
+  stay independently visible for a well-shaped (string) unowned slot;
+  a non-string slot suppresses ALL markers per #108 fail-closed policy.
+  Verify input immutability.
 - Full React mocked Playwright 2/8 on true rendered city: legitimate
   extra unowned card preserves 3-card count and rows; bad card hides
   card count, quote, public economy and resources for all seats but

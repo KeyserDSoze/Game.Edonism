@@ -9,7 +9,7 @@ import { cityBoard, slotById, slotsOnStreet, streetById } from "@/features/city/
 import { playerMarkerPlacements } from "@/features/city/playerMarkers";
 import { verifiedPublicStartingLots } from "@/features/city/playerStartingLots";
 import { verifiedPublicFreeMoveUsage } from "@/features/city/playerFreeMoveUsage";
-import { verifiedPublicCharacterHearts } from "@/features/city/playerCharacterHearts";
+import { verifiedPublicCharacterHearts, verifiedPublicCharacterRoster } from "@/features/city/playerCharacterHearts";
 import { verifiedPublicSeatEconomy } from "@/features/city/publicSeatEconomy";
 import { verifiedPublicSeatResources } from "@/features/city/publicSeatResources";
 import { controlledLotMarkers, publicGrossSalaryQuotes, verifiedPublicBoardCardCount, type PublicMatchSceneState } from "@/features/city/activityMarkers";
@@ -55,6 +55,9 @@ export default function App() {
   // #141: validate each printed heart against its character assigned by
   // this SAME public .NET snapshot, rather than accepting only 1–5.
   const publicCharacterHearts = verifiedPublicCharacterHearts(publicPlayers);
+  // #146: the technical card IDs are already in the same public .NET
+  // character assignment. Show them only after the #141/#145 checks.
+  const publicCharacterRoster = verifiedPublicCharacterRoster(publicPlayers);
   const controlMarkers = publicPlayers ? controlledLotMarkers(publicPlayers) : [];
   const grossQuotes = publicPlayers ? publicGrossSalaryQuotes(publicPlayers) : [];
   // #138: same server-confirmed public lots and verified GROSS quote as
@@ -356,6 +359,30 @@ export default function App() {
                             hearts: publicCharacterHearts.get(marker.playerId),
                           })}
                         </span>
+                      )}
+                      {publicCharacterRoster.has(marker.playerId) && (
+                        <>
+                          <span
+                            data-testid={`match-character-card-${marker.playerId}`}
+                            data-character-card-id={publicCharacterRoster.get(marker.playerId)?.characterId}
+                            className="text-muted-foreground break-all"
+                          >
+                            {t("city.publicCharacterCardId", {
+                              id: publicCharacterRoster.get(marker.playerId)?.characterId,
+                            })}
+                          </span>
+                          <span
+                            data-testid={`match-character-starting-card-${marker.playerId}`}
+                            data-starting-activity-card-id={
+                              publicCharacterRoster.get(marker.playerId)?.startingActivityCardId
+                            }
+                            className="text-muted-foreground break-all"
+                          >
+                            {t("city.publicCharacterStartingCardId", {
+                              id: publicCharacterRoster.get(marker.playerId)?.startingActivityCardId,
+                            })}
+                          </span>
+                        </>
                       )}
                       {publicSeatEconomy.has(marker.playerId) && (
                         <span

@@ -337,6 +337,55 @@ async function assertLivePublicStreetControlMatrix(
     created.state.controlledActivities.filter(x => x.ownerPlayerId !== actorId).length);
   expect(opponents.routes.every(route => route.ownerPlayerId !== actorId)).toBe(true);
 
+  // #161: a correct event sequence must NOT certify forged public
+  // first-round resources or activity setup. Check the real Domain audit
+  // and its public-only frames against the original .NET-created match
+  // for both 2 and 8 seats. No POST, no client-authorized state.
+  const [auditReply, historyReply] = await Promise.all([
+    page.request.get(endpoint + "/audit", { headers: auth(token) }),
+    page.request.get(endpoint + "/history", { headers: auth(token) }),
+  ]);
+  expect(auditReply.status()).toBe(200);
+  expect(historyReply.status()).toBe(200);
+  expect(auditReply.headers()["cache-control"]).toContain("no-store");
+  expect(historyReply.headers()["cache-control"]).toContain("no-store");
+  const audit = await auditReply.json() as {
+    isValid: boolean; code: string; verifiedRevision: number;
+    activePlayerId: string | null;
+    frames: { revision: number; kind: string; actorId: string;
+      players: { playerId: string; streetId: string; freeMoveUsed: boolean }[] }[];
+    players: { playerId: string; streetId: string; freeMoveUsed: boolean }[];
+  };
+  const history = await historyReply.json() as {
+    matchId: string; verifiedRevision: number; frames: typeof audit.frames;
+  };
+  expect(audit.isValid).toBe(true);
+  expect(audit.code).toBe("ok");
+  expect(audit.verifiedRevision).toBe(created.state.revision);
+  expect(history.verifiedRevision).toBe(created.state.revision);
+  expect(history.matchId).toBe(created.matchId);
+  expect(audit.frames).toEqual(history.frames);
+  expect(audit.frames).toHaveLength(created.state.events.length);
+  expect(audit.frames[0].revision).toBe(0);
+  expect(audit.frames[0].kind).toBe("match-created");
+  expect(audit.frames[0].actorId).toBe("system");
+  expect(audit.players).toEqual(created.state.players.map(player => ({
+    playerId: player.playerId,
+    streetId: player.streetId,
+    freeMoveUsed: player.freeMoveUsed,
+  })));
+  expect(created.state.players.every(p =>
+    p.atoms === 4 && p.diplomacyTokens === 2
+    && p.henchmenTotal === 16 && p.henchmenAvailable === 15)).toBe(true);
+  expect(created.state.controlledActivities.every(lot => lot.posture === 0)).toBe(true);
+  expect(created.state.grossSalaryQuotes.every(quote =>
+    quote.baseAtoms === 2 && quote.standingActivityAtoms === 1
+    && quote.grossAtoms === 3)).toBe(true);
+  const publicAuditWire = JSON.stringify(audit) + JSON.stringify(history);
+  expect(publicAuditWire).not.toMatch(/cardIds|drawPile|actionCard/i);
+  for (const credential of created.credentials)
+    expect(publicAuditWire).not.toContain(credential.token);
+
   // #160: .NET's public salary quote is valid only for an actual 2–8
   // seat printed roster. Check every seat's own standing controlled lots,
   // printed per-seat resources and that a quote is NOT a wallet credit.

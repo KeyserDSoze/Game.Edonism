@@ -7083,3 +7083,101 @@ for (const count of [2, 8] as const) {
       });
   }
 }
+
+
+// #149: full 30-card printed Development boards have 28 visibly public but
+// UNCONTROLLED cards in this synthetic fixture (two controlled starts).
+// The city lists ALL of them only after validating the entire public board;
+// clicking merely selects the printed lot, without a .NET game command.
+for (const count of [2, 8] as const) {
+  for (const invalidQuota of [false, true] as const) {
+    test(`#149: ${count} seats free public activity atlas, forged quota=${invalidQuota}`,
+      async ({ page }) => {
+        if (count === 2) {
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.addInitScript(() => {
+            const original = HTMLCanvasElement.prototype.getContext;
+            HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+              if (kind === "webgl" || kind === "webgl2"
+                || kind === "experimental-webgl") return null;
+              return Reflect.apply(original, this, [kind, ...args]);
+            };
+          });
+        }
+        const { observedHeaders } = await mockMatchApi(page, {
+          playerCount: count,
+          publicCardCategory: invalidQuota ? "full-bad-quota" : "full-valid",
+        });
+        await page.goto("/");
+        await page.getByTestId("dev-player-count").selectOption(String(count));
+        await page.getByTestId("dev-create").click();
+        await expect(page.getByTestId("dev-revision")).toHaveText("0");
+        await expect(page.getByTestId("match-player-legend").locator("li"))
+          .toHaveCount(count);
+        await expect(page.getByTestId("match-activity-roster")
+          .locator("li[data-owner-id]")).toHaveCount(2);
+
+        const atlas = page.getByTestId("match-public-free-activities");
+        const list = page.getByTestId("match-public-free-activities-list");
+        if (invalidQuota) {
+          await expect(atlas).toHaveCount(0);
+          await expect(page.getByTestId("match-board-card-count")).toHaveCount(0);
+          // A rejected printed category NEVER suppresses player positions
+          // or revokes a valid actor's separate .NET turn command.
+          await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+          await expect(page.getByTestId("match-player-alice")).toHaveCount(1);
+          await expect(page.getByTestId("match-player-bob")).toHaveCount(1);
+          return;
+        }
+
+        await expect(page.getByTestId("match-board-card-count"))
+          .toContainText("30");
+        await expect(atlas).toBeVisible();
+        await expect(atlas).not.toHaveAttribute("open", "");
+        await expect(atlas.locator("summary"))
+          .toContainText("Esplora 28 attività non controllate sulla plancia");
+        await atlas.locator("summary").click();
+        await expect(atlas).toHaveAttribute("open", "");
+        await expect(list.locator("li")).toHaveCount(28);
+        await expect(list.locator("li").first())
+          .toHaveAttribute("data-card-id", "synthetic:printed:N-02");
+        await expect(list.locator("li").first())
+          .toHaveAttribute("data-street-id", "gauss");
+        await expect(list.locator("li").last())
+          .toHaveAttribute("data-card-id", "synthetic:printed:M-04");
+        await expect(page.getByTestId("public-free-activity-N-01")).toHaveCount(0);
+        await expect(page.getByTestId("public-free-activity-S-01")).toHaveCount(0);
+        await expect(page.getByTestId("match-inspect-free-activity-N-02"))
+          .toHaveAttribute("aria-label",
+            "Esplora attività non controllata nel lotto N-02 su Gauss Avenue");
+        await page.getByTestId("match-inspect-free-activity-N-02").click();
+        await expect(page.getByTestId("selected-slot")).toHaveText("N-02");
+        await expect(page.getByTestId("selected-street")).toHaveText("Gauss Avenue");
+        await expect(page.getByTestId("dev-revision")).toHaveText("0");
+        expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+          .toHaveLength(0);
+        await expect(page.getByTestId("gross-salary-alice")).toHaveCount(1);
+        await expect(page.getByTestId("match-character-hearts-bob")).toHaveCount(1);
+
+        if (count === 2) {
+          await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+          await expect(atlas.locator("summary"))
+            .toContainText("Inspect 28 uncontrolled activities on the board");
+          await expect(page.getByTestId("match-inspect-free-activity-N-02"))
+            .toHaveAttribute("aria-label",
+              "Inspect uncontrolled activity at lot N-02 on Gauss Avenue");
+          const overflow = await page.evaluate(() =>
+            document.documentElement.scrollWidth > window.innerWidth + 2);
+          expect(overflow).toBe(false);
+          await page.getByTestId("dev-end-turn").click();
+          await expect(page.getByTestId("dev-active-player")).toHaveText("bob");
+          await page.getByTestId("dev-seat-bob").click();
+          await page.getByTestId("dev-end-turn").click();
+          await expect(page.getByTestId("dev-revision")).toHaveText("2");
+          // No active player is necessary: printed public cards remain.
+          await expect(atlas).toBeVisible();
+          await expect(list.locator("li")).toHaveCount(28);
+        }
+      });
+  }
+}

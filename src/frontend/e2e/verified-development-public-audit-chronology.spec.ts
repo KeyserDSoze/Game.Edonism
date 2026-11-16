@@ -109,6 +109,12 @@ for (const count of [2, 4, 8] as const) {
       wrongGenesisTo: changed(s => { s.events[0].toStreetId = "planck"; }),
       genesisMissing: changed(s => { s.events.shift(); s.revision = 1; }),
       futureRoundEvent: changed(s => { s.events[1].round = 2; }),
+      reservedSystemAfterGenesis: changed(s => { s.events[1].actorId = "system"; }),
+      repeatedGenesisKind: changed(s => { s.events[1].kind = "match-created"; }),
+      reservedSystemFutureKind: changed(s => {
+        s.events[1].actorId = "system";
+        s.events[1].kind = "future-public-kind";
+      }),
       wrongSnapshotRound: changed(s => { s.round = 2; }),
       staleSnapshotRevision: changed(s => { s.revision = 1; }),
       highSnapshotRevision: changed(s => { s.revision = 99; }),

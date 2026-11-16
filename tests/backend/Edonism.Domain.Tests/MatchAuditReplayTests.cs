@@ -71,6 +71,34 @@ public sealed class MatchAuditReplayTests
     }
 
     [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void TechnicalGenesisActorAndEventKindAreUniqueAcrossFirstRound(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var seeds = board.Slots.Take(count)
+            .Select((slot, i) => new MatchParticipantSeed($"player-{i}", slot.Id))
+            .ToArray();
+        var match = GameMatch.CreateFromTrustedSetup(Guid.NewGuid(), board, seeds);
+        Assert.True(match.TryEndTurn("player-0", 0).Accepted);
+        var honest = match.Snapshot();
+        Assert.True(MatchAuditReplay.Verify(board, honest).IsValid);
+
+        var impersonated = MatchAuditReplay.Verify(board,
+            ReplaceEvent(honest, 1, e => e with { ActorId = "system" }));
+        Assert.False(impersonated.IsValid);
+        Assert.Equal("event_out_of_turn", impersonated.Code);
+        Assert.Empty(impersonated.Frames);
+
+        var repeatedGenesis = MatchAuditReplay.Verify(board,
+            ReplaceEvent(honest, 1, e => e with { Kind = "match-created" }));
+        Assert.False(repeatedGenesis.IsValid);
+        Assert.Equal("unknown_event_kind", repeatedGenesis.Code);
+        Assert.Empty(repeatedGenesis.Frames);
+    }
+
+    [Theory]
     [InlineData("revision", "invalid_event_revision")]
     [InlineData("round", "invalid_event_revision")]
     [InlineData("actor", "event_out_of_turn")]

@@ -9,6 +9,8 @@ import { hasValidDevelopmentPublicEnvelope } from "./verifiedDevelopmentPublicEn
  * or infer powers/settlement. Only the .NET Domain can do those things.
  * Future well-shaped PUBLIC event kinds remain transport-compatible, but
  * all first-round event records must be in the same contiguous timeline.
+ * #134: genesis is unique. Later public entries cannot claim the reserved
+ * system principal or repeat the match-created event kind.
  */
 export function hasValidDevelopmentPublicAuditChronology(
   value: unknown, expectedMatchId: string,
@@ -28,7 +30,8 @@ export function hasValidDevelopmentPublicAuditChronology(
     const event = value.events[i];
     // Check the real wire record, never trust a TypeScript-only cast.
     if (!isPublicMatchEventRecord(event)
-      || event.revision !== i || event.round !== 1)
+      || event.revision !== i || event.round !== 1
+      || event.actorId === "system" || event.kind === "match-created")
       return false;
   }
   return true;

@@ -25,7 +25,7 @@ function stateFor(count: Count) {
 }
 
 for (const count of [2, 4, 8] as const) {
-  test("#126: real public ingress accepts every roster actor and system for "
+  test("#134: real public envelope admits known actors, chronology reserves system for "
     + count + " seats", async ({ page }) => {
     const initial = stateFor(count);
     const before = JSON.stringify(initial);
@@ -51,7 +51,9 @@ for (const count of [2, 4, 8] as const) {
       };
     }, initial);
     expect(result.bySeat).toEqual(Array.from({ length: count }, () => [true, true]));
-    expect(result.system).toEqual([true, true]);
+    // #126's broad envelope is shape-compatible; #134's narrower
+    // chronology refuses reserved genesis identity after revision zero.
+    expect(result.system).toEqual([true, false]);
     expect(result.initial).toEqual([true, true]);
     expect(result.badIndependentCard).toBe(true);
     expect(JSON.stringify(initial)).toBe(before);

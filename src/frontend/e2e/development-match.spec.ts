@@ -6898,3 +6898,85 @@ for (const count of [2, 8] as const) {
     });
   }
 }
+
+
+// #147: lightweight, PUBLIC PvP distance from the actual current turn owner;
+// never a move option or server command. Canonical street hops must update on
+// turn rotation and disappear when the last first-round player ends the turn.
+for (const count of [2, 8] as const) {
+  test(`#147: ${count} seats display active-turn rival hops with IT/EN/mobile/no-WebGL`,
+    async ({ page }) => {
+      if (count === 2) {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.addInitScript(() => {
+          const original = HTMLCanvasElement.prototype.getContext;
+          HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+            if (kind === "webgl" || kind === "webgl2"
+              || kind === "experimental-webgl") return null;
+            return Reflect.apply(original, this, [kind, ...args]);
+          };
+        });
+      }
+      const { observedHeaders } = await mockMatchApi(page, { playerCount: count });
+      await page.goto("/");
+      await page.getByTestId("dev-player-count").selectOption(String(count));
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      await expect(page.getByTestId("match-player-legend").locator("li"))
+        .toHaveCount(count);
+      await expect(page.getByTestId("match-active-rival-steps-alice"))
+        .toHaveCount(0);
+      const expectedHops = {
+        bob: 2, charlie: 1, diana: 1, eve: 2,
+        frank: 2, grace: 1, heidi: 0,
+      } as const;
+      for (const id of demoSeats.slice(1, count)) {
+        const badge = page.getByTestId(`match-active-rival-steps-${id}`);
+        await expect(badge).toHaveAttribute("data-from-player-id", "alice");
+        await expect(badge).toHaveAttribute("data-from-street-id", "gauss");
+        await expect(badge).toHaveAttribute(
+          "data-street-steps", String(expectedHops[id as keyof typeof expectedHops]));
+        await expect(badge).toContainText("Distanza in strade da alice (di turno):");
+        await expect(page.getByTestId(`match-character-hearts-${id}`))
+          .toHaveCount(1);
+        await expect(page.getByTestId(`match-player-economy-${id}`))
+          .toHaveCount(1);
+      }
+      await expect(page.getByTestId("match-active-rival-steps-bob"))
+        .toHaveAttribute("data-street-path", "gauss,main-square,einstein");
+      expect(observedHeaders.filter(e => /\/(free-move|end-turn)$/.test(e.path)))
+        .toHaveLength(0);
+
+      if (count === 2) {
+        await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+        await expect(page.getByTestId("match-active-rival-steps-bob"))
+          .toHaveText("Street hops from turn owner alice: 2");
+        const overflow = await page.evaluate(() =>
+          document.documentElement.scrollWidth > window.innerWidth + 2);
+        expect(overflow).toBe(false);
+      }
+      await page.getByTestId("dev-end-turn").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("1");
+      await expect(page.getByTestId("dev-active-player")).toHaveText("bob");
+      await expect(page.getByTestId("match-active-rival-steps-bob"))
+        .toHaveCount(0);
+      await expect(page.getByTestId("match-active-rival-steps-alice"))
+        .toHaveAttribute("data-from-player-id", "bob");
+      await expect(page.getByTestId("match-active-rival-steps-alice"))
+        .toHaveAttribute("data-street-steps", "2");
+
+      if (count === 2) {
+        await page.getByTestId("dev-seat-bob").click();
+        await page.getByTestId("dev-end-turn").click();
+        await expect(page.getByTestId("dev-revision")).toHaveText("2");
+        await expect(page.getByTestId("dev-active-player")).toContainText("In attesa");
+        for (const id of demoSeats.slice(0, count))
+          await expect(page.getByTestId(`match-active-rival-steps-${id}`))
+            .toHaveCount(0);
+      }
+      expect(observedHeaders.filter(e => e.path.endsWith("/free-move")))
+        .toHaveLength(0);
+      expect(observedHeaders.filter(e => e.path.endsWith("/end-turn")))
+        .toHaveLength(count === 2 ? 2 : 1);
+    });
+}

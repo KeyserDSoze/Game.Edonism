@@ -235,6 +235,39 @@ async function assertLivePublicUncontrolledAtlas(
       streetId: item.getAttribute("data-street-id"),
     })));
   expect(observed).toEqual(expected);
+  // #150: client filters operate only AFTER the same public data verified
+  // against the .NET endpoint. Count/identity/slot order must remain exact.
+  const streetFilter = page.getByTestId("public-free-filter-street");
+  const categoryFilter = page.getByTestId("public-free-filter-category");
+  const count = page.getByTestId("public-free-filter-count");
+  const listed = page.getByTestId("match-public-free-activities-list").locator("li");
+  await expect(count).toHaveAttribute("data-total-count", String(expected.length));
+  await streetFilter.selectOption(expected[0].streetId);
+  const streetCards = expected.filter(x => x.streetId === expected[0].streetId);
+  await expect(listed).toHaveCount(streetCards.length);
+  await expect(count).toHaveAttribute("data-visible-count", String(streetCards.length));
+  await categoryFilter.selectOption(expected[0].category);
+  const paired = streetCards.filter(x => x.category === expected[0].category);
+  await expect(listed).toHaveCount(paired.length);
+  expect(await listed.evaluateAll(rows => rows.map(row =>
+    row.getAttribute("data-testid")?.replace("public-free-activity-", ""))))
+    .toEqual(paired.map(x => x.slotId));
+  const allCategories = [
+    "public-financing", "private-financing", "black-market", "corruption",
+    "culture", "sport", "transport", "bishopric",
+  ];
+  const absent = allCategories.find(category =>
+    streetCards.every(card => card.category !== category));
+  if (absent) {
+    await categoryFilter.selectOption(absent);
+    await expect(listed).toHaveCount(0);
+    await expect(page.getByTestId("public-free-filter-empty")).toBeVisible();
+    await expect(count).toHaveAttribute("data-total-count", String(expected.length));
+  }
+  await categoryFilter.selectOption("");
+  await streetFilter.selectOption("");
+  await expect(listed).toHaveCount(expected.length);
+  await expect(page.getByTestId("public-free-filter-empty")).toHaveCount(0);
   if (inspectFirst) {
     const before = await page.getByTestId("dev-revision").textContent();
     await page.getByTestId(

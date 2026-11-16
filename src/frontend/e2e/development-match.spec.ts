@@ -6981,3 +6981,105 @@ for (const count of [2, 8] as const) {
         .toHaveLength(count === 2 ? 2 : 1);
     });
 }
+
+
+// #148: an actually useful PvP quick-scout: ALL nearest rival seats, not
+// one arbitrary winner. Clicking only INSPECTS that public street. This
+// section uses buttons, NOT extra <li> elements in the canonical seat list.
+for (const count of [2, 8] as const) {
+  for (const sameStreet of [false, true] as const) {
+    test(`#148: ${count} seats nearest opponent ties, sameStreet=${sameStreet}, inspect only`,
+      async ({ page }) => {
+        if (count === 2) {
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.addInitScript(() => {
+            const original = HTMLCanvasElement.prototype.getContext;
+            HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+              if (kind === "webgl" || kind === "webgl2"
+                || kind === "experimental-webgl") return null;
+              return Reflect.apply(original, this, [kind, ...args]);
+            };
+          });
+        }
+        const { observedHeaders } = await mockMatchApi(page, {
+          playerCount: count, sameStreet,
+        });
+        await page.goto("/");
+        await page.getByTestId("dev-player-count").selectOption(String(count));
+        await page.getByTestId("dev-create").click();
+        await expect(page.getByTestId("match-player-legend").locator("li"))
+          .toHaveCount(count);
+        await expect(page.getByTestId("dev-revision")).toHaveText("0");
+
+        const expected = count === 2 ? ["bob"]
+          : sameStreet ? ["bob", "heidi"] : ["heidi"];
+        const buttons = page.getByTestId("city-nearest-rivals")
+          .locator('button[data-testid^="city-nearest-rival-"]');
+        await expect(buttons).toHaveCount(expected.length);
+        for (let i = 0; i < expected.length; i++) {
+          const button = buttons.nth(i);
+          const id = expected[i];
+          await expect(button).toHaveAttribute(
+            "data-from-player-id", "alice");
+          await expect(button).toHaveAttribute(
+            "data-street-steps",
+            String(count === 2 && !sameStreet ? 2 : 0));
+          await expect(button).toHaveAttribute("data-target-street-id",
+            id === "bob" && !sameStreet ? "einstein" : "gauss");
+          await expect(button).toContainText(id);
+        }
+        expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+          .toHaveLength(0);
+
+        const targetStreet = expected[0] === "bob" && !sameStreet
+          ? "Einstein Avenue" : "Gauss Avenue";
+        await buttons.first().click();
+        await expect(page.getByTestId("selected-street")).toHaveText(targetStreet);
+        await expect(page.getByTestId("dev-revision")).toHaveText("0");
+        await expect(page.getByTestId("match-player-legend").locator("li"))
+          .toHaveCount(count);
+        expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+          .toHaveLength(0);
+        await expect(page.getByTestId("match-player-economy-bob"))
+          .toHaveCount(1);
+        await expect(page.getByTestId("match-character-hearts-bob"))
+          .toHaveCount(1);
+
+        if (count === 2) {
+          await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+          await expect(page.getByTestId("city-nearest-rivals"))
+            .toContainText("Nearest rivals to the turn owner");
+          await expect(buttons.first()).toHaveText(
+            `bob · ${sameStreet ? 0 : 2} hops`);
+          const overflow = await page.evaluate(() =>
+            document.documentElement.scrollWidth > window.innerWidth + 2);
+          expect(overflow).toBe(false);
+        }
+        await page.getByTestId("dev-end-turn").click();
+        await expect(page.getByTestId("dev-revision")).toHaveText("1");
+        await expect(page.getByTestId("dev-active-player")).toHaveText("bob");
+        const expectedAfter = count === 2 ? ["alice"]
+          : sameStreet ? ["alice", "heidi"] : ["charlie", "diana", "grace"];
+        await expect(buttons).toHaveCount(expectedAfter.length);
+        for (let i = 0; i < expectedAfter.length; i++) {
+          const button = buttons.nth(i);
+          await expect(button).toHaveAttribute(
+            "data-from-player-id", "bob");
+          await expect(button).toContainText(expectedAfter[i]);
+        }
+        if (count === 2) {
+          await page.getByTestId("dev-seat-bob").click();
+          await page.getByTestId("dev-end-turn").click();
+          await expect(page.getByTestId("dev-revision")).toHaveText("2");
+          await expect(page.getByTestId("city-nearest-rivals"))
+            .toHaveCount(0);
+          await expect(page.getByTestId("match-player-legend").locator("li"))
+            .toHaveCount(2);
+        }
+        expect(observedHeaders.filter(x => x.path.endsWith("/free-move")))
+          .toHaveLength(0);
+        expect(observedHeaders.filter(x => x.path.endsWith("/end-turn")))
+          .toHaveLength(count === 2 ? 2 : 1);
+      });
+  }
+}

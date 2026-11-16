@@ -252,6 +252,60 @@ public sealed class UncontrolledActivityRoutesTests
         Assert.True(match.VerifyPublicAudit().IsValid);
     }
 
+    // #151: client street-count shortcuts are derived from canonical public
+    // uncontrolled cards. All routes for any authenticated actor must agree
+    // with the SAME board-wide counts across moves and turn rotation.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void FreePublicActivityStreetCountsAgreeForAllSeatsAfterMoveAndEndTurn(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = NewMatch(count);
+        var checkpointSecret = JsonSerializer.Serialize(match.CaptureCheckpoint().PrivateDeal);
+        var genesis = match.Snapshot();
+        var originalCards = JsonSerializer.Serialize(genesis.BoardActivities);
+        var originalControls = JsonSerializer.Serialize(genesis.ControlledActivities);
+
+        void AssertStreetCounts()
+        {
+            var state = match.Snapshot();
+            var owned = state.ControlledActivities.Select(control => control.SlotId)
+                .ToHashSet(StringComparer.Ordinal);
+            var free = state.BoardActivities.Where(card => !owned.Contains(card.SlotId)).ToArray();
+            Assert.Equal(30 - count, free.Length);
+            var byStreet = board.Streets.Select(street =>
+                (street.Id, Count: free.Count(card =>
+                    board.Slots.Single(slot => slot.Id == card.SlotId).StreetId == street.Id)))
+                .ToArray();
+            Assert.Equal(7, byStreet.Length);
+            Assert.Equal(30 - count, byStreet.Sum(row => row.Count));
+            foreach (var actor in state.Players)
+            {
+                var plan = Assert.IsType<MatchUncontrolledRoutes>(
+                    match.VerifiedUncontrolledRoutesForActor(actor.PlayerId));
+                Assert.Equal(state.Revision, plan.VerifiedRevision);
+                foreach (var (streetId, expected) in byStreet)
+                    Assert.Equal(expected, plan.Routes.Count(route =>
+                        route.StreetId == streetId));
+            }
+            Assert.Equal(originalCards, JsonSerializer.Serialize(state.BoardActivities));
+            Assert.Equal(originalControls, JsonSerializer.Serialize(state.ControlledActivities));
+            Assert.Equal(checkpointSecret, JsonSerializer.Serialize(match.CaptureCheckpoint().PrivateDeal));
+            Assert.True(match.VerifyPublicAudit().IsValid);
+        }
+
+        AssertStreetCounts();
+        var actorId = genesis.Players[0].PlayerId;
+        var origin = genesis.Players[0].StreetId;
+        var neighboringStreet = board.Streets.Single(s => s.Id == origin).Neighbors[0];
+        Assert.True(match.TryFreeMove(actorId, neighboringStreet, match.Revision).Accepted);
+        AssertStreetCounts();
+        Assert.True(match.TryEndTurn(actorId, match.Revision).Accepted);
+        AssertStreetCounts();
+    }
+
     [Fact]
     public void MinimalTrustedFixtureDoesNotInventMissingPublicCards()
     {

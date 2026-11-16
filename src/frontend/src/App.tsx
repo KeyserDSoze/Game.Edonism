@@ -12,7 +12,8 @@ import { verifiedPublicFreeMoveUsage } from "@/features/city/playerFreeMoveUsage
 import { verifiedPublicCharacterHearts, verifiedPublicCharacterRoster } from "@/features/city/playerCharacterHearts";
 import { verifiedActiveTurnRivalProximity } from "@/features/city/activeTurnRivalProximity";
 import { verifiedNearestActiveTurnRivals } from "@/features/city/nearestActiveTurnRivals";
-import { verifiedPublicUncontrolledBoardActivities } from "@/features/city/publicUncontrolledBoardActivities";
+import { selectVerifiedPublicUncontrolledActivities } from "@/features/city/publicUncontrolledActivityFilters";
+import { printedActivityCategoryQuotas } from "@/features/city/activityMarkers";
 import { verifiedPublicSeatEconomy } from "@/features/city/publicSeatEconomy";
 import { verifiedPublicSeatResources } from "@/features/city/publicSeatResources";
 import { controlledLotMarkers, publicGrossSalaryQuotes, verifiedPublicBoardCardCount, type PublicMatchSceneState } from "@/features/city/activityMarkers";
@@ -25,6 +26,17 @@ import { changeLanguage } from "@/i18n";
 const DevelopmentMatchLab = import.meta.env.DEV
   ? lazy(() => import("@/features/matches/DevelopmentMatchLab").then((m) => ({ default: m.DevelopmentMatchLab })))
   : null;
+
+const publicActivityCategoryKeys: Record<string, string> = {
+  "public-financing": "city.publicFreeCategoryPublicFinancing",
+  "private-financing": "city.publicFreeCategoryPrivateFinancing",
+  "black-market": "city.publicFreeCategoryBlackMarket",
+  corruption: "city.publicFreeCategoryCorruption",
+  culture: "city.publicFreeCategoryCulture",
+  sport: "city.publicFreeCategorySport",
+  transport: "city.publicFreeCategoryTransport",
+  bishopric: "city.publicFreeCategoryBishopric",
+};
 
 const themeOptions: { theme: Theme; Icon: typeof Monitor }[] = [
   { theme: "system", Icon: Monitor },
@@ -41,6 +53,9 @@ export default function App() {
   const [publicPlayers, setPublicPlayers] = useState<PublicMatchSceneState | null>(null);
   const [tacticalFocus, setTacticalFocus] = useState<TacticalFocus | null>(null);
   const [historicalFocus, setHistoricalFocus] = useState<HistoricalStreetFocus | null>(null);
+  // #150: local read-only public atlas preferences, no token/session storage.
+  const [freeStreetFilter, setFreeStreetFilter] = useState("");
+  const [freeCategoryFilter, setFreeCategoryFilter] = useState("");
   // Both overlays fail closed against the current public match snapshot.
   const verifiedFocus = verifiedTacticalFocus(publicPlayers, tacticalFocus);
   const verifiedHistorical = verifiedHistoricalStreetFocus(publicPlayers, historicalFocus);
@@ -78,7 +93,11 @@ export default function App() {
   const verifiedBoardCardCount = verifiedPublicBoardCardCount(publicPlayers);
   // #149: independently verified complete printed board; list UNCONTROLLED
   // face-up cards only, with no purchase/action/secret inference.
-  const freePublicActivities = verifiedPublicUncontrolledBoardActivities(publicPlayers);
+  const publicFreeAtlas = selectVerifiedPublicUncontrolledActivities(publicPlayers, {
+    streetId: freeStreetFilter,
+    category: freeCategoryFilter,
+  });
+  const freePublicActivities = publicFreeAtlas.all;
   const currentStreet = streetById(selectedStreetId) ?? cityBoard.streets[0];
   const currentSlot = selectedSlotId ? slotById(selectedSlotId) : undefined;
   const streetSlots = slotsOnStreet(selectedStreetId);
@@ -143,6 +162,12 @@ export default function App() {
   };
 
   const updatePublicState = (state: PublicMatchSceneState | null) => {
+    // #150: turn/revision refresh must retain filters, but a foreign match
+    // or leaving the Development lab resets any old search context.
+    if (state?.matchId !== publicPlayers?.matchId) {
+      setFreeStreetFilter("");
+      setFreeCategoryFilter("");
+    }
     setTacticalFocus(null);
     setHistoricalFocus(null);
     setPublicPlayers(state);
@@ -586,9 +611,51 @@ export default function App() {
                   <p className="mt-2 text-[11px] text-muted-foreground">
                     {t("city.publicFreeActivitiesNote")}
                   </p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className="flex min-w-0 flex-col gap-1 text-xs">
+                      <span className="font-semibold">{t("city.publicFreeFilterStreet")}</span>
+                      <select data-testid="public-free-filter-street"
+                        className="min-h-10 min-w-0 rounded-md border border-border bg-background px-2"
+                        value={publicFreeAtlas.streetId}
+                        onChange={event => setFreeStreetFilter(event.target.value)}>
+                        <option value="">{t("city.publicFreeAllStreets")}</option>
+                        {cityBoard.streets.map(street => (
+                          <option value={street.id} key={street.id}>{street.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex min-w-0 flex-col gap-1 text-xs">
+                      <span className="font-semibold">{t("city.publicFreeFilterCategory")}</span>
+                      <select data-testid="public-free-filter-category"
+                        className="min-h-10 min-w-0 rounded-md border border-border bg-background px-2"
+                        value={publicFreeAtlas.category}
+                        onChange={event => setFreeCategoryFilter(event.target.value)}>
+                        <option value="">{t("city.publicFreeAllCategories")}</option>
+                        {[...printedActivityCategoryQuotas.keys()].map(category => (
+                          <option value={category} key={category}>
+                            {t(publicActivityCategoryKeys[category])}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <p data-testid="public-free-filter-count" role="status" aria-live="polite"
+                    className="mt-2 text-xs text-muted-foreground"
+                    data-visible-count={publicFreeAtlas.visibleCount}
+                    data-total-count={publicFreeAtlas.totalCount}>
+                    {t("city.publicFreeVisibleCount", {
+                      visible: publicFreeAtlas.visibleCount,
+                      total: publicFreeAtlas.totalCount,
+                    })}
+                  </p>
+                  {publicFreeAtlas.visibleCount === 0 && (
+                    <p data-testid="public-free-filter-empty" className="mt-2 text-xs text-muted-foreground">
+                      {t("city.publicFreeNoResults")}
+                    </p>
+                  )}
                   <ol className="mt-3 grid gap-2 sm:grid-cols-2"
                     data-testid="match-public-free-activities-list">
-                    {freePublicActivities.map(card => (
+                    {publicFreeAtlas.visible.map(card => (
                       <li key={card.slotId}
                         data-testid={`public-free-activity-${card.slotId}`}
                         data-card-id={card.cardId}

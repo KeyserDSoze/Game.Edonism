@@ -1,6 +1,7 @@
 import { cityBoard } from "./board";
 import { controlledLotMarkers, verifiedPublicBoardCardCount, type PublicMatchSceneState } from "./activityMarkers";
 import { verifiedPublicUncontrolledBoardActivities } from "./publicUncontrolledBoardActivities";
+import { playerMarkerPlacements } from "./playerMarkers";
 
 /**
  * #152: public street ownership and henchman posture only.
@@ -39,15 +40,17 @@ export function verifiedPublicStreetControlMatrix(
   if (!Array.isArray(state.players)
     || !Array.isArray(state.boardActivities)
     || !Array.isArray(state.controlledActivities)
+    || state.players.length < 2 || state.players.length > 8
+    || playerMarkerPlacements(state.players, state.activePlayerId).length !== state.players.length
     || verifiedPublicBoardCardCount(state) !== cityBoard.slots.length)
     return [];
 
   // #149 checks the FULL 2–8 player roster, every board card, every control,
   // unique canonical slots/categories and real owners. No subset is valid.
   const free = verifiedPublicUncontrolledBoardActivities(state);
-  if (free.length < cityBoard.slots.length - state.players.length
-    || free.length === 0) return [];
   const controlled = controlledLotMarkers(state);
+  // A future fully occupied 30/30 board has legitimately ZERO free lots:
+  // allow it only when all controls pass and cover all printed slots.
   if (controlled.length !== state.controlledActivities.length
     || free.length + controlled.length !== cityBoard.slots.length)
     return [];

@@ -362,7 +362,21 @@ export default function App() {
                     >
                       <div className="flex flex-wrap items-center gap-2">
                         <span aria-hidden="true" className="size-3 shrink-0 rounded-full" style={{ backgroundColor: marker.color }} />
-                        <strong>{marker.slotId}</strong>
+                        <button
+                          type="button"
+                          data-testid={`match-inspect-controlled-${marker.slotId}`}
+                          aria-label={t("city.inspectControlledLot", {
+                            id: marker.slotId,
+                            player: marker.ownerPlayerId,
+                          })}
+                          aria-pressed={selectedSlotId === marker.slotId}
+                          onClick={() => {
+                            // #132: Public read-only city selection; never
+                            // a match movement, action or ownership command.
+                            chooseSlot(marker.slotId);
+                          }}
+                          className="rounded-sm font-semibold underline decoration-dotted underline-offset-2 hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                        >{marker.slotId}</button>
                         <span className="text-muted-foreground">{marker.ownerPlayerId}</span>
                         <span className="font-medium">{t(marker.posture === "standing" ? "city.henchmanStanding" : "city.henchmanFallen")}</span>
                       </div>

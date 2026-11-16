@@ -1382,6 +1382,106 @@ for (const count of [2, 8] as const) {
   });
 }
 
+
+for (const count of [2, 8] as const) {
+  test("#132: inspect a rival-controlled public lot without issuing a game command ("
+    + count + " seats)", async ({ page }) => {
+    const { observedHeaders } = await mockMatchApi(page, { playerCount: count });
+    await page.goto("/");
+    await page.getByTestId("dev-player-count").selectOption(String(count));
+    await page.getByTestId("dev-create").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    const bobLot = page.getByTestId("controlled-lot-S-01");
+    await expect(bobLot).toHaveAttribute("data-owner-id", "bob");
+    const bobCard = await bobLot.getAttribute("data-card-id");
+    const inspect = page.getByTestId("match-inspect-controlled-S-01");
+    await expect(inspect).toHaveAttribute("aria-label",
+      "Esplora l’attività controllata S-01 da bob");
+    await inspect.click();
+    await expect(page.getByTestId("selected-slot")).toHaveText("S-01");
+    await expect(page.getByTestId("street-picker-einstein"))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect(inspect).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("dev-active-player")).toHaveText("alice");
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+    expect(observedHeaders.filter(x =>
+      x.path.endsWith("/free-move") || x.path.endsWith("/end-turn")))
+      .toHaveLength(0);
+
+    await page.getByTestId("dev-move-planck").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    await expect(page.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-street-id", "planck");
+    await page.getByTestId("street-picker-meson").click();
+    await page.getByTestId("match-inspect-controlled-N-01").click();
+    await expect(page.getByTestId("selected-slot")).toHaveText("N-01");
+    await expect(page.getByTestId("street-picker-gauss"))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect(bobLot).toHaveAttribute("data-card-id", bobCard!);
+    await expect(bobLot).toHaveAttribute("data-owner-id", "bob");
+    await expect(page.getByTestId("match-player-alice"))
+      .toHaveAttribute("data-street-id", "planck");
+    expect(observedHeaders.filter(x => x.path.endsWith("/free-move")))
+      .toHaveLength(1);
+    expect(observedHeaders.filter(x => x.path.endsWith("/end-turn")))
+      .toHaveLength(0);
+
+    await page.getByTestId("dev-seat-bob").click();
+    await page.getByTestId("match-inspect-controlled-S-01").click();
+    await expect(page.getByTestId("selected-slot")).toHaveText("S-01");
+    await expect(page.getByTestId("dev-revision")).toHaveText("1");
+    expect(observedHeaders.filter(x =>
+      x.path.endsWith("/free-move") || x.path.endsWith("/end-turn")))
+      .toHaveLength(1);
+
+    await page.getByTestId("dev-leave").click();
+    await expect(page.getByTestId("match-inspect-controlled-S-01")).toHaveCount(0);
+    await expect(page.getByTestId("match-inspect-controlled-N-01")).toHaveCount(0);
+  });
+}
+
+test("#132: controlled lot inspection is keyboard accessible in English and WebGL fallback",
+  async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+      if (kind === "webgl" || kind === "webgl2"
+        || kind === "experimental-webgl") return null;
+      return Reflect.apply(original, this, [kind, ...args]);
+    };
+  });
+  await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  const inspect = page.getByTestId("match-inspect-controlled-S-01");
+  await expect(inspect).toHaveAttribute("aria-label",
+    "Inspect activity S-01 controlled by bob");
+  await inspect.focus();
+  await expect(inspect).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("selected-slot")).toHaveText("S-01");
+  await expect(inspect).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  const overflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth > window.innerWidth + 2);
+  expect(overflow).toBe(false);
+  await page.getByTestId("dev-leave").click();
+  await expect(inspect).toHaveCount(0);
+});
+
+test("#132: invalid public rival control never gets an inspector action",
+  async ({ page }) => {
+  await mockMatchApi(page, { badControlSlot: true });
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("match-inspect-controlled-N-01")).toBeVisible();
+  await expect(page.getByTestId("match-inspect-controlled-S-01")).toHaveCount(0);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+});
+
 test("#131: origin inspection is keyboard reachable in English and WebGL fallback",
   async ({ page }) => {
   await page.addInitScript(() => {

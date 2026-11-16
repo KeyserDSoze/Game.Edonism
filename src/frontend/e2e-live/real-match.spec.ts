@@ -198,6 +198,28 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   await expect(page.getByTestId("dev-revision")).toHaveText("0");
   expect(serverCommands).toHaveLength(0);
 
+  // #132: The controlled lot roster is also a READ-ONLY printed board
+  // selector. Inspect one genuinely server-owned face-up business, verify
+  // its canonical street, and prove no match command/revision change.
+  const bobControl = created.state.controlledActivities
+    .find(c => c.ownerPlayerId === "bob")!;
+  expect(bobControl).toBeTruthy();
+  const bobControlStreet = (
+    (JSON.parse(slotSource) as { slots: { id: string; streetId: string }[] })
+      .slots.find(s => s.id === bobControl.slotId)
+  )?.streetId;
+  expect(bobControlStreet).toBeTruthy();
+  const controlledRow = page.getByTestId("controlled-lot-" + bobControl.slotId);
+  await expect(controlledRow).toHaveAttribute("data-owner-id", "bob");
+  const originalCard = await controlledRow.getAttribute("data-card-id");
+  await page.getByTestId("match-inspect-controlled-" + bobControl.slotId).click();
+  await expect(page.getByTestId("selected-slot")).toHaveText(bobControl.slotId);
+  await expect(page.getByTestId("street-picker-" + bobControlStreet))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(controlledRow).toHaveAttribute("data-card-id", originalCard!);
+  await expect(page.getByTestId("dev-revision")).toHaveText("0");
+  expect(serverCommands).toHaveLength(0);
+
   const aliceToken = tokenFor(created, "alice");
   const bobToken = tokenFor(created, "bob");
 

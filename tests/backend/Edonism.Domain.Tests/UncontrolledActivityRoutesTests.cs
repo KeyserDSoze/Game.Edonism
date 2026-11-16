@@ -206,6 +206,52 @@ public sealed class UncontrolledActivityRoutesTests
         Assert.Equal(before.ControlledActivities, match.Snapshot().ControlledActivities);
     }
 
+    // #150: category/street filters are read-only client display, derived
+    // strictly from the complete public cards. Assert the underlying Domain
+    // projection has the same canonical data for every street/category pair.
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void EveryPrintedStreetAndCategorySubsetMatchesPublicAuditedUnownedCards(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = NewMatch(count);
+        var state = match.Snapshot();
+        var checkpoint = JsonSerializer.Serialize(match.CaptureCheckpoint());
+        var controlled = state.ControlledActivities.Select(x => x.SlotId)
+            .ToHashSet(StringComparer.Ordinal);
+        var free = state.BoardActivities
+            .Where(x => !controlled.Contains(x.SlotId)).ToArray();
+        var categoryIds = new[] {
+            "public-financing", "private-financing", "black-market",
+            "corruption", "culture", "sport", "transport", "bishopric",
+        };
+        Assert.Equal(30 - count, free.Length);
+
+        foreach (var actor in state.Players)
+        {
+            var routes = Assert.IsType<MatchUncontrolledRoutes>(
+                match.VerifiedUncontrolledRoutesForActor(actor.PlayerId));
+            foreach (var street in board.Streets)
+            {
+                foreach (var categoryId in categoryIds)
+                {
+                    var expected = free.Where(c => c.Category == categoryId
+                        && board.Slots.Single(slot => slot.Id == c.SlotId).StreetId == street.Id)
+                        .Select(x => x.SlotId).OrderBy(x => x, StringComparer.Ordinal).ToArray();
+                    var actual = routes.Routes.Where(x => x.Category == categoryId
+                        && x.StreetId == street.Id)
+                        .Select(x => x.SlotId).OrderBy(x => x, StringComparer.Ordinal).ToArray();
+                    Assert.Equal(expected, actual);
+                }
+            }
+        }
+        Assert.Equal(checkpoint, JsonSerializer.Serialize(match.CaptureCheckpoint()));
+        Assert.Equal(0, match.Revision);
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
     [Fact]
     public void MinimalTrustedFixtureDoesNotInventMissingPublicCards()
     {

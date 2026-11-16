@@ -48,6 +48,46 @@ public sealed class CharacterMatchSetupTests
         Assert.True(match.VerifyPublicAudit().IsValid);
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void AllPublicFirstRoundHeartsProveTheirUniqueAssignedCharacterAndOriginCard(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var match = GameMatch.CreateFromTrustedCharacterCatalog(
+            Guid.NewGuid(), board,
+            Enumerable.Range(0, count).Select(i => $"player-{i}").ToArray(),
+            CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(), 141 + count);
+        var before = match.Snapshot();
+        Assert.Equal(count, before.Players.Count);
+        Assert.Equal(count, before.AssignedCharacters.Count);
+        Assert.Equal(count, before.AssignedCharacters.Select(x => x.CharacterId)
+            .Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(count, before.AssignedCharacters.Select(x => x.StartingActivityCardId)
+            .Distinct(StringComparer.Ordinal).Count());
+
+        foreach (var assigned in before.AssignedCharacters)
+        {
+            var seat = Assert.Single(before.Players, p => p.PlayerId == assigned.PlayerId);
+            var card = Assert.Single(before.BoardActivities,
+                placed => placed.CardId == assigned.StartingActivityCardId);
+            Assert.Equal(assigned.PrintedInitialHearts, seat.Hearts);
+            Assert.Equal(seat.StartingSlotId, card.SlotId);
+            Assert.True(assigned.PrintedInitialHearts is >= 1 and <= 5);
+        }
+
+        var actor = before.Players[0];
+        var destination = board.Streets.Single(s => s.Id == actor.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(actor.PlayerId, destination, before.Revision).Accepted);
+        Assert.True(match.TryEndTurn(actor.PlayerId, match.Revision).Accepted);
+        var after = match.Snapshot();
+        Assert.Equal(before.AssignedCharacters, after.AssignedCharacters);
+        Assert.Equal(before.Players.Select(p => p.Hearts),
+            after.Players.Select(p => p.Hearts));
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
     [Fact]
     public void DrawnCharacterDeterminesStartingLotStreetAndPublicHearts()
     {

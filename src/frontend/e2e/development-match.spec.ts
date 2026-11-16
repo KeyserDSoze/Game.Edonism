@@ -57,6 +57,8 @@ type MockOptions = {
   invalidGrossQuote?: boolean; // #105: forged public total, never server wallet state.
   missingGrossQuote?: boolean; // #107: a forged incomplete public quote set.
   malformedReserve?: boolean; // #139: public henchmen reserve contradicts owned lots.
+  forgedAssignedCharacter?: "wrong-hearts" | "forged-seat-hearts" | "duplicate-character"
+    | "duplicate-starting-activity" | "missing-seat" | "foreign-actor" | "bad-heart"; // #141.
   unownedBoardCard?: "valid" | "duplicate" | "foreign" | "bad-category" | "bad-id"; // #140: untouched controlled cards.
   forgedHigherRevisionSnapshot?: boolean; // #112: corrupt first public poll, never a real command.
   forgedNullAuditEventSnapshot?: boolean; // #113: corrupt first poll with events:[null].
@@ -208,7 +210,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       streetId: streets[playerId],
       startingSlotId: playerId === "alice" ? "N-01" : playerId === "bob" ? bobLotSlot
         : `N-${String(index + 1).padStart(2, "0")}`,
-      hearts: 3,
+      hearts: playerId === "alice" && options.forgedAssignedCharacter === "forged-seat-hearts"
+        ? 4 : 3,
       // #139: real .NET public fixture: 4 atoms, 2 diplomacy, 16
       // henchmen, one deployed on each of the first two starting lots.
       atoms: 4,
@@ -246,6 +249,26 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
             ? 42 as unknown as string : "culture" },
       ] : []),
     ],
+    // #141: these are PUBLIC server-assigned card facts, not private hands.
+    // The roster's printed hearts must agree with exactly one distinct
+    // public character and initial activity per seat. All other Development
+    // view validators intentionally remain independent from this field.
+    assignedCharacters: seats.filter(playerId =>
+      !(options.forgedAssignedCharacter === "missing-seat" && playerId === "bob"))
+      .map((playerId, index) => ({
+        playerId: playerId === "bob"
+          && options.forgedAssignedCharacter === "foreign-actor" ? "intruder" : playerId,
+        characterId: playerId === "bob"
+          && options.forgedAssignedCharacter === "duplicate-character"
+            ? "synthetic:character:alice" : `synthetic:character:${playerId}`,
+        startingActivityCardId: playerId === "bob"
+          && options.forgedAssignedCharacter === "duplicate-starting-activity"
+            ? "synthetic:starting:alice" : `synthetic:starting:${playerId}`,
+        printedInitialHearts: playerId === "alice"
+          && options.forgedAssignedCharacter === "wrong-hearts" ? 4
+          : playerId === "alice"
+            && options.forgedAssignedCharacter === "bad-heart" ? 0 : 3,
+      })),
     controlledActivities: [
       { slotId: "N-01", ownerPlayerId: "alice", posture: 0 },
       {
@@ -6570,6 +6593,56 @@ for (const count of [2, 8] as const) {
           await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
           await expect(page.getByTestId("match-player-economy-alice"))
             .toContainText("gross quote:");
+          await expect(page.getByTestId("match-player-resources-alice"))
+            .toContainText("Current atoms:");
+        }
+      });
+  }
+}
+
+// #141: retain all valid independently verified positions, economic rows,
+// resources, active turn and private actor scope on a malformed PUBLIC
+// character assignment. The browser displays no fabricated rival hearts.
+for (const count of [2, 8] as const) {
+  for (const defect of ["wrong-hearts", "forged-seat-hearts", "duplicate-character",
+    "duplicate-starting-activity", "missing-seat", "foreign-actor", "bad-heart"] as const) {
+    test(`#141: ${count}-seat ${defect} hides all hearts but keeps legitimate PvP views`,
+      async ({ page }) => {
+        if (count === 2) {
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.addInitScript(() => {
+            const original = HTMLCanvasElement.prototype.getContext;
+            HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+              if (kind === "webgl" || kind === "webgl2"
+                || kind === "experimental-webgl") return null;
+              return Reflect.apply(original, this, [kind, ...args]);
+            };
+          });
+        }
+        const { observedHeaders } = await mockMatchApi(page, {
+          playerCount: count, forgedAssignedCharacter: defect,
+        });
+        await page.goto("/");
+        await page.getByTestId("dev-player-count").selectOption(String(count));
+        await page.getByTestId("dev-create").click();
+        await expect(page.getByTestId("match-player-legend").locator("li"))
+          .toHaveCount(count);
+        for (const id of demoSeats.slice(0, count)) {
+          await expect(page.getByTestId(`match-character-hearts-${id}`))
+            .toHaveCount(0);
+          await expect(page.getByTestId(`match-inspect-street-${id}`))
+            .toHaveCount(1);
+          await expect(page.getByTestId(`match-player-economy-${id}`))
+            .toHaveCount(1);
+          await expect(page.getByTestId(`match-player-resources-${id}`))
+            .toHaveCount(1);
+        }
+        await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+        await expect(page.getByTestId("dev-revision")).toHaveText("0");
+        expect(observedHeaders.filter(h => /\/(free-move|end-turn)$/.test(h.path)))
+          .toHaveLength(0);
+        if (count === 2 && defect === "wrong-hearts") {
+          await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
           await expect(page.getByTestId("match-player-resources-alice"))
             .toContainText("Current atoms:");
         }

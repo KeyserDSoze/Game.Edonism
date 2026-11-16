@@ -1,59 +1,97 @@
 import { expect, test } from "@playwright/test";
 
-// #137: import the ACTUAL TypeScript helper from Vite in Chromium. Printed
-// public character hearts are read-only, not a client damage/attack engine.
-const playerIds = ["alice", "bob", "charlie", "diana", "eve", "frank", "grace", "heidi"];
+// #137/#141: Chromium imports the ACTUAL Vite TypeScript helper. Verify
+// public character provenance, not a test-only JS calculation or combat.
+const players = ["alice", "bob", "charlie", "diana", "eve", "frank", "grace", "heidi"];
 
 for (const count of [2, 4, 8] as const) {
-  test(`#137: verified ${count}-seat public hearts preserve printed values and hide invalid/mixed rosters`,
+  test(`#141: ${count}-seat printed hearts agree with all assigned public characters`,
     async ({ page }) => {
-      const seats = playerIds.slice(0, count).map((playerId, index) => ({
-        playerId, streetId: index % 2 ? "einstein" : "gauss",
-        hearts: 1 + (index % 5),
+      const roster = players.slice(0, count).map((playerId, i) => ({
+        playerId, streetId: i % 2 ? "einstein" : "gauss",
+        hearts: 1 + i % 5,
       }));
-      const changed = (mutate: (entries: typeof seats) => void) => {
-        const copy = structuredClone(seats);
-        mutate(copy);
-        return copy;
+      const assignedCharacters = roster.map((p, i) => ({
+        playerId: p.playerId,
+        characterId: `synthetic-character:${i + 1}`,
+        startingActivityCardId: `synthetic-activity:${i + 1}`,
+        printedInitialHearts: p.hearts,
+      }));
+      const valid = { players: roster, assignedCharacters };
+      const legacy = {
+        players: roster.map(p => ({ ...p, hearts: null as number | null })),
+        assignedCharacters: [],
       };
-      const legacy = seats.map(s => ({ ...s, hearts: null as number | null }));
-      const invalid = {
-        missing: seats.map((s, i) => i === 0
-          ? { playerId: s.playerId, streetId: s.streetId } : s),
-        zero: changed(s => { s[0].hearts = 0; }),
-        negative: changed(s => { s[0].hearts = -1; }),
-        fractional: changed(s => { s[0].hearts = 2.5; }),
-        abovePrintedMax: changed(s => { s[0].hearts = 6; }),
-        notNumber: changed(s => { s[0].hearts = "3" as unknown as number; }),
-        boolean: changed(s => { s[0].hearts = true as unknown as number; }),
-        duplicateId: changed(s => { s[count - 1].playerId = "alice"; }),
-        foreignStreet: changed(s => { s[0].streetId = "foreign-street"; }),
-        nullRecord: seats.map((s, i) => i === 0 ? null : s),
-        systemActor: changed(s => { s[0].playerId = "system"; }),
-        trailingSpace: changed(s => { s[0].playerId = "alice "; }),
-        unsafeUnicode: changed(s => { s[0].playerId = "alice\u202e"; }),
-        mixedLegacy: seats.map((s, i) => i === 0
-          ? { ...s, hearts: null } : s),
-        allMissing: seats.map(s => ({ playerId: s.playerId, streetId: s.streetId })),
+      const tamper = (edit: (data: typeof valid) => void): typeof valid => {
+        const result = structuredClone(valid);
+        edit(result);
+        return result;
+      };
+      const bad: Record<string, unknown> = {
+        missingPair: tamper(s => { s.assignedCharacters.pop(); }),
+        foreignActor: tamper(s => { s.assignedCharacters[0].playerId = "intruder"; }),
+        duplicateSeat: tamper(s => {
+          s.assignedCharacters[1].playerId = "alice";
+        }),
+        duplicateCharacter: tamper(s => {
+          s.assignedCharacters[1].characterId = s.assignedCharacters[0].characterId;
+        }),
+        duplicateStartingActivity: tamper(s => {
+          s.assignedCharacters[1].startingActivityCardId =
+            s.assignedCharacters[0].startingActivityCardId;
+        }),
+        emptyCharacter: tamper(s => {
+          s.assignedCharacters[0].characterId = "";
+        }),
+        emptyStartingActivity: tamper(s => {
+          s.assignedCharacters[0].startingActivityCardId = "";
+        }),
+        forgedPrintedHearts: tamper(s => {
+          s.assignedCharacters[0].printedInitialHearts = 5 + s.players[0].hearts;
+        }),
+        plausibleMismatch: tamper(s => {
+          s.assignedCharacters[0].printedInitialHearts =
+            s.players[0].hearts === 5 ? 4 : s.players[0].hearts + 1;
+        }),
+        forgedPublicHearts: tamper(s => {
+          s.players[0].hearts = 5 + s.assignedCharacters[0].printedInitialHearts;
+        }),
+        partialNull: tamper(s => {
+          s.players[0].hearts = null as unknown as number;
+        }),
+        missingHearts: tamper(s => {
+          s.players[0].hearts = undefined as unknown as number;
+        }),
+        fractionalHearts: tamper(s => { s.players[0].hearts = 2.5; }),
+        zeroHearts: tamper(s => { s.players[0].hearts = 0; }),
+        nonNumericHearts: tamper(s => {
+          s.players[0].hearts = "3" as unknown as number;
+        }),
+        duplicatePlayer: tamper(s => { s.players[1].playerId = "alice"; }),
+        reservedSeat: tamper(s => { s.players[0].playerId = "system"; }),
+        foreignStreet: tamper(s => { s.players[0].streetId = "fake-road"; }),
+        tooSmall: { players: roster.slice(0, 1), assignedCharacters: assignedCharacters.slice(0, 1) },
+        missingAssignments: { players: roster },
+        missingPlayers: { assignedCharacters },
+        wrongContainer: [],
         nullContainer: null,
-        tooSmall: seats.slice(0, 1),
       };
-      const initialJson = JSON.stringify({ seats, legacy, invalid });
+      const unchanged = JSON.stringify({ valid, legacy, bad });
       await page.goto("/");
-      const result = await page.evaluate(async ({ seats, legacy, invalid }) => {
+      const result = await page.evaluate(async ({ valid, legacy, bad }) => {
         const { verifiedPublicCharacterHearts: guard } =
           await import("/src/features/city/playerCharacterHearts.ts");
         return {
-          valid: [...guard(seats)],
-          allLegacy: guard(legacy).size,
-          invalid: Object.entries(invalid).map(([key, value]) => [key, guard(value).size]),
-          blank: guard(undefined).size,
+          valid: [...guard(valid)],
+          legacy: guard(legacy).size,
+          bad: Object.entries(bad).map(([name, input]) => [name, guard(input).size]),
+          noInput: guard(undefined).size,
         };
-      }, { seats, legacy, invalid });
-      expect(result.valid).toEqual(seats.map(s => [s.playerId, s.hearts]));
-      expect(result.allLegacy).toBe(0);
-      expect(result.invalid).toEqual(Object.keys(invalid).map(key => [key, 0]));
-      expect(result.blank).toBe(0);
-      expect(JSON.stringify({ seats, legacy, invalid })).toBe(initialJson);
+      }, { valid, legacy, bad });
+      expect(result.valid).toEqual(roster.map(p => [p.playerId, p.hearts]));
+      expect(result.legacy).toBe(0);
+      expect(result.bad).toEqual(Object.keys(bad).map(name => [name, 0]));
+      expect(result.noInput).toBe(0);
+      expect(JSON.stringify({ valid, legacy, bad })).toBe(unchanged);
     });
 }

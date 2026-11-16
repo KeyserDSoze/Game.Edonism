@@ -26,7 +26,8 @@ type PublicMatch = Readonly<{
     playerId: Seat; baseAtoms: number; standingActivityAtoms: number; grossAtoms: number
   }[];
   assignedCharacters: readonly {
-    playerId: Seat; characterId: string; printedInitialHearts: number
+    playerId: Seat; characterId: string;
+    startingActivityCardId: string; printedInitialHearts: number
   }[];
   turnOrder: readonly Seat[];
   proposedNextRoundOrder: readonly Seat[];
@@ -146,6 +147,12 @@ async function startRealMatch(page: Page): Promise<CreatedMatch> {
     // #136: same public server field, no derived move permission.
     await expect(page.getByTestId(`match-free-move-${player.playerId}`))
       .toHaveAttribute("data-free-move-used", String(player.freeMoveUsed));
+    // #141: the SAME real public .NET response must show each assigned
+    // character's printed hearts, never a guessed rival combat HP value.
+    const assigned = match.state.assignedCharacters.find(
+      character => character.playerId === player.playerId);
+    expect(assigned).toBeDefined();
+    expect(assigned?.printedInitialHearts).toBe(player.hearts);
     // #137: real printed, public character hearts (not a client estimate).
     expect(player.hearts).toBeGreaterThanOrEqual(1);
     expect(player.hearts).toBeLessThanOrEqual(5);
@@ -356,6 +363,9 @@ test("real .NET + React: server draws a match, moves two players and stops befor
   for (const quote of afterMove.grossSalaryQuotes)
     await expect(page.getByTestId(`match-player-economy-${quote.playerId}`))
       .toHaveAttribute("data-gross-atoms", String(quote.grossAtoms));
+  // #141: the real public assigned-character provenance is immutable
+  // across the movement; no client hp/attack rule is involved.
+  expect(afterMove.assignedCharacters).toEqual(created.state.assignedCharacters);
   // #137: moving with the actual .NET API does not modify printed hearts.
   for (const player of afterMove.players) {
     const original = created.state.players.find(p => p.playerId === player.playerId);
@@ -739,6 +749,15 @@ test("real .NET eight-seat match supports private join and all sequential turns"
   await expect(page.getByTestId("match-board-card-count")).toContainText("30");
   expect(created.state.assignedCharacters).toHaveLength(8);
   expect(created.state.grossSalaryQuotes).toHaveLength(8);
+  // #141: every public 8-player heart badge is confirmed by that
+  // seat's unique public assigned-character printed card record.
+  expect(new Set(created.state.assignedCharacters.map(c => c.characterId)).size).toBe(8);
+  for (const character of created.state.assignedCharacters) {
+    const player = created.state.players.find(p => p.playerId === character.playerId);
+    expect(player?.hearts).toBe(character.printedInitialHearts);
+    await expect(page.getByTestId(`match-character-hearts-${character.playerId}`))
+      .toHaveAttribute("data-character-hearts", String(character.printedInitialHearts));
+  }
   await expect(page.getByTestId("match-player-legend").locator("li")).toHaveCount(8);
   await expect(page.getByTestId("match-activity-roster").locator("li[data-owner-id]")).toHaveCount(8);
   // #138: all eight public economic rows equal authoritative read-only

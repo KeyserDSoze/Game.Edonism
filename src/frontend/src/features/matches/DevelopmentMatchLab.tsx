@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cityBoard, shortestStreetPath, streetById, slotById } from "@/features/city/board";
 import type { TacticalFocus } from "@/features/city/tacticalFocus";
 import type { HistoricalStreetFocus } from "@/features/city/historicalStreetFocus";
-import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
+import type { PublicMatchSceneState, PublicBoardActivity, PublicControlledActivity, PublicGrossSalaryQuote, PublicAssignedCharacter } from "@/features/city/activityMarkers";
 import { visiblePublicAuditEvents, type PublicMatchEvent } from "./publicAudit";
 import { hasValidDevelopmentPublicEnvelope } from "./verifiedDevelopmentPublicEnvelope";
 import { hasValidDevelopmentCreatorResponse } from "./verifiedDevelopmentCreatorResponse";
@@ -54,6 +54,9 @@ type DemoMatch = Readonly<{
   boardActivities: readonly PublicBoardActivity[];
   controlledActivities: readonly PublicControlledActivity[];
   grossSalaryQuotes: readonly PublicGrossSalaryQuote[];
+  // #141: this list is already part of the .NET PUBLIC match snapshot;
+  // it is never the private action hand or a player credential.
+  assignedCharacters: readonly PublicAssignedCharacter[];
   turnOrder: readonly string[];
   proposedNextRoundOrder: readonly string[];
   events: readonly PublicMatchEvent[];
@@ -655,6 +658,9 @@ export function DevelopmentMatchLab({
           boardActivities: state.boardActivities ?? [],
           controlledActivities: state.controlledActivities ?? [],
           grossSalaryQuotes: state.grossSalaryQuotes ?? [],
+          // #141: preserve PUBLIC character-card provenance in the same
+          // snapshot revision as the seat heart count; no API call added.
+          assignedCharacters: state.assignedCharacters,
         }
       : null);
   }

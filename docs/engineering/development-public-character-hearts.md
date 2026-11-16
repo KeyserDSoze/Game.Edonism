@@ -52,3 +52,33 @@ information. Original real printed character art/data remain blocked by
 
 Issue [#137](https://github.com/KeyserDSoze/Game.Edonism/issues/137).
 Commit directly on main; close after all 3 jobs green on exact last HEAD.
+
+## #141 — Cross-check the same public character assignments
+
+The #137 transport validator previously accepted any well-formed 1–5
+`players[*].hearts` and canonical street. In a full-deck .NET first-round
+match there is a stronger already-public source of provenance:
+`MatchSnapshot.AssignedCharacters[*]` contains one unique
+`PlayerId`/`CharacterId`/`StartingActivityCardId`/
+`PrintedInitialHearts` record per seat. The browser had dropped this
+**public** list while forwarding player positions, and therefore could
+show a forged public rival heart count even if the corresponding public
+character card record disagreed.
+
+`verifiedPublicCharacterHearts` now receives **one public scene state**,
+requires exactly one well-formed distinct assignment per displayed seat,
+nonempty unique character and initial-activity card IDs, matching
+`printedInitialHearts === hearts` (safe integer 1–5) for every
+seat, canonical player streets, and valid exact technical IDs. Any missing,
+duplicate, foreign, mixed, mismatched or malformed assignment hides
+**all** heart labels, without altering legitimate public pawns, economy,
+resources, commands, credentials, session revision, or the broad public
+envelope. Legacy null-heart / empty-assignment matches remain blank.
+No additional API call, no client combat or faction/hand inference.
+
+xUnit .NET 2/4/8 tests the real seeded public card/heart/origin
+provenance and stability after move+turn; actual-Vite Playwright 2/4/8
+tests malformed/forged assignments and legacy; mocked React 2/8 tests
+rendered fail-closed isolation on bad server responses; live .NET 2/8
+compares city heart badges to the server's assigned cards. Track
+final CI and acceptance at [#141](https://github.com/KeyserDSoze/Game.Edonism/issues/141).

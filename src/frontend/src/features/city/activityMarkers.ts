@@ -21,12 +21,23 @@ export type PublicGrossSalaryQuote = Readonly<{
   grossAtoms: number;
 }>;
 
+/** #141: public server-assigned character facts, NOT a private hand. */
+export type PublicAssignedCharacter = Readonly<{
+  playerId: string;
+  characterId: string;
+  startingActivityCardId: string;
+  printedInitialHearts: number;
+}>;
+
 export type PublicMatchSceneState = PublicPlayerPositions & Readonly<{
   matchId: string;
   revision: number;
   boardActivities: readonly PublicBoardActivity[];
   controlledActivities: readonly PublicControlledActivity[];
   grossSalaryQuotes: readonly PublicGrossSalaryQuote[];
+  // Optional for unrelated city-only fixtures; the #141 character-heart
+  // verifier requires the complete public assignments before showing badges.
+  assignedCharacters?: readonly PublicAssignedCharacter[];
 }>;
 
 export type ControlledLotMarker = Readonly<{

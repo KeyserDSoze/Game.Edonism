@@ -52,7 +52,9 @@ export default function App() {
   const publicFreeMoveUsage = verifiedPublicFreeMoveUsage(publicPlayers?.players);
   // #137: the server's printed public character hearts only. Never infer
   // live damage, win/loss, combat targets or authority from the city roster.
-  const publicCharacterHearts = verifiedPublicCharacterHearts(publicPlayers?.players);
+  // #141: validate each printed heart against its character assigned by
+  // this SAME public .NET snapshot, rather than accepting only 1–5.
+  const publicCharacterHearts = verifiedPublicCharacterHearts(publicPlayers);
   const controlMarkers = publicPlayers ? controlledLotMarkers(publicPlayers) : [];
   const grossQuotes = publicPlayers ? publicGrossSalaryQuotes(publicPlayers) : [];
   // #138: same server-confirmed public lots and verified GROSS quote as

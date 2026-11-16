@@ -234,6 +234,56 @@ public sealed class CharacterMatchSetupTests
         Assert.True(match.VerifyPublicAudit().IsValid);
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void FullDeckSnapshotExposesVerifiedCharacterIdsButNeverActorHands(int count)
+    {
+        var board = BoardCatalog.LoadDefault();
+        var players = Enumerable.Range(0, count).Select(i => $"player-{i}").ToArray();
+        var match = GameMatch.CreateFromTrustedFullDeckSetup(
+            Guid.NewGuid(), board, players,
+            CharacterSetupFixture.Catalog(), ActivitySetupFixture.Catalog(),
+            ActionDeckFixture.ActionIds(), ActionDeckFixture.ElectionDayId, 143 + count);
+        var publicState = match.Snapshot();
+        var secretState = match.CaptureCheckpoint().PrivateDeal;
+        Assert.NotNull(secretState);
+        Assert.Equal(count, publicState.AssignedCharacters.Count);
+        Assert.Equal(count, secretState.Hands.Count);
+        Assert.Equal(count, publicState.AssignedCharacters
+            .Select(a => a.CharacterId).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(count, publicState.AssignedCharacters
+            .Select(a => a.StartingActivityCardId).Distinct(StringComparer.Ordinal).Count());
+
+        foreach (var assignment in publicState.AssignedCharacters)
+        {
+            var player = Assert.Single(publicState.Players,
+                p => p.PlayerId == assignment.PlayerId);
+            var lot = Assert.Single(publicState.BoardActivities,
+                c => c.CardId == assignment.StartingActivityCardId);
+            Assert.Equal(player.StartingSlotId, lot.SlotId);
+            Assert.Equal(player.Hearts, assignment.PrintedInitialHearts);
+        }
+
+        // #146: characters and their printed origin cards are public by
+        // contract; private action hands, draw pile and the shuffle seed
+        // must NEVER ride along in the HTTP-public MatchSnapshot.
+        var publicJson = System.Text.Json.JsonSerializer.Serialize(publicState);
+        Assert.DoesNotContain("\"privateDeal\"", publicJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"remainingDrawPile\"", publicJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"hands\"", publicJson, StringComparison.OrdinalIgnoreCase);
+        foreach (var hiddenCard in secretState.Hands.SelectMany(h => h.CardIds))
+            Assert.DoesNotContain(hiddenCard, publicJson, StringComparison.Ordinal);
+
+        var actor = publicState.Players[0];
+        var neighbor = board.Streets.Single(s => s.Id == actor.StreetId).Neighbors[0];
+        Assert.True(match.TryFreeMove(actor.PlayerId, neighbor, match.Revision).Accepted);
+        Assert.True(match.TryEndTurn(actor.PlayerId, match.Revision).Accepted);
+        Assert.Equal(publicState.AssignedCharacters, match.Snapshot().AssignedCharacters);
+        Assert.True(match.VerifyPublicAudit().IsValid);
+    }
+
     [Fact]
     public void DrawnCharacterDeterminesStartingLotStreetAndPublicHearts()
     {

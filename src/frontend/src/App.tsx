@@ -11,6 +11,7 @@ import { verifiedPublicStartingLots } from "@/features/city/playerStartingLots";
 import { verifiedPublicFreeMoveUsage } from "@/features/city/playerFreeMoveUsage";
 import { verifiedPublicCharacterHearts, verifiedPublicCharacterRoster } from "@/features/city/playerCharacterHearts";
 import { verifiedActiveTurnRivalProximity } from "@/features/city/activeTurnRivalProximity";
+import { verifiedNearestActiveTurnRivals } from "@/features/city/nearestActiveTurnRivals";
 import { verifiedPublicSeatEconomy } from "@/features/city/publicSeatEconomy";
 import { verifiedPublicSeatResources } from "@/features/city/publicSeatResources";
 import { controlledLotMarkers, publicGrossSalaryQuotes, verifiedPublicBoardCardCount, type PublicMatchSceneState } from "@/features/city/activityMarkers";
@@ -59,6 +60,9 @@ export default function App() {
   // #147: topology only, measured from the server-declared TURN OWNER to
   // every other public seat. This never implies a move/attack permission.
   const activeTurnRivalProximity = verifiedActiveTurnRivalProximity(publicPlayers);
+  // #148: show ALL nearest rivals, including ties at zero street hops.
+  // Reuses the full fail-closed #147 roster; not a combat/range authority.
+  const nearestTurnRivals = verifiedNearestActiveTurnRivals(publicPlayers);
   // #146: the technical card IDs are already in the same public .NET
   // character assignment. Show them only after the #141/#145 checks.
   const publicCharacterRoster = verifiedPublicCharacterRoster(publicPlayers);
@@ -466,6 +470,39 @@ export default function App() {
                     </li>
                   ))}
                 </ul>
+                {nearestTurnRivals.length > 0 && (
+                  <section
+                    data-testid="city-nearest-rivals"
+                    aria-label={t("city.nearestRivalsTitle")}
+                    className="mt-3 space-y-2 border-t border-border pt-3"
+                  >
+                    <p className="text-xs font-semibold">{t("city.nearestRivalsTitle")}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {nearestTurnRivals.map(rival => (
+                        <Button key={rival.playerId}
+                          type="button" variant="outline" size="sm"
+                          data-testid={`city-nearest-rival-${rival.playerId}`}
+                          data-street-steps={rival.streetSteps}
+                          data-target-street-id={rival.toStreetId}
+                          data-from-player-id={rival.fromPlayerId}
+                          aria-label={t("city.nearestRivalInspect", {
+                            player: rival.playerId, street: streetById(rival.toStreetId)?.name,
+                            steps: rival.streetSteps,
+                          })}
+                          onClick={() => chooseStreet(rival.toStreetId)}
+                          className="h-auto min-h-9 max-w-full whitespace-normal break-all text-left text-xs"
+                        >
+                          {t("city.nearestRivalEntry", {
+                            player: rival.playerId, steps: rival.streetSteps,
+                          })}
+                        </Button>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("city.nearestRivalsNote")}
+                    </p>
+                  </section>
+                )}
               </div>
             )}
             {publicPlayers && (

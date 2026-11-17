@@ -114,6 +114,34 @@ public sealed class DevelopmentGrossSalaryAdmissionEndpointTests
                 Gross: q.GetProperty("grossAtoms").GetInt32())).ToArray();
         Assert.Equal(initialQuotes, quotes);
 
+        // #162: three HYPOTHETICAL 0/1/2 atom policies from exactly the
+        // same audited gross quotes and seat order. No mayor decision,
+        // municipal credit, tax debit or next-round transition occurs.
+        var scenarios = current.GetProperty("hypotheticalTaxScenarios")
+            .EnumerateArray().ToArray();
+        Assert.Equal(3, scenarios.Length);
+        for (var tax = 0; tax <= 2; tax++)
+        {
+            var scenario = scenarios[tax];
+            Assert.Equal(tax, scenario.GetProperty("hypotheticalTaxAtomsPerPlayer").GetInt32());
+            Assert.Equal(tax * count, scenario.GetProperty("potentialWithheldAtoms").GetInt32());
+            var rows = scenario.GetProperty("players").EnumerateArray().ToArray();
+            Assert.Equal(count, rows.Length);
+            Assert.Equal(players,
+                rows.Select(row => row.GetProperty("playerId").GetString()));
+            for (var i = 0; i < count; i++)
+            {
+                Assert.Equal(initialQuotes[i].Gross,
+                    rows[i].GetProperty("grossAtoms").GetInt32());
+                Assert.Equal(tax, rows[i].GetProperty("hypotheticalTaxAtoms").GetInt32());
+                Assert.Equal(initialQuotes[i].Gross - tax,
+                    rows[i].GetProperty("hypotheticalNetAtoms").GetInt32());
+            }
+            Assert.Equal(initialQuotes.Sum(q => q.Gross),
+                rows.Sum(row => row.GetProperty("hypotheticalNetAtoms").GetInt32())
+                + scenario.GetProperty("potentialWithheldAtoms").GetInt32());
+        }
+
         using var snapshot = await actor.GetAsync($"/api/dev/matches/{matchId}");
         Assert.Equal(HttpStatusCode.OK, snapshot.StatusCode);
         using var snapshotBody = await snapshot.Content.ReadFromJsonAsync<JsonDocument>();
@@ -135,6 +163,24 @@ public sealed class DevelopmentGrossSalaryAdmissionEndpointTests
             Assert.DoesNotContain(token, raw);
         Assert.DoesNotContain("cardIds", raw, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("token", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cardIds", raw, StringComparison.OrdinalIgnoreCase);
+
+        // Rotating a Development seat capability does not select or apply
+        // any scenario and revokes all authenticated read-only projections.
+        using var rotated = await actor.PostAsync(
+            $"/api/dev/matches/{matchId}/rotate-token", null);
+        Assert.Equal(HttpStatusCode.OK, rotated.StatusCode);
+        using var replacement = await rotated.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert.NotNull(replacement);
+        using (var rejected = await actor.GetAsync(previewPath))
+            Assert.Equal(HttpStatusCode.NotFound, rejected.StatusCode);
+        using var renewed = Seat(host, replacement.RootElement.GetProperty("token").GetString()!);
+        using var validAgain = await renewed.GetAsync(previewPath);
+        Assert.Equal(HttpStatusCode.OK, validAgain.StatusCode);
+        using var newBody = await validAgain.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert.NotNull(newBody);
+        Assert.Equal(current.GetProperty("hypotheticalTaxScenarios").GetRawText(),
+            newBody.RootElement.GetProperty("hypotheticalTaxScenarios").GetRawText());
     }
 
     [Fact]

@@ -14,6 +14,10 @@ import { hasValidDevelopmentCreatorResponse } from "./verifiedDevelopmentCreator
 import { hasValidDevelopmentRotatedCredential } from "./verifiedDevelopmentRotatedCredential";
 import { hasValidDevelopmentTurnOptions } from "./verifiedDevelopmentTurnOptions";
 import { hasValidDevelopmentFirstRoundHand } from "./verifiedDevelopmentFirstRoundHand";
+import {
+  hasVerifiedHypotheticalSalaryScenarios,
+  type HypotheticalTaxScenario,
+} from "./verifiedHypotheticalSalaryScenarios";
 import { hasValidDevelopmentPublicAuditChronology } from "./verifiedDevelopmentPublicAuditChronology";
 import { hasSameDevelopmentPublicSnapshotAtRevision } from "./verifiedDevelopmentSameRevisionSnapshot";
 import { buildVerifiedPublicAuditExport } from "./publicAuditExport";
@@ -95,6 +99,7 @@ type PendingSettlementPreview = Readonly<{
   verifiedRevision: number;
   nextTurnOrder: readonly string[];
   grossSalaryQuotes: readonly PublicGrossSalaryQuote[];
+  hypotheticalTaxScenarios: readonly HypotheticalTaxScenario[];
 }>;
 
 // Read-only, server-verified routes to uncontrolled PUBLIC activities.
@@ -1033,7 +1038,13 @@ export function DevelopmentMatchLab({
               || q.baseAtoms !== original.baseAtoms
               || q.standingActivityAtoms !== original.standingActivityAtoms
               || q.grossAtoms !== original.grossAtoms;
-          })) return;
+          })
+          // #162: the three scenarios must be the EXACT printed 0/1/2
+          // what-ifs from the same canonical gross quotes at this revision.
+          // Any forged or incomplete row hides the entire preview, not
+          // merely the bad tax option.
+          || !hasVerifiedHypotheticalSalaryScenarios(
+            result.hypotheticalTaxScenarios, expectedQuotes)) return;
         setSettlementLease({ token: actorToken, data: result });
       })
       .catch(() => {
@@ -2085,6 +2096,46 @@ export function DevelopmentMatchLab({
                         </li>
                       ))}
                     </ul>
+                    <section data-testid="dev-settlement-tax-scenarios"
+                      aria-label={t("dev.settlementTaxScenariosTitle")}
+                      className="space-y-2 border-t border-border pt-2">
+                      <p className="text-xs font-semibold">{t("dev.settlementTaxScenariosTitle")}</p>
+                      <p data-testid="dev-settlement-tax-note"
+                        className="text-[11px] leading-5 text-muted-foreground">
+                        {t("dev.settlementTaxScenariosNote")}
+                      </p>
+                      <ul className="grid gap-2 text-xs sm:grid-cols-3">
+                        {settlement.hypotheticalTaxScenarios.map(scenario => (
+                          <li key={scenario.hypotheticalTaxAtomsPerPlayer}
+                            data-testid={`dev-settlement-tax-${scenario.hypotheticalTaxAtomsPerPlayer}`}
+                            data-tax-atoms={scenario.hypotheticalTaxAtomsPerPlayer}
+                            data-potential-withheld-atoms={scenario.potentialWithheldAtoms}
+                            className="rounded-md border border-border bg-muted/50 px-2 py-2">
+                            <p className="font-semibold">{t("dev.settlementHypotheticalTaxRate", {
+                              amount: scenario.hypotheticalTaxAtomsPerPlayer,
+                            })}</p>
+                            <p className="mt-1 text-muted-foreground">
+                              {t("dev.settlementPotentialWithheld", {
+                                amount: scenario.potentialWithheldAtoms,
+                              })}
+                            </p>
+                            <ul className="mt-2 space-y-1">
+                              {scenario.players.map(row => (
+                                <li key={row.playerId}
+                                  data-testid={`dev-settlement-tax-${scenario.hypotheticalTaxAtomsPerPlayer}-player-${row.playerId}`}
+                                  data-gross-atoms={row.grossAtoms}
+                                  data-hypothetical-net-atoms={row.hypotheticalNetAtoms}>
+                                  {t("dev.settlementHypotheticalNet", {
+                                    player: row.playerId,
+                                    amount: row.hypotheticalNetAtoms,
+                                  })}
+                                </li>
+                              ))}
+                            </ul>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
                     <p className="text-xs font-semibold">{t("dev.nextOrderPreview")}</p>
                     <ol data-testid="dev-settlement-order" className="flex flex-wrap gap-2 text-xs">
                       {settlement.nextTurnOrder.map((id, index) => (

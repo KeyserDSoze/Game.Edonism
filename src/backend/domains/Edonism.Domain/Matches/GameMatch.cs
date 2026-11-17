@@ -71,7 +71,13 @@ public sealed record MatchCommandResult(bool Accepted, string Code, MatchSnapsho
 public sealed record MatchPendingSettlementPreview(
     Guid MatchId, int Round, long VerifiedRevision,
     IReadOnlyList<string> NextTurnOrder,
-    IReadOnlyList<MatchGrossSalaryQuote> GrossSalaryQuotes);
+    IReadOnlyList<MatchGrossSalaryQuote> GrossSalaryQuotes)
+{
+    // #162: three printed 0–2 tax WHAT-IFs, explicitly not a selected
+    // policy, payment or municipal credit. Nested arrays are read-only.
+    public IReadOnlyList<MatchHypotheticalTaxScenario> HypotheticalTaxScenarios
+        { get; init; } = Array.Empty<MatchHypotheticalTaxScenario>();
+}
 
 /// <summary>
 /// A public first-round audit-verified ordered turn progress projection.
@@ -344,8 +350,13 @@ public sealed partial class GameMatch
         return new MatchPendingSettlementPreview(
             MatchId, Round, replay.VerifiedRevision,
             Array.AsReadOnly(state.ProposedNextRoundOrder.ToArray()),
-            Array.AsReadOnly(GrossSalaryRules.Quote(
-                _board, _players, _controlledActivities).ToArray()));
+            Array.AsReadOnly(state.GrossSalaryQuotes.ToArray()))
+        {
+            // The audited snapshot/verified revision is the single source;
+            // never apply a tax, payment, mayor decision or round transition.
+            HypotheticalTaxScenarios = MatchSalaryTaxScenarios.Quote(
+                state.GrossSalaryQuotes)
+        };
     }
 
     /// <summary>

@@ -136,6 +136,7 @@ type MockOptions = {
   invalidTurnProgress?: boolean;
   delayFirstAliceTurnProgress?: boolean;
   invalidSettlementPreview?: boolean;
+  invalidTaxScenarios?: "withheld" | "net" | "missing" | "seat" | "rate";
   delayFirstSettlementPreview?: boolean;
   routePlannerWithFreeCards?: boolean;
   invalidRoutePlanner?: boolean;
@@ -797,6 +798,17 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
 
     if (path.endsWith("/settlement-preview")) {
       if (phase !== 1) return reply({ status: 409, json: { code: "round_not_pending" } });
+      const scenarios = [0, 1, 2].map(tax => ({
+        hypotheticalTaxAtomsPerPlayer: tax,
+        potentialWithheldAtoms: tax * seats.length,
+        players: seats.map(playerId => ({
+          playerId, grossAtoms: 3, hypotheticalTaxAtoms: tax, hypotheticalNetAtoms: 3 - tax,
+        })),
+      }));
+      if (options.invalidTaxScenarios === "withheld") scenarios[1].potentialWithheldAtoms++;
+      if (options.invalidTaxScenarios === "net") scenarios[2].players[0].hypotheticalNetAtoms++;
+      if (options.invalidTaxScenarios === "seat") scenarios[1].players[0].playerId = "forged-owner";
+      if (options.invalidTaxScenarios === "rate") scenarios[2].hypotheticalTaxAtomsPerPlayer = 9;
       const data = {
         matchId: snapshot().matchId,
         round: 1,
@@ -805,6 +817,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         grossSalaryQuotes: seats.map(playerId => ({
           playerId, baseAtoms: 2, standingActivityAtoms: 1, grossAtoms: 3,
         })),
+        hypotheticalTaxScenarios: options.invalidTaxScenarios === "missing"
+          ? undefined : scenarios,
       };
       if (options.delayFirstSettlementPreview && !delayedSettlement) {
         delayedSettlement = true;
@@ -4597,12 +4611,67 @@ test("settlement is a server-verified read-only gross projection, not a payout",
     .toHaveText(["1. bob", "2. alice"]);
   await expect(page.getByTestId("dev-settlement-warning"))
     .toContainText("nessun salario pagato");
+  // #162: complete authenticated what-if scenarios, never selected rates.
+  await expect(page.getByTestId("dev-settlement-tax-note"))
+    .toContainText("nessuna tassa è stata scelta o applicata");
+  for (const tax of [0, 1, 2]) {
+    const scenario = page.getByTestId(`dev-settlement-tax-${tax}`);
+    await expect(scenario).toHaveAttribute("data-tax-atoms", String(tax));
+    await expect(scenario).toHaveAttribute("data-potential-withheld-atoms",
+      String(tax * 2));
+    for (const id of ["alice", "bob"]) {
+      await expect(page.getByTestId(`dev-settlement-tax-${tax}-player-${id}`))
+        .toHaveAttribute("data-hypothetical-net-atoms", String(3 - tax));
+    }
+  }
   await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
   expect(observedHeaders.filter(x => x.path.endsWith("/settlement-preview")).length)
     .toBeGreaterThanOrEqual(1);
   expect(matchId).toMatch(/^[a-f0-9-]{36}$/);
   await page.getByTestId("dev-leave").click();
   await expect(panel).toHaveCount(0);
+});
+
+for (const forged of ["withheld", "net", "missing", "seat", "rate"] as const) {
+  test(`#162: forged hypothetical salary scenario (${forged}) hides every amount`,
+    async ({ page }) => {
+      await mockMatchApi(page, { invalidTaxScenarios: forged });
+      await page.goto("/");
+      await page.getByTestId("dev-create").click();
+      await page.getByTestId("dev-end-turn").click();
+      await page.getByTestId("dev-seat-bob").click();
+      await page.getByTestId("dev-end-turn").click();
+      await expect(page.getByTestId("dev-settlement-panel")).toBeVisible();
+      await expect(page.getByTestId("dev-settlement-unavailable")).toBeVisible();
+      await expect(page.getByTestId("dev-settlement-gross")).toHaveCount(0);
+      await expect(page.getByTestId("dev-settlement-tax-scenarios")).toHaveCount(0);
+      await expect(page.getByTestId("dev-settlement-warning"))
+        .toContainText("nessun salario pagato");
+    });
+}
+
+test("#162: mobile English shows explicit non-applied 0/1/2 tax cases", async ({ page }) => {
+  await mockMatchApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await page.getByTestId("dev-end-turn").click();
+  await page.getByTestId("dev-seat-bob").click();
+  await page.getByTestId("dev-end-turn").click();
+  await expect(page.getByTestId("dev-settlement-tax-scenarios")).toBeVisible();
+  await expect(page.getByTestId("dev-settlement-tax-note"))
+    .toContainText("no tax was chosen or applied");
+  await expect(page.getByTestId("dev-settlement-tax-0-player-alice"))
+    .toHaveAttribute("data-hypothetical-net-atoms", "3");
+  await expect(page.getByTestId("dev-settlement-tax-2-player-bob"))
+    .toHaveAttribute("data-hypothetical-net-atoms", "1");
+  await expect(page.getByTestId("dev-settlement-warning"))
+    .toContainText("no salary paid");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
+    .toBe(false);
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-settlement-tax-scenarios")).toHaveCount(0);
 });
 
 test("settlement preview rejects stale, malformed and switched bearer results on mobile EN", async ({ page }) => {

@@ -1471,6 +1471,58 @@ test("real .NET eight-seat match supports private join and all sequential turns"
     expect(state.events).toHaveLength(9);
     expect(state.events.at(-1)?.kind).toBe("round-settlement-pending");
 
+    // #162: for eight seats too, three printed possibilities must come
+    // from the REAL .NET pending preview and match the rendered 8×3
+    // client rows. The browser never chooses/applies a tax or pays wages.
+    const eightPreview = await request.get(origin + "/settlement-preview", {
+      headers: auth(guestToken),
+    });
+    expect(eightPreview.status()).toBe(200);
+    expect(eightPreview.headers()["cache-control"]).toContain("no-store");
+    const eightResult = await eightPreview.json() as {
+      verifiedRevision: number;
+      hypotheticalTaxScenarios: {
+        hypotheticalTaxAtomsPerPlayer: number;
+        potentialWithheldAtoms: number;
+        players: {
+          playerId: string; grossAtoms: number;
+          hypotheticalTaxAtoms: number; hypotheticalNetAtoms: number;
+        }[];
+      }[];
+    };
+    expect(eightResult.verifiedRevision).toBe(8);
+    expect(eightResult.hypotheticalTaxScenarios).toHaveLength(3);
+    const expectedEightRows: { id: string; gross: string; net: string }[] = [];
+    for (const [tax, scenario] of eightResult.hypotheticalTaxScenarios.entries()) {
+      expect(scenario.hypotheticalTaxAtomsPerPlayer).toBe(tax);
+      expect(scenario.potentialWithheldAtoms).toBe(8 * tax);
+      expect(scenario.players.map(x => x.playerId)).toEqual(seatIds);
+      for (const player of scenario.players) {
+        expect(player.grossAtoms).toBe(3);
+        expect(player.hypotheticalTaxAtoms).toBe(tax);
+        expect(player.hypotheticalNetAtoms).toBe(3 - tax);
+        expectedEightRows.push({
+          id: `dev-settlement-tax-${tax}-player-${player.playerId}`,
+          gross: String(player.grossAtoms), net: String(player.hypotheticalNetAtoms),
+        });
+      }
+    }
+    await expect(page.getByTestId("dev-settlement-tax-scenarios"))
+      .toBeVisible({ timeout: 12000 });
+    await expect(guest.getByTestId("dev-settlement-tax-scenarios"))
+      .toBeVisible({ timeout: 12000 });
+    const visibleEightRows = await page.locator(
+      "li[data-testid^='dev-settlement-tax-'][data-hypothetical-net-atoms]",
+    ).evaluateAll(elements => elements.map(element => ({
+      id: element.getAttribute("data-testid") ?? "",
+      gross: element.getAttribute("data-gross-atoms") ?? "",
+      net: element.getAttribute("data-hypothetical-net-atoms") ?? "",
+    })));
+    expect(visibleEightRows).toEqual(expectedEightRows);
+    expect(state.players.every(player => player.atoms === 4)).toBe(true);
+    for (const credential of created.credentials)
+      expect(JSON.stringify(eightResult)).not.toContain(credential.token);
+
     const storage = await guest.evaluate(() => ({
       url: location.href, local: Object.values(localStorage), session: Object.values(sessionStorage),
     }));
@@ -2880,7 +2932,12 @@ test("real .NET settlement preview is authenticated, gross-only and consistent i
     const a = await first.json() as { matchId: string; round: number; verifiedRevision: number;
       nextTurnOrder: string[];
       grossSalaryQuotes: { playerId: string; baseAtoms: number;
-        standingActivityAtoms: number; grossAtoms: number }[] };
+        standingActivityAtoms: number; grossAtoms: number }[];
+      hypotheticalTaxScenarios: {
+        hypotheticalTaxAtomsPerPlayer: number; potentialWithheldAtoms: number;
+        players: { playerId: string; grossAtoms: number;
+          hypotheticalTaxAtoms: number; hypotheticalNetAtoms: number }[];
+      }[] };
     const b = await other.json();
     expect(b).toEqual(a);
     expect(a.matchId).toBe(id);
@@ -2890,6 +2947,27 @@ test("real .NET settlement preview is authenticated, gross-only and consistent i
     expect(a.grossSalaryQuotes).toHaveLength(2);
     expect(a.grossSalaryQuotes.every(q => q.baseAtoms === 2
       && q.standingActivityAtoms === 1 && q.grossAtoms === 3)).toBe(true);
+    // #162: compare both REAL browsers with server-certified hypothetical
+    // taxes; neither selects a rate nor changes the four-atom wallets.
+    expect(a.hypotheticalTaxScenarios).toHaveLength(3);
+    for (const [tax, scenario] of a.hypotheticalTaxScenarios.entries()) {
+      expect(scenario.hypotheticalTaxAtomsPerPlayer).toBe(tax);
+      expect(scenario.potentialWithheldAtoms).toBe(2 * tax);
+      expect(scenario.players.map(player => player.playerId)).toEqual(["alice", "bob"]);
+      for (const player of scenario.players) {
+        expect(player.grossAtoms).toBe(3);
+        expect(player.hypotheticalTaxAtoms).toBe(tax);
+        expect(player.hypotheticalNetAtoms).toBe(3 - tax);
+        await expect(page.getByTestId(
+          `dev-settlement-tax-${tax}-player-${player.playerId}`,
+        )).toHaveAttribute("data-hypothetical-net-atoms", String(3 - tax));
+        await expect(second.getByTestId(
+          `dev-settlement-tax-${tax}-player-${player.playerId}`,
+        )).toHaveAttribute("data-hypothetical-net-atoms", String(3 - tax));
+      }
+    }
+    await expect(second.getByTestId("dev-settlement-tax-note"))
+      .toContainText("no tax was chosen or applied");
     expect(JSON.stringify(a)).not.toContain(aliceToken);
     expect(JSON.stringify(a)).not.toContain(bobToken);
     expect(JSON.stringify(a)).not.toContain("cardIds");

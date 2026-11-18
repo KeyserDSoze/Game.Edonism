@@ -126,6 +126,8 @@ type MockOptions = {
   invalidTurnOptions?: boolean;
   forgedSecondMoveOptionsOnce?: boolean; // #117: 200 offers another move after use.
   forgedUnknownStreetOptionsOnce?: boolean; // #124: forged canonical/foreign destination mix.
+  forgedExtraTurnOptionsOnce?: boolean; // #170: unknown raw options keys on GET.
+  forgedJoinedExtraTurnOptionsOnce?: boolean; // #170: unknown keys in /seat turnOptions.
   delayFirstAliceOptions?: boolean;
   dropFirstEndTurnResponse?: boolean;
   http503FirstEndTurn?: boolean;
@@ -187,6 +189,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let forgedSystemSeatIssued = false;
   let forgedStartingSlotIssued = false;
   let forgedUnknownStreetIssued = false;
+  let forgedExtraOptionsIssued = false;
+  let forgedJoinedExtraOptionsIssued = false;
   let forgedJoinedHandIssued = false;
   let forgedBobHandIssued = false;
   const observedInvalidHandReplies: Array<"seat" | "hand"> = [];
@@ -509,6 +513,9 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     if (path.endsWith("/seat")) {
       if (options.bootstrapUnavailable)
         return reply({ status: 503, json: { code: "unavailable" } });
+      const forgedJoinExtra = Boolean(options.forgedJoinedExtraTurnOptionsOnce
+        && !forgedJoinedExtraOptionsIssued && seat === "bob");
+      if (forgedJoinExtra) forgedJoinedExtraOptionsIssued = true;
       const seatHasTurn = phase === 0 && active === seat;
       const forgedJoinAudit = Boolean(options.forgedJoinedAuditChronologyOnce
         && !forgedJoinedAuditChronologySent && seat === "bob");
@@ -564,6 +571,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
             canEndTurn: seatHasTurn,
             freeMoveStreetIds: seatHasTurn && !moved[seat]
               ? adjacent[streets[seat]] ?? [] : [],
+            ...(forgedJoinExtra ? { futureActions: ["NEVER_GRANT"] } : {}),
           },
         },
       });
@@ -882,6 +890,13 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         forgedUnknownStreetIssued = true;
         observedForgedOptions.push({ seat, revision });
       }
+      const forgedExtraOptions = Boolean(options.forgedExtraTurnOptionsOnce
+        && !forgedExtraOptionsIssued && seat === "alice" && isTurn
+        && revision === 0);
+      if (forgedExtraOptions) {
+        forgedExtraOptionsIssued = true;
+        observedForgedOptions.push({ seat, revision });
+      }
       return reply({
         status: 200, headers: { "Cache-Control": "no-store" },
         json: {
@@ -892,6 +907,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           freeMoveStreetIds: forgedForeignStreet ? ["planck", "unmapped-road"]
             : forgedSecondMove ? ["meson"]
             : isTurn && !moved[seat] ? neighbors[streets[seat]] ?? [] : [],
+          ...(forgedExtraOptions ? { mayMoveAnywhere: true } : {}),
         },
       });
     }
@@ -3193,6 +3209,66 @@ test("Domain options are required: missing or wrong revision prevents browser co
   await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
 });
 
+
+// #170: Preserve the server's existing first-round options and only reject
+// over-wide raw JSON; no browser-created PvP permissions or session binding.
+test("#170: forged /turn-options extra keys cannot enable actions; valid seat retry recovers",
+  async ({ page }) => {
+    const { observedHeaders, observedForgedOptions } = await mockMatchApi(page,
+      { forgedExtraTurnOptionsOnce: true });
+    await page.goto("/");
+    await page.getByTestId("dev-create").click();
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    await expect.poll(() => observedForgedOptions.length).toBe(1);
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+    await expect(page.locator('[data-testid^="dev-move-"]')).toHaveCount(0);
+    await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+    expect(observedHeaders.filter(entry => entry.path.endsWith("/end-turn")
+      || entry.path.endsWith("/free-move"))).toHaveLength(0);
+
+    // Switching actors re-reads genuine options. A failed lease must not
+    // survive and must not silently grant a "futureActions" capability.
+    await page.getByTestId("dev-seat-bob").click();
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+    await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+    await page.getByTestId("dev-seat-alice").click();
+    await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+    await expect(page.getByTestId("dev-move-planck")).toBeEnabled();
+    expect(observedHeaders.filter(entry => entry.path.endsWith("/end-turn")
+      || entry.path.endsWith("/free-move"))).toHaveLength(0);
+  });
+
+test("#170: forged /seat nested turnOptions extra fields deny private bootstrap and retry",
+  async ({ page }) => {
+    const { observedHeaders } = await mockMatchApi(page,
+      { forgedJoinedExtraTurnOptionsOnce: true });
+    await page.goto("/");
+    await page.getByTestId("dev-join-id")
+      .fill("00000000-0000-0000-0000-000000000020");
+    await page.getByTestId("dev-join-token").fill(mockSeatToken(1));
+    await page.getByTestId("dev-join").click();
+    await expect(page.getByTestId("dev-error")).toBeVisible();
+    await expect(page.getByTestId("dev-session")).toHaveCount(0);
+    await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+    await expect(page.getByTestId("match-player-legend")).toHaveCount(0);
+    expect(observedHeaders.filter(entry => entry.path.endsWith("/hand")
+      || entry.path.endsWith("/turn-options")
+      || entry.path.endsWith("/end-turn"))).toHaveLength(0);
+    await page.getByTestId("dev-join").click();
+    await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+    await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+    await expect(page.getByTestId("dev-error")).toHaveCount(0);
+    expect(observedHeaders.filter(entry => entry.path.endsWith("/seat")))
+      .toHaveLength(2);
+    const storage = await page.evaluate(() => ({
+      local: Object.values(localStorage),
+      session: Object.values(sessionStorage),
+      url: location.href,
+    }));
+    expect(JSON.stringify(storage)).not.toContain(mockSeatToken(1));
+    expect(await page.locator("body").innerText()).not.toContain("NEVER_GRANT");
+  });
 
 test("#124: foreign destination in otherwise valid turn options hides all controls and recovers", async ({ page }) => {
   // Keep DOM checks independent of WebGL, while retaining the real React runtime.

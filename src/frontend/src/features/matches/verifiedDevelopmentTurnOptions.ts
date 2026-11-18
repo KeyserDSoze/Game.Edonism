@@ -10,6 +10,11 @@ import canonicalBoard from "../../../../shared/board/edonism-board.v1.json";
 // #124: Check destination membership in the same shared printed board;
 // never compute adjacency, grant permissions or trust a client-generated route.
 const canonicalStreetIds = new Set(canonicalBoard.streets.map(street => street.id));
+// #170: exact .NET MatchTurnOptions own-field contract. A forged actor
+// response is kept as a raw in-memory option lease by the UI, so rejecting
+// unknown keys before accepting it prevents untrusted future-action metadata
+// from becoming authoritative-looking state. Never derive legal moves here.
+const allowedOptionKeys = "canEndTurn|freeMoveStreetIds|matchId|playerId|revision";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -21,6 +26,7 @@ export function hasValidDevelopmentTurnOptions(
   if (!isRecord(publicState) || typeof publicState.matchId !== "string"
     || !hasValidDevelopmentPublicEnvelope(publicState, publicState.matchId)
     || typeof actorId !== "string" || !actorId.trim() || !isRecord(value)
+    || Object.keys(value).sort().join("|") !== allowedOptionKeys
     || value.matchId !== publicState.matchId || value.playerId !== actorId
     || value.revision !== publicState.revision
     || typeof value.canEndTurn !== "boolean"

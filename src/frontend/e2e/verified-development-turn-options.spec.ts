@@ -38,15 +38,20 @@ for (const count of [2, 4, 8] as const) {
     const pending = structuredClone(state);
     pending.phase = 1;
     pending.activePlayerId = null;
-    const before = JSON.stringify({ state, last, moved, pending });
+    const shuffled = {
+      freeMoveStreetIds: ["newton", "planck"], canEndTurn: true,
+      revision: 2, playerId: "alice", matchId: state.matchId,
+    }; // Object property insertion order is irrelevant to the JSON contract.
+    const before = JSON.stringify({ state, last, moved, pending, shuffled });
     await page.goto("/");
-    const result = await page.evaluate(async ({ state, last, moved, pending, count }) => {
+    const result = await page.evaluate(async ({ state, last, moved, pending, shuffled, count }) => {
       const { hasValidDevelopmentTurnOptions: valid } =
         await import("/src/features/matches/verifiedDevelopmentTurnOptions.ts");
       const lastSeat = last.turnOrder.at(-1)!;
       return {
         active: valid({ matchId: state.matchId, playerId: "alice", revision: 2,
           canEndTurn: true, freeMoveStreetIds: ["planck", "newton"] }, "alice", state),
+        reorderedKeys: valid(shuffled, "alice", state),
         other: valid({ matchId: state.matchId, playerId: "bob", revision: 2,
           canEndTurn: false, freeMoveStreetIds: [] }, "bob", state),
         last: valid({ matchId: last.matchId, playerId: lastSeat, revision: 2,
@@ -59,12 +64,12 @@ for (const count of [2, 4, 8] as const) {
           canEndTurn: false, freeMoveStreetIds: [] }, "intruder", state),
         playerCount: count,
       };
-    }, { state, last, moved, pending, count });
+    }, { state, last, moved, pending, shuffled, count });
     expect(result).toEqual({
-      active: true, other: true, last: true, usedMove: true,
+      active: true, reorderedKeys: true, other: true, last: true, usedMove: true,
       pending: true, missingSeat: false, playerCount: count,
     });
-    expect(JSON.stringify({ state, last, moved, pending })).toBe(before);
+    expect(JSON.stringify({ state, last, moved, pending, shuffled })).toBe(before);
   });
 
   test(`#117: ${count}-seat forged options never invent end-turn or a second free move`,
@@ -82,6 +87,47 @@ for (const count of [2, 4, 8] as const) {
       return next;
     };
     const invalid = {
+      // #170: actor options are retained as a raw HTTP object, so any
+      // unexpected key (including a null/false value) fails closed.
+      extraPrivateHand: { state, actor: "alice", result:
+        Object.assign(structuredClone(validActive), { privateHand: ["hidden"] }) },
+      extraAdminActions: { state, actor: "alice", result:
+        Object.assign(structuredClone(validActive), { adminActions: ["override-turn"] }) },
+      extraToken: { state, actor: "alice", result:
+        Object.assign(structuredClone(validActive), { token: "fake-secret" }) },
+      extraFutureActions: { state, actor: "alice", result:
+        Object.assign(structuredClone(validActive), { futureActions: [] }) },
+      extraUnknownMetadata: { state, actor: "alice", result:
+        Object.assign(structuredClone(validActive), { unknownMetadata: true }) },
+      extraNullMetadata: { state, actor: "alice", result:
+        Object.assign(structuredClone(validActive), { metadata: null }) },
+      extraInertBoolean: { state, actor: "alice", result:
+        Object.assign(structuredClone(validActive), { mayMoveAnywhere: false }) },
+      missingCanEndTurn: { state, actor: "alice", result: (() => {
+        const row = { ...validActive };
+        delete (row as Record<string, unknown>).canEndTurn;
+        return row;
+      })() },
+      missingFreeMoves: { state, actor: "alice", result: (() => {
+        const row = { ...validActive };
+        delete (row as Record<string, unknown>).freeMoveStreetIds;
+        return row;
+      })() },
+      missingPlayer: { state, actor: "alice", result: (() => {
+        const row = { ...validActive };
+        delete (row as Record<string, unknown>).playerId;
+        return row;
+      })() },
+      missingRevision: { state, actor: "alice", result: (() => {
+        const row = { ...validActive };
+        delete (row as Record<string, unknown>).revision;
+        return row;
+      })() },
+      missingMatch: { state, actor: "alice", result: (() => {
+        const row = { ...validActive };
+        delete (row as Record<string, unknown>).matchId;
+        return row;
+      })() },
       falseEndTurn: { state, actor: "alice", result: tamper(x => { x.canEndTurn = false; }) },
       wrongActorPermission: { state, actor: "bob", result: options("bob", true) },
       wrongActorMoves: { state, actor: "bob", result: options("bob", false, ["planck"]) },

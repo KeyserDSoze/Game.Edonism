@@ -79,7 +79,7 @@ public sealed class MatchCheckpointTests
     {
         var state = FullDeck().CaptureCheckpoint();
         Assert.Throws<InvalidDataException>(() =>
-            Restore(state with { FormatVersion = 2 }));
+            Restore(state with { FormatVersion = 3 }));
         Assert.Throws<InvalidDataException>(() =>
             Restore(state with { State = state.State with { BoardVersion = "invented" } }));
         Assert.Throws<InvalidDataException>(() =>

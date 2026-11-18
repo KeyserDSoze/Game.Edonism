@@ -1563,4 +1563,116 @@ public sealed class DevelopmentCheckpointPersistenceTests
         using var forbidden = await invalid.GetAsync($"/api/dev/matches/{id}");
         Assert.Equal(HttpStatusCode.NotFound, forbidden.StatusCode);
     }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public async Task ApiEncryptedRestartsKeepTypedElectionDayPrivateAndRejectRevokedBearer(int seats)
+    {
+        using var temp = new TempDirectory();
+        var ids = Enumerable.Range(0, seats).Select(i => $"player-{i}").ToArray();
+        Guid matchId;
+        string[] tokens;
+        using (var firstHost = ApiFactory(temp))
+        using (var creator = firstHost.CreateClient())
+        {
+            using var response = await creator.PostAsJsonAsync(
+                "/api/dev/matches/from-full-deck", new
+                {
+                    playerIds = ids,
+                    characters = CharacterSetupFixture.Catalog(),
+                    availableActivities = ActivitySetupFixture.Catalog(),
+                    actionCardIds = ActionDeckFixture.ActionIds(),
+                    electionDayCardId = ActionDeckFixture.ElectionDayId,
+                    seed = 2026
+                });
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            using var json = await response.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.NotNull(json);
+            matchId = json.RootElement.GetProperty("matchId").GetGuid();
+            tokens = json.RootElement.GetProperty("credentials").EnumerateArray()
+                .Select(item => item.GetProperty("token").GetString()!).ToArray();
+            var publicCreated = json.RootElement.GetProperty("state").GetRawText();
+            Assert.DoesNotContain("ElectionDayCardId", publicCreated);
+            Assert.DoesNotContain(ActionDeckFixture.ElectionDayId, publicCreated);
+        }
+        var saved = temp.Files().Load(matchId);
+        Assert.NotNull(saved);
+        Assert.Equal(2, saved.Checkpoint.FormatVersion);
+        Assert.Equal(ActionDeckFixture.ElectionDayId,
+            saved.Checkpoint.PrivateDeal!.ElectionDayCardId);
+        Assert.True(InitialActionDeckComposer.MatchesRecordedShuffle(
+            saved.Checkpoint.PrivateDeal, ids,
+            requireElectionDayMarker: true));
+        var pathOnDisk = Path.Combine(temp.PathOnDisk, matchId.ToString("N") + ".edonism");
+        var bytes = File.ReadAllBytes(pathOnDisk);
+        Assert.True(bytes.Length > 64);
+        Assert.True(bytes.AsSpan().IndexOf(
+            Encoding.UTF8.GetBytes(ActionDeckFixture.ElectionDayId)) < 0);
+
+        using var restarted = ApiFactory(temp);
+        using var invalid = restarted.CreateClient();
+        using (var denied = await invalid.GetAsync($"/api/dev/matches/{matchId}/hand"))
+            Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+
+        // Every seat still receives only its own original four physical
+        // IDs, never the private marker field or another actor's hand.
+        for (var i = 0; i < seats; i++)
+        {
+            using var actor = restarted.CreateClient();
+            actor.DefaultRequestHeaders.Add("X-Edonism-Dev-Token", tokens[i]);
+            using var hand = await actor.GetAsync(
+                $"/api/dev/matches/{matchId}/hand?playerId={ids[(i + 1) % seats]}");
+            Assert.Equal(HttpStatusCode.OK, hand.StatusCode);
+            Assert.Equal("no-store", hand.Headers.CacheControl?.ToString());
+            using var handJson = await hand.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.NotNull(handJson);
+            Assert.Equal(ids[i], handJson.RootElement.GetProperty("playerId").GetString());
+            Assert.Equal(4, handJson.RootElement.GetProperty("cardIds").GetArrayLength());
+            Assert.Equal(saved.Checkpoint.PrivateDeal.Hands[i].CardIds,
+                handJson.RootElement.GetProperty("cardIds").EnumerateArray()
+                    .Select(c => c.GetString()!).ToArray());
+            Assert.DoesNotContain("ElectionDayCardId",
+                await hand.Content.ReadAsStringAsync());
+
+            foreach (var suffix in new[] { "", "/audit", "/history" })
+            {
+                using var projection = await actor.GetAsync(
+                    $"/api/dev/matches/{matchId}{suffix}");
+                Assert.Equal(HttpStatusCode.OK, projection.StatusCode);
+                Assert.Equal("no-store", projection.Headers.CacheControl?.ToString());
+                var text = await projection.Content.ReadAsStringAsync();
+                Assert.DoesNotContain("ElectionDayCardId", text);
+                Assert.DoesNotContain(ActionDeckFixture.ElectionDayId, text);
+                foreach (var token in tokens) Assert.DoesNotContain(token, text);
+            }
+        }
+
+        using var owner = restarted.CreateClient();
+        owner.DefaultRequestHeaders.Add("X-Edonism-Dev-Token", tokens[0]);
+        using var rotate = await owner.PostAsync(
+            $"/api/dev/matches/{matchId}/rotate-token", null);
+        Assert.Equal(HttpStatusCode.OK, rotate.StatusCode);
+        using var rotated = await rotate.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert.NotNull(rotated);
+        var nextToken = rotated.RootElement.GetProperty("token").GetString()!;
+        using (var forbidden = await owner.GetAsync($"/api/dev/matches/{matchId}/hand"))
+            Assert.Equal(HttpStatusCode.NotFound, forbidden.StatusCode);
+        using (var newHost = ApiFactory(temp))
+        using (var again = newHost.CreateClient())
+        {
+            again.DefaultRequestHeaders.Add("X-Edonism-Dev-Token", nextToken);
+            using var available = await again.GetAsync($"/api/dev/matches/{matchId}/hand");
+            Assert.Equal(HttpStatusCode.OK, available.StatusCode);
+        }
+        var persistedAgain = temp.Files().Load(matchId);
+        Assert.NotNull(persistedAgain);
+        Assert.Equal(GameMatch.CheckpointVersion, persistedAgain.Checkpoint.FormatVersion);
+        Assert.Equal(saved.Checkpoint.PrivateDeal.ElectionDayCardId,
+            persistedAgain.Checkpoint.PrivateDeal!.ElectionDayCardId);
+        Assert.True(InitialActionDeckComposer.MatchesRecordedShuffle(
+            persistedAgain.Checkpoint.PrivateDeal, ids,
+            requireElectionDayMarker: true));
+    }
 }

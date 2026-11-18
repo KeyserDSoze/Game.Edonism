@@ -57,7 +57,7 @@ public sealed class DevelopmentOwnElectionDayEndpointTests
         var originalState = created.RootElement.GetProperty("state").GetRawText();
         var deal = InitialActionDeckComposer.Deal(
             ActionDeckFixture.ActionIds(), ActionDeckFixture.ElectionDayId,
-            playerIds, seed);
+            playerIds, seed ^ unchecked((int)0x51D7348D));
         var path = $"/api/dev/matches/{id}/hand/election-day";
         using (var noToken = await creator.GetAsync(path))
         {

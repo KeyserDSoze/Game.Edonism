@@ -2804,8 +2804,7 @@ export function DevelopmentMatchLab({
                         <span>{id}</span>
                         {ownElectionInspection?.classificationAvailable
                           && ownElectionInspection.ownHandIndex === index && (
-                          <Badge variant="secondary"
-                            data-testid="dev-own-election-day-card">
+                          <Badge data-testid="dev-own-election-day-card">
                             {t("dev.ownElectionDayCard")}
                           </Badge>
                         )}

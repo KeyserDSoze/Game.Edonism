@@ -132,8 +132,8 @@ for (const seats of [2, 4, 8] as const) {
           delete (p.hypotheticalTaxScenarios[1] as unknown as Record<string, unknown>).players;
         }),
         missingRowNet: change(p => {
-          delete (p.hypotheticalTaxScenarios[2].players[0]
-            as unknown as Record<string, unknown>).hypotheticalNetAtoms;
+          Reflect.deleteProperty(p.hypotheticalTaxScenarios[2].players[0],
+            "hypotheticalNetAtoms");
         }),
         wrongRound: change(p => { p.round = 2; }),
         wrongMatch: change(p => { p.matchId = "other"; }),

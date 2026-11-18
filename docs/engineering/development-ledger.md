@@ -3,7 +3,8 @@
 GitHub Issues are the detailed source of truth. Work is committed directly to `main` as requested; CI remains mandatory.
 
 | Issue | Version | Work | Status | Verification |
-|---|---|---|---|
+|---|---|---|---|---|
+| [#165](https://github.com/KeyserDSoze/Game.Edonism/issues/165) | 0.0.2 | Reject reserved/Unicode-invalid technical seat owners in standalone React hypothetical 0/1/2 salary scenarios; xUnit/Playwright 2/4/8, source-of-truth parity | In progress — code, tests and docs committed directly to main | Await final exact-HEAD 3/3 CI before closure |
 | [#164](https://github.com/KeyserDSoze/Game.Edonism/issues/164) | 0.0.2 | Actor-only typed Election Day own-hand index, authenticated Development API, fail-closed private IT/EN UI (legacy v1 unknown), no vote/card effects | Done — closed; exact-main `8decd287` | [CI #44268585913](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/44268585913): .NET 10/xUnit, React/Playwright and live React+.NET all 3 completed/success |
 | [#163](https://github.com/KeyserDSoze/Game.Edonism/issues/163) | 0.0.2 | Preserve private typed Election Day identity from trusted 59-card shuffle across v2 encrypted checkpoints while accepting historical v1 without guessing | Done — closed on exact-main 6cedb85 after 3/3 success | [CI #44263895697](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/44263895697): 878 xUnit + 536 React + 42 live .NET (1,456/1,456) |
 | [#162](https://github.com/KeyserDSoze/Game.Edonism/issues/162) | 0.0.2 | Pure printed-rule 0/1/2 hypothetical salary tax scenarios in audited Development pending-round preview, explicit non-applied UI IT/EN | Done — issue closed after exact-main CI on ac91f91 | [CI #44010344394](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/44010344394): 865 xUnit, 536 React/Vite, 42 live .NET (1,443/1,443, 3/3 success) |

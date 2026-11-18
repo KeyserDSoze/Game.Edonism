@@ -7,6 +7,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const hexBearer = /^[0-9a-f]{64}$/i;
+// #173: .NET DevSeatCredential is exactly { playerId, token } on rotation.
+// The raw HTTP 200 must never introduce silent extra private/bearer metadata
+// before the UI binds a newly minted actor capability.
+const rotatedCredentialKeys = "playerId|token";
 
 export function hasValidDevelopmentRotatedCredential(
   value: unknown,
@@ -15,6 +19,7 @@ export function hasValidDevelopmentRotatedCredential(
   heldCredentials: readonly unknown[],
 ): boolean {
   if (!isRecord(value)
+    || Object.keys(value).sort().join("|") !== rotatedCredentialKeys
     || typeof seatId !== "string" || !seatId.trim()
     || typeof previousToken !== "string" || !hexBearer.test(previousToken)
     || value.playerId !== seatId

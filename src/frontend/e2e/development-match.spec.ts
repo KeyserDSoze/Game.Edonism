@@ -78,7 +78,8 @@ type MockOptions = {
   forgedCreatorAuditChronologyOnce?: boolean; // #119: valid credentials, false public timeline.
   forgedCreatorTurnOrderOnce?: boolean; // #120: correct credentials, false next-round order.
   forgedCreatorBoardVersionOnce?: boolean; // #122: false board version on creator 201.
-  rotationCredentialFaultOnce?: "other-seat" | "other-seat-uppercase"; // #115 fake 200, no backend rotation.
+  rotationCredentialFaultOnce?: "other-seat" | "other-seat-uppercase"
+    | "extra-private-hand"; // #115/#173 fake 200, no backend rotation.
   sameStreet?: boolean;
   unknownStreet?: boolean;
   fallenHenchman?: boolean;
@@ -979,7 +980,11 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           json: {
             playerId: seat,
             token: options.rotationCredentialFaultOnce === "other-seat-uppercase"
-              ? mockSeatToken(0).toUpperCase() : mockSeatToken(0),
+              ? mockSeatToken(0).toUpperCase()
+              : options.rotationCredentialFaultOnce === "extra-private-hand"
+                ? "C".repeat(64) : mockSeatToken(0),
+            ...(options.rotationCredentialFaultOnce === "extra-private-hand"
+              ? { privateHand: ["NEVER_EXPOSE_ROTATION"] } : {}),
           },
         });
       }
@@ -3151,6 +3156,74 @@ test("Development seat rotation invalidates old capability without touching matc
   expect(await page.locator("body").innerText()).not.toContain(changed.token);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
 });
+
+// #173: a forged 200 with a valid-looking new bearer and EXTRA private
+// metadata must fail before rebinding actor scope; only valid retry rotates.
+test("#173: over-wide rotation 200 cannot rebind Bob; genuine retry succeeds",
+  async ({ page }) => {
+    const { observedHeaders } = await mockMatchApi(page,
+      { rotationCredentialFaultOnce: "extra-private-hand" });
+    await page.goto("/");
+    await page.getByTestId("dev-create").click();
+    await page.getByTestId("dev-seat-bob").click();
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+    const rotatedResponse = () => page.waitForResponse(r =>
+      new URL(r.url()).pathname.endsWith("/rotate-token")
+        && r.request().method() === "POST");
+
+    const forged = rotatedResponse();
+    await page.getByTestId("dev-rotate-token").click();
+    const fake = await forged;
+    expect(fake.status()).toBe(200);
+    const forgedBody = await fake.json() as Record<string, unknown>;
+    expect(forgedBody).toMatchObject({
+      playerId: "bob", token: "C".repeat(64),
+      privateHand: ["NEVER_EXPOSE_ROTATION"],
+    });
+    await expect(page.getByTestId("dev-error")).toBeVisible();
+    await expect(page.getByTestId("dev-rotation-notice")).toHaveCount(0);
+    await expect(page.getByTestId("dev-session")).toBeVisible();
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    expect(await page.locator("body").innerText())
+      .not.toContain("NEVER_EXPOSE_ROTATION");
+    const storageBefore = await page.evaluate(() => ({
+      local: Object.values(localStorage), session: Object.values(sessionStorage),
+      url: location.href,
+    }));
+    expect(JSON.stringify(storageBefore)).not.toContain("C".repeat(64));
+
+    // No rotation was performed by mock backend on the forged first reply;
+    // the original Bob token still authorizes his OWN hand on a fresh switch.
+    await page.getByTestId("dev-seat-alice").click();
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+    await page.getByTestId("dev-seat-bob").click();
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+    expect(observedHeaders.some(entry =>
+      entry.path.endsWith("/hand") && entry.token === mockSeatToken(1)))
+      .toBe(true);
+
+    const genuine = rotatedResponse();
+    await page.getByTestId("dev-rotate-token").click();
+    const acknowledged = await genuine;
+    expect(acknowledged.status()).toBe(200);
+    const receipt = await acknowledged.json() as { playerId: string; token: string };
+    expect(receipt.playerId).toBe("bob");
+    expect(receipt.token).toMatch(/^[a-f0-9]{64}$/i);
+    expect(receipt.token).not.toBe("C".repeat(64));
+    await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+    await expect(page.getByTestId("dev-error")).toHaveCount(0);
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+    expect(observedHeaders.some(entry =>
+      entry.path.endsWith("/hand") && entry.token === receipt.token))
+      .toBe(true);
+    const privacy = await page.evaluate(() => ({
+      local: Object.values(localStorage), session: Object.values(sessionStorage),
+      url: location.href, body: document.body.innerText,
+    }));
+    for (const secret of ["C".repeat(64), receipt.token, mockSeatToken(1)])
+      expect(JSON.stringify(privacy)).not.toContain(secret);
+  });
 
 test("#115: colliding 200 rotation cannot impersonate Alice; Bob retries safely", async ({ page }) => {
   const { observedHeaders } = await mockMatchApi(page,

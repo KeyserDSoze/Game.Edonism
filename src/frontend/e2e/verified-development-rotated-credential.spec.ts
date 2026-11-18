@@ -12,9 +12,14 @@ for (const count of [2, 4, 8] as const) {
     const held = seatIds.slice(0, count).map((playerId, index) => ({
       playerId, token: token(index),
     }));
-    const before = JSON.stringify(held);
+    const unicodeHeld = held.map((item, index) => ({
+      ...item, playerId: index === 0 ? "Renée"
+        : index === 1 ? "王小明"
+          : index === 2 ? "System" : index === 3 ? "🙂" : item.playerId,
+    }));
+    const before = JSON.stringify({ held, unicodeHeld });
     await page.goto("/");
-    const result = await page.evaluate(async ({ held, replacement }) => {
+    const result = await page.evaluate(async ({ held, replacement, unicodeHeld }) => {
       const { hasValidDevelopmentRotatedCredential: valid } =
         await import("/src/features/matches/verifiedDevelopmentRotatedCredential.ts");
       return {
@@ -22,13 +27,18 @@ for (const count of [2, 4, 8] as const) {
         uppercase: valid({ playerId: "bob", token: replacement.toUpperCase() },
           "bob", "B".repeat(64), held),
         alice: valid({ playerId: "alice", token: replacement }, "alice", "a".repeat(64), held),
+        reorderedKeys: valid({ token: replacement, playerId: "bob" },
+          "bob", "b".repeat(64), held),
+        unicode: valid({ playerId: "王小明", token: replacement },
+          "王小明", "b".repeat(64), unicodeHeld),
         // Joining with a single capability is allowed; creator-owned extra seats are optional.
         joined: valid({ playerId: "bob", token: replacement }, "bob", "b".repeat(64),
           [{ playerId: "bob", token: "b".repeat(64) }]),
       };
-    }, { held, replacement });
-    expect(result).toEqual({ normal: true, uppercase: true, alice: true, joined: true });
-    expect(JSON.stringify(held)).toBe(before);
+    }, { held, replacement, unicodeHeld });
+    expect(result).toEqual({ normal: true, uppercase: true, alice: true,
+      reorderedKeys: true, unicode: true, joined: true });
+    expect(JSON.stringify({ held, unicodeHeld })).toBe(before);
   });
 
   test(`#115: forged ${count}-seat rotation cannot reuse another local bearer`,
@@ -49,6 +59,17 @@ for (const count of [2, 4, 8] as const) {
         return seats;
       };
       const cases: Record<string, boolean> = {
+        // #173: a raw forged 200 rotation receipt must have exactly two
+        // own .NET DevSeatCredential fields, even when the extras are null.
+        extraOtherSeatTokens: valid({ ...reply, otherPlayerTokens: [held[0].token] },
+          "bob", old, held),
+        extraPrivateHand: valid({ ...reply, privateHand: ["HIDDEN"] }, "bob", old, held),
+        extraDrawPile: valid({ ...reply, remainingDrawPile: ["HIDDEN"] }, "bob", old, held),
+        extraFutureActions: valid({ ...reply, futureActions: [] }, "bob", old, held),
+        extraFalseSkip: valid({ ...reply, maySkipTurn: false }, "bob", old, held),
+        extraNullMetadata: valid({ ...reply, unknownMetadata: null }, "bob", old, held),
+        extraSecret: valid({ ...reply, secret: "HIDDEN" }, "bob", old, held),
+        missingToken: valid({ playerId: "bob" }, "bob", old, held),
         duplicateAlice: valid({ ...reply, token: held[0].token }, "bob", old, held),
         duplicateAliceUpper: valid({ ...reply, token: held[0].token.toUpperCase() },
           "bob", old, held),
@@ -83,7 +104,7 @@ for (const count of [2, 4, 8] as const) {
       };
       return cases;
     }, { held, old, replacement });
-    expect(Object.keys(result)).toHaveLength(24);
+    expect(Object.keys(result)).toHaveLength(32);
     for (const [name, accepted] of Object.entries(result)) expect(accepted, name).toBe(false);
     expect(JSON.stringify(held)).toBe(before);
   });

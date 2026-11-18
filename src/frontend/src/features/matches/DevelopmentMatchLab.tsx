@@ -15,6 +15,10 @@ import { hasValidDevelopmentRotatedCredential } from "./verifiedDevelopmentRotat
 import { hasValidDevelopmentTurnOptions } from "./verifiedDevelopmentTurnOptions";
 import { hasValidDevelopmentFirstRoundHand } from "./verifiedDevelopmentFirstRoundHand";
 import {
+  hasVerifiedOwnElectionDayInspection,
+  type OwnElectionDayInspection,
+} from "./verifiedOwnElectionDayInspection";
+import {
   hasVerifiedHypotheticalSalaryScenarios,
   type HypotheticalTaxScenario,
 } from "./verifiedHypotheticalSalaryScenarios";
@@ -270,6 +274,11 @@ export function DevelopmentMatchLab({
   const [playerCount, setPlayerCount] = useState(2);
   const [actorId, setActorId] = useState("");
   const [hand, setHand] = useState<PrivateHand | null>(null);
+  // #164: at most an index in the *current actor's* own four-card hand.
+  // Never cache a typed marker in storage or a public snapshot.
+  const [ownElectionLease, setOwnElectionLease] = useState<{
+    token: string; data: OwnElectionDayInspection;
+  } | null>(null);
   const [historyLease, setHistoryLease] = useState<{
     token: string; data: PublicHistory;
   } | null>(null);
@@ -370,6 +379,13 @@ export function DevelopmentMatchLab({
     && optionLease.options.revision === session?.state.revision
     ? optionLease.options : null;
   const canEndTurn = Boolean(isMyTurn && turnOptions?.canEndTurn && !busy);
+  const ownElectionInspection = ownElectionLease && token
+    && ownElectionLease.token === token
+    && ownElectionLease.data.matchId === session?.matchId
+    && ownElectionLease.data.playerId === actorId
+    && ownElectionLease.data.verifiedRevision === session?.state.revision
+    && hand?.matchId === session?.matchId && hand?.playerId === actorId
+    ? ownElectionLease.data : null;
   // The Domain authorizes destinations; the browser board names them only.
   const adjacent = isMyTurn && turnOptions ? turnOptions.freeMoveStreetIds : [];
   const publicEvents = session
@@ -820,6 +836,45 @@ export function DevelopmentMatchLab({
       });
     return () => controller.abort();
   }, [session?.matchId, token]);
+
+  // #164: read-only, bearer-bound PRIVATE classification. The endpoint
+  // returns only an index (0..3) in the actor's own hand, or unknown for
+  // historical v1. A late reply from a previous token/seat/revision MUST
+  // NEVER label a card owned by the current actor.
+  useEffect(() => {
+    const matchId = session?.matchId;
+    const revision = session?.state.revision;
+    const seatId = actorId;
+    const actorToken = token;
+    setOwnElectionLease(null);
+    if (!matchId || revision === undefined || !seatId || !actorToken
+      || !hand || hand.matchId !== matchId || hand.playerId !== seatId)
+      return;
+    const controller = new AbortController();
+    void fetch(`/api/dev/matches/${matchId}/hand/election-day`, {
+      headers: { "X-Edonism-Dev-Token": actorToken },
+      signal: controller.signal,
+      cache: "no-store",
+    })
+      .then(response => {
+        if (response.status === 404 && !controller.signal.aborted)
+          reconcileRevokedSeat(matchId, seatId, actorToken);
+        return responseJson<OwnElectionDayInspection>(response);
+      })
+      .then(candidate => {
+        const active = currentActorScope.current;
+        if (!controller.signal.aborted && active?.matchId === matchId
+          && active.seatId === seatId && active.token === actorToken
+          && currentRevision.current === revision
+          && hasVerifiedOwnElectionDayInspection(
+            candidate, matchId, seatId, revision, hand))
+          setOwnElectionLease({ token: actorToken, data: candidate });
+      })
+      .catch(() => {
+        // Offline, invalid or stale: show NO typed classification.
+      });
+    return () => controller.abort();
+  }, [session?.matchId, session?.state.revision, actorId, token, hand]);
 
   // Ask the Domain verifier for a complete, public replay at this
   // confirmed match revision. A previous seat/token/revision may never
@@ -2741,9 +2796,37 @@ export function DevelopmentMatchLab({
                 <Hand aria-hidden="true" className="size-4" /> {t("dev.hand")} · {actorId}
               </p>
               {hand?.playerId === actorId ? (
-                <ul data-testid="dev-hand" className="space-y-1 font-mono text-xs">
-                  {hand.cardIds.map((id) => <li key={id} className="break-all">{id}</li>)}
-                </ul>
+                <>
+                  <ul data-testid="dev-hand" className="space-y-1 font-mono text-xs">
+                    {hand.cardIds.map((id, index) => (
+                      <li key={id} data-testid={`dev-own-hand-card-${index}`}
+                        className="flex flex-wrap items-center gap-2 break-all">
+                        <span>{id}</span>
+                        {ownElectionInspection?.classificationAvailable
+                          && ownElectionInspection.ownHandIndex === index && (
+                          <Badge variant="secondary"
+                            data-testid="dev-own-election-day-card">
+                            {t("dev.ownElectionDayCard")}
+                          </Badge>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  {ownElectionInspection && (
+                    <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                      <p data-testid="dev-own-election-day-status">
+                        {!ownElectionInspection.classificationAvailable
+                          ? t("dev.ownElectionDayUnknown")
+                          : ownElectionInspection.ownHandIndex === null
+                            ? t("dev.ownElectionDayNotInHand")
+                            : t("dev.ownElectionDayPrivateHint")}
+                      </p>
+                      <p data-testid="dev-own-election-day-warning">
+                        {t("dev.ownElectionDayNotActive")}
+                      </p>
+                    </div>
+                  )}
+                </>
               ) : (
                 <p className="text-xs text-muted-foreground">{t("dev.handLoading")}</p>
               )}

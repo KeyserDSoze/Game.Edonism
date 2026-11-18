@@ -22,7 +22,9 @@ function fixture(seats: 2 | 4 | 8) {
       freeMoveUsed: false,
     })),
     turnOrder: [...ids],
-    proposedNextRoundOrder: [...ids.slice(1), ids[0]],
+    // .NET GameMatch.Snapshot() proposes last-to-first rotation; moving
+    // first-to-last is only indistinguishable when the match has 2 seats.
+    proposedNextRoundOrder: [ids[ids.length - 1], ...ids.slice(0, -1)],
     events: [{ revision: 0, round: 1, kind: "match-created",
       actorId: "system", fromStreetId: null, toStreetId: null }],
     boardActivities: [],

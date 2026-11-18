@@ -35,7 +35,9 @@ export function verifiedPublicSeatResources(value: unknown): ReadonlyMap<string,
     if (!verified
       || !Number.isSafeInteger(player.atoms) || player.atoms! < 0
       || !Number.isSafeInteger(player.diplomacyTokens) || player.diplomacyTokens! < 0
-      || !Number.isSafeInteger(player.henchmenTotal) || player.henchmenTotal! < 0
+      // #168: The printed per-seat reserve is 16; .NET GrossSalaryRules
+      // rejects even a self-consistent forged 15/14 or 17/16 owner.
+      || player.henchmenTotal !== 16
       || !Number.isSafeInteger(player.henchmenAvailable) || player.henchmenAvailable! < 0
       || player.henchmenAvailable! > player.henchmenTotal!
       || player.henchmenTotal! - player.henchmenAvailable! !== verified.controlledLots)

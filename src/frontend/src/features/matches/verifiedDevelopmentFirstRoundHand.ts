@@ -1,3 +1,5 @@
+import { isValidDevelopmentTechnicalPlayerId } from "./verifiedDevelopmentTechnicalPlayerId";
+
 /**
  * #118: Development first-round private hand response integrity.
  *
@@ -12,6 +14,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const InitialDevelopmentHandSize = 4;
+// #166: This is the entire current .NET private-hand wire contract.
+// A forged 200 containing opponent hands, deck, capabilities or unknown
+// metadata must never enter React state, even if four own cards look valid.
+const ExpectedPrivateHandKeys = ["cardIds", "matchId", "playerId"].join("|");
 
 export function hasValidDevelopmentFirstRoundHand(
   value: unknown,
@@ -20,9 +26,10 @@ export function hasValidDevelopmentFirstRoundHand(
 ): boolean {
   if (!isRecord(value)
     || typeof expectedMatchId !== "string" || !expectedMatchId.trim()
-    || typeof expectedActorId !== "string" || !expectedActorId.trim()
+    || !isValidDevelopmentTechnicalPlayerId(expectedActorId)
     || value.matchId !== expectedMatchId
     || value.playerId !== expectedActorId
+    || Object.keys(value).sort().join("|") !== ExpectedPrivateHandKeys
     || !Array.isArray(value.cardIds)
     || value.cardIds.length !== InitialDevelopmentHandSize)
     return false;

@@ -129,6 +129,7 @@ type MockOptions = {
   forgedUnknownStreetOptionsOnce?: boolean; // #124: forged canonical/foreign destination mix.
   forgedExtraTurnOptionsOnce?: boolean; // #170: unknown raw options keys on GET.
   forgedJoinedExtraTurnOptionsOnce?: boolean; // #170: unknown keys in /seat turnOptions.
+  forgedSeatBootstrapRootExtraOnce?: boolean; // #174: forged atomic 5-field root.
   delayFirstAliceOptions?: boolean;
   dropFirstEndTurnResponse?: boolean;
   http503FirstEndTurn?: boolean;
@@ -194,6 +195,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let forgedUnknownStreetIssued = false;
   let forgedExtraOptionsIssued = false;
   let forgedJoinedExtraOptionsIssued = false;
+  let forgedBootstrapRootIssued = false;
   let forgedJoinedHandIssued = false;
   let forgedBobHandIssued = false;
   const observedInvalidHandReplies: Array<"seat" | "hand"> = [];
@@ -521,6 +523,9 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       const forgedJoinExtra = Boolean(options.forgedJoinedExtraTurnOptionsOnce
         && !forgedJoinedExtraOptionsIssued && seat === "bob");
       if (forgedJoinExtra) forgedJoinedExtraOptionsIssued = true;
+      const forgedBootstrapRoot = Boolean(options.forgedSeatBootstrapRootExtraOnce
+        && !forgedBootstrapRootIssued && seat === "bob");
+      if (forgedBootstrapRoot) forgedBootstrapRootIssued = true;
       const seatHasTurn = phase === 0 && active === seat;
       const forgedJoinAudit = Boolean(options.forgedJoinedAuditChronologyOnce
         && !forgedJoinedAuditChronologySent && seat === "bob");
@@ -578,6 +583,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
               ? adjacent[streets[seat]] ?? [] : [],
             ...(forgedJoinExtra ? { futureActions: ["NEVER_GRANT"] } : {}),
           },
+          ...(forgedBootstrapRoot
+            ? { otherPlayerTokens: ["NEVER_BIND_OPPONENT_SECRET"] } : {}),
         },
       });
     }
@@ -3326,6 +3333,52 @@ test("#170: forged /turn-options extra keys cannot enable actions; valid seat re
     await expect(page.getByTestId("dev-move-planck")).toBeEnabled();
     expect(observedHeaders.filter(entry => entry.path.endsWith("/end-turn")
       || entry.path.endsWith("/free-move"))).toHaveLength(0);
+  });
+
+test("#174: forged atomic /seat ROOT field blocks private join and genuine retry",
+  async ({ page }) => {
+    const { observedHeaders } = await mockMatchApi(page,
+      { forgedSeatBootstrapRootExtraOnce: true });
+    await page.goto("/");
+    await page.getByTestId("dev-join-id")
+      .fill("00000000-0000-0000-0000-000000000020");
+    await page.getByTestId("dev-join-token").fill(mockSeatToken(1));
+
+    const forgedResponse = page.waitForResponse(r =>
+      new URL(r.url()).pathname.endsWith("/seat") && r.status() === 200);
+    await page.getByTestId("dev-join").click();
+    const forged = await forgedResponse;
+    const body = await forged.json() as Record<string, unknown>;
+    expect(body.otherPlayerTokens).toEqual(["NEVER_BIND_OPPONENT_SECRET"]);
+    await expect(page.getByTestId("dev-error")).toBeVisible();
+    await expect(page.getByTestId("dev-session")).toHaveCount(0);
+    await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+    await expect(page.getByTestId("match-player-legend")).toHaveCount(0);
+    expect(observedHeaders.filter(entry => entry.path.endsWith("/hand")
+      || entry.path.endsWith("/turn-options")
+      || entry.path.endsWith("/end-turn") || entry.path.endsWith("/free-move")))
+      .toHaveLength(0);
+    const blockedPrivacy = await page.evaluate(() => ({
+      url: location.href, local: Object.values(localStorage),
+      session: Object.values(sessionStorage), body: document.body.innerText,
+    }));
+    expect(JSON.stringify(blockedPrivacy)).not.toContain(mockSeatToken(1));
+    expect(JSON.stringify(blockedPrivacy)).not.toContain("NEVER_BIND_OPPONENT_SECRET");
+
+    await page.getByTestId("dev-join").click();
+    await expect(page.getByTestId("dev-seat-bob")).toBeVisible();
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+    await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+    await expect(page.getByTestId("dev-error")).toHaveCount(0);
+    expect(observedHeaders.filter(entry => entry.path.endsWith("/seat")))
+      .toHaveLength(2);
+    expect(await page.locator("body").innerText())
+      .not.toContain("NEVER_BIND_OPPONENT_SECRET");
+    const after = await page.evaluate(() => ({
+      url: location.href, local: Object.values(localStorage),
+      session: Object.values(sessionStorage),
+    }));
+    expect(JSON.stringify(after)).not.toContain(mockSeatToken(1));
   });
 
 test("#170: forged /seat nested turnOptions extra fields deny private bootstrap and retry",

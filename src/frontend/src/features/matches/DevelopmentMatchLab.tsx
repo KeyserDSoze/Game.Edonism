@@ -13,6 +13,7 @@ import { hasValidDevelopmentPublicEnvelope } from "./verifiedDevelopmentPublicEn
 import { hasValidDevelopmentCreatorResponse } from "./verifiedDevelopmentCreatorResponse";
 import { hasValidDevelopmentRotatedCredential } from "./verifiedDevelopmentRotatedCredential";
 import { hasValidDevelopmentTurnOptions } from "./verifiedDevelopmentTurnOptions";
+import { hasValidDevelopmentSeatBootstrapEnvelope } from "./verifiedDevelopmentSeatBootstrapEnvelope";
 import { hasValidDevelopmentFirstRoundTurnProgress } from "./verifiedDevelopmentFirstRoundTurnProgress";
 import {
   hasValidDevelopmentSeatPresence,
@@ -1418,6 +1419,11 @@ export function DevelopmentMatchLab({
       const bootstrap = await responseJson<DevSeatBootstrap>(await fetch(
         `/api/dev/matches/${id}/seat`, { headers, cache: "no-store" },
       ));
+      // #174: Fail closed on an over-wide ATOMIC ROOT before any private
+      // session/capability binding. Existing independent nested validators
+      // must still pass after this exact .NET DevSeatBootstrap shape.
+      if (!hasValidDevelopmentSeatBootstrapEnvelope(bootstrap, id))
+        throw new Error("invalid_seat_bootstrap_envelope");
       const { state, hand: privateHand, turnOptions: options } = bootstrap;
       const actor = bootstrap.playerId;
       if (!hasValidDevelopmentPublicEnvelope(state, id)

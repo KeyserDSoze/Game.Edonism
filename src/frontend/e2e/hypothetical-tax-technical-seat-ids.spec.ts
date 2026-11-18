@@ -46,10 +46,10 @@ for (const seats of [2, 4, 8] as const) {
         // merely catch mismatched row sums / ordering.
         const hostileOwners: unknown[] = [
           "system", null, 17, "", " ",
-          " Renée", "Renée ", "alice\\nbob", "alice\\tbob",
-          "alice\\u202Eevil", "alice\\u200B", "alice\\u0085",
-          "\\uD800", "\\uDC00", "A".repeat(65), "🙂".repeat(33),
-          "alice\\u{E0001}other", original[0],
+          " Renée", "Renée ", "alice\nbob", "alice\tbob",
+          "alice\u202Eevil", "alice\u200B", "alice\u0085",
+          "\uD800", "\uDC00", "A".repeat(65), "🙂".repeat(33),
+          "alice\u{E0001}other", original[0],
         ];
         return {
           accepted: check(original),

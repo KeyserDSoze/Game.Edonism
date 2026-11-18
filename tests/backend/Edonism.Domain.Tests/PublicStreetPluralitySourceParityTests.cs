@@ -47,7 +47,7 @@ public sealed class PublicStreetPluralitySourceParityTests
             Assert.Equal(street.TotalSlots - raw.Length, street.FreeLots);
             var maximum = Math.Max(0, street.Owners.Max(owner => owner.ControlledLots));
             var leaders = maximum == 0
-                ? [] : street.Owners.Where(owner => owner.ControlledLots == maximum)
+                ? Array.Empty<string>() : street.Owners.Where(owner => owner.ControlledLots == maximum)
                     .Select(owner => owner.PlayerId).ToArray();
             Assert.Equal(raw.Length == 0, maximum == 0);
             if (maximum == 0) Assert.Empty(leaders);
@@ -73,19 +73,9 @@ public sealed class PublicStreetPluralitySourceParityTests
         var moved = match.VerifiedPublicTerritoryForActor(ids[0]);
         Assert.NotNull(moved);
         Assert.Equal(1, moved.VerifiedRevision);
-        Assert.Equal(report.Streets, moved.Streets, new StreetRowComparer());
+        Assert.Equal(JsonSerializer.Serialize(report.Streets),
+            JsonSerializer.Serialize(moved.Streets));
         Assert.Equal(genesis.ControlledActivities, match.Snapshot().ControlledActivities);
     }
 
-    private sealed class StreetRowComparer : IEqualityComparer<MatchPublicTerritoryStreet>
-    {
-        public bool Equals(MatchPublicTerritoryStreet? a, MatchPublicTerritoryStreet? b) =>
-            a?.StreetId == b?.StreetId
-            && a?.ControlledLots == b?.ControlledLots
-            && a?.FreeLots == b?.FreeLots
-            && a?.Owners.SequenceEqual(b?.Owners ?? []) == true;
-
-        public int GetHashCode(MatchPublicTerritoryStreet row) =>
-            HashCode.Combine(row.StreetId, row.ControlledLots, row.FreeLots);
-    }
 }

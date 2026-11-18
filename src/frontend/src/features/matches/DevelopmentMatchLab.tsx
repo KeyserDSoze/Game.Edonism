@@ -24,10 +24,8 @@ import {
   hasVerifiedOwnElectionDayInspection,
   type OwnElectionDayInspection,
 } from "./verifiedOwnElectionDayInspection";
-import {
-  hasVerifiedHypotheticalSalaryScenarios,
-  type HypotheticalTaxScenario,
-} from "./verifiedHypotheticalSalaryScenarios";
+import { type HypotheticalTaxScenario } from "./verifiedHypotheticalSalaryScenarios";
+import { hasVerifiedDevelopmentPendingSettlementPreview } from "./verifiedDevelopmentPendingSettlementPreview";
 import { hasValidDevelopmentPublicAuditChronology } from "./verifiedDevelopmentPublicAuditChronology";
 import { hasSameDevelopmentPublicSnapshotAtRevision } from "./verifiedDevelopmentSameRevisionSnapshot";
 import { buildVerifiedPublicAuditExport } from "./publicAuditExport";
@@ -1058,34 +1056,11 @@ export function DevelopmentMatchLab({
         if (controller.signal.aborted || scope?.matchId !== matchId
           || scope.seatId !== seatId || scope.token !== actorToken
           || currentRevision.current !== revision) return;
-        const ids = state.players.map(p => p.playerId);
-        const expectedNext = state.proposedNextRoundOrder;
-        const expectedQuotes = state.grossSalaryQuotes;
-        if (!result || result.matchId !== matchId
-          || result.round !== state.round || result.verifiedRevision !== revision
-          || !Array.isArray(result.nextTurnOrder)
-          || result.nextTurnOrder.length !== ids.length
-          || result.nextTurnOrder.some((id, i) => id !== expectedNext[i])
-          || !Array.isArray(result.grossSalaryQuotes)
-          || result.grossSalaryQuotes.length !== expectedQuotes.length
-          || result.grossSalaryQuotes.some((q, i) => {
-            const original = expectedQuotes[i];
-            return q.playerId !== original?.playerId
-              || !Number.isInteger(q.baseAtoms)
-              || !Number.isInteger(q.standingActivityAtoms)
-              || !Number.isInteger(q.grossAtoms)
-              || q.baseAtoms < 0 || q.standingActivityAtoms < 0
-              || q.grossAtoms !== q.baseAtoms + q.standingActivityAtoms
-              || q.baseAtoms !== original.baseAtoms
-              || q.standingActivityAtoms !== original.standingActivityAtoms
-              || q.grossAtoms !== original.grossAtoms;
-          })
-          // #162: the three scenarios must be the EXACT printed 0/1/2
-          // what-ifs from the same canonical gross quotes at this revision.
-          // Any forged or incomplete row hides the entire preview, not
-          // merely the bad tax option.
-          || !hasVerifiedHypotheticalSalaryScenarios(
-            result.hypotheticalTaxScenarios, expectedQuotes)) return;
+        // #176: the existing 0/1/2 tax arithmetic is necessary but not
+        // enough. Reject an over-wide raw .NET settlement DTO at root,
+        // public quote, hypothetical scenario OR per-player row before
+        // storing the entire optional read-only preview in React state.
+        if (!hasVerifiedDevelopmentPendingSettlementPreview(result, state)) return;
         setSettlementLease({ token: actorToken, data: result });
       })
       .catch(() => {

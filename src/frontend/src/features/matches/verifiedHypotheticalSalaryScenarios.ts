@@ -5,6 +5,15 @@ import { isValidDevelopmentTechnicalPlayerId } from "./verifiedDevelopmentTechni
 // public tax, not net atoms credited to any seat, and never a match command.
 // #165: even this standalone validator must reject forged/reserved technical
 // owners, independent of its caller's public-match ingress gate.
+// #176: a hypothetical scenario is retained RAW in the settlement lease;
+// reject extra own HTTP JSON keys in every scenario and player calculation,
+// not only incorrect printed 0/1/2 values. The client never applies taxes.
+const scenarioKeys = "hypotheticalTaxAtomsPerPlayer|players|potentialWithheldAtoms";
+const netSalaryKeys = "grossAtoms|hypotheticalNetAtoms|hypotheticalTaxAtoms|playerId";
+function exactOwnKeys(row: unknown, keys: string): boolean {
+  return row !== null && typeof row === "object" && !Array.isArray(row)
+    && Object.keys(row).sort().join("|") === keys;
+}
 export type HypotheticalNetSalary = Readonly<{
   playerId: string;
   grossAtoms: number;
@@ -35,14 +44,16 @@ export function hasVerifiedHypotheticalSalaryScenarios(
     return false;
 
   return scenarios.every((scenario: HypotheticalTaxScenario, tax: number) =>
-    scenario && Number.isInteger(scenario.hypotheticalTaxAtomsPerPlayer)
+    exactOwnKeys(scenario, scenarioKeys)
+    && Number.isInteger(scenario.hypotheticalTaxAtomsPerPlayer)
     && scenario.hypotheticalTaxAtomsPerPlayer === tax
     && Number.isInteger(scenario.potentialWithheldAtoms)
     && scenario.potentialWithheldAtoms === tax * gross.length
     && Array.isArray(scenario.players) && scenario.players.length === gross.length
     && scenario.players.every((row, index) => {
       const expected = gross[index];
-      return row && row.playerId === expected.playerId
+      return exactOwnKeys(row, netSalaryKeys)
+        && row.playerId === expected.playerId
         && Number.isInteger(row.grossAtoms)
         && row.grossAtoms === expected.grossAtoms
         && Number.isInteger(row.hypotheticalTaxAtoms)

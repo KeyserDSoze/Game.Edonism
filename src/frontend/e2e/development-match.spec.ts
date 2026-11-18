@@ -146,6 +146,7 @@ type MockOptions = {
   forgedProgressExtraOnce?: boolean; // #172: forged nine-key read-only turn-progress GET.
   delayFirstAliceTurnProgress?: boolean;
   invalidSettlementPreview?: boolean;
+  forgedSettlementExtraOnce?: "root" | "gross" | "scenario" | "row"; // #176: extra raw preview fields.
   invalidTaxScenarios?: "withheld" | "net" | "missing" | "seat" | "rate";
   delayFirstSettlementPreview?: boolean;
   routePlannerWithFreeCards?: boolean;
@@ -216,6 +217,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayedAlicePresence = false;
   let forgedPresenceExtraIssued = false;
   let delayedSettlement = false;
+  let forgedSettlementExtraIssued = false;
   let delayedAliceTurnProgress = false;
   let forgedProgressExtraIssued = false;
   let forgedHistoryExtraIssued = false;
@@ -853,6 +855,15 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           playerId, grossAtoms: 3, hypotheticalTaxAtoms: tax, hypotheticalNetAtoms: 3 - tax,
         })),
       }));
+      // #176: a forged HTTP 200 has correct arithmetic and revision but
+      // one extra field in the root, quote, hypothetical scenario or row.
+      const forgedSettlementExtra = Boolean(options.forgedSettlementExtraOnce
+        && !forgedSettlementExtraIssued && seat === "bob");
+      if (forgedSettlementExtra) forgedSettlementExtraIssued = true;
+      if (forgedSettlementExtra && options.forgedSettlementExtraOnce === "scenario")
+        Object.assign(scenarios[1], { selectedMayorTax: "NEVER_APPLY_TAX" });
+      if (forgedSettlementExtra && options.forgedSettlementExtraOnce === "row")
+        Object.assign(scenarios[2].players[1], { walletCredit: "NEVER_APPLY_TAX" });
       if (options.invalidTaxScenarios === "withheld") scenarios[1].potentialWithheldAtoms++;
       if (options.invalidTaxScenarios === "net") scenarios[2].players[0].hypotheticalNetAtoms++;
       if (options.invalidTaxScenarios === "seat") scenarios[1].players[0].playerId = "forged-owner";
@@ -868,6 +879,10 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         hypotheticalTaxScenarios: options.invalidTaxScenarios === "missing"
           ? undefined : scenarios,
       };
+      if (forgedSettlementExtra && options.forgedSettlementExtraOnce === "root")
+        Object.assign(data, { privateHand: ["NEVER_APPLY_TAX"] });
+      if (forgedSettlementExtra && options.forgedSettlementExtraOnce === "gross")
+        Object.assign(data.grossSalaryQuotes[0], { payoutApplied: "NEVER_APPLY_TAX" });
       if (options.delayFirstSettlementPreview && !delayedSettlement) {
         delayedSettlement = true;
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -5088,6 +5103,52 @@ test("settlement is a server-verified read-only gross projection, not a payout",
   await page.getByTestId("dev-leave").click();
   await expect(panel).toHaveCount(0);
 });
+
+// #176: acceptance depends on the exact .NET 6/4/3/4 JSON DTO wire,
+// not just correct 0/1/2 arithmetic. A forged 200 is a NO-PREVIEW, never
+// a fake mayor policy or salary payout, and never revokes a valid actor.
+for (const extra of ["root", "gross", "scenario", "row"] as const) {
+  test(`#176: forged ${extra} settlement 200 denied, genuine actor read restores it`,
+    async ({ page }) => {
+      const { observedHeaders } = await mockMatchApi(page,
+        { forgedSettlementExtraOnce: extra });
+      await page.goto("/");
+      await page.getByTestId("dev-create").click();
+      await page.getByTestId("dev-end-turn").click();
+      await page.getByTestId("dev-seat-bob").click();
+      const forged = page.waitForResponse(r =>
+        new URL(r.url()).pathname.endsWith("/settlement-preview") && r.status() === 200);
+      await page.getByTestId("dev-end-turn").click();
+      await forged;
+      await expect(page.getByTestId("dev-settlement-panel")).toBeVisible();
+      await expect(page.getByTestId("dev-settlement-unavailable")).toBeVisible();
+      await expect(page.getByTestId("dev-settlement-gross")).toHaveCount(0);
+      await expect(page.getByTestId("dev-settlement-tax-scenarios")).toHaveCount(0);
+      await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+      await expect(page.getByTestId("dev-revision")).toHaveText("2");
+      await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+      expect(await page.locator("body").innerText()).not.toContain("NEVER_APPLY_TAX");
+
+      await page.getByTestId("dev-seat-alice").click();
+      await expect(page.getByTestId("dev-settlement-gross")).toBeVisible();
+      await expect(page.getByTestId("dev-settlement-tax-scenarios")).toBeVisible();
+      await expect(page.getByTestId("dev-settlement-tax-0-player-alice"))
+        .toHaveAttribute("data-hypothetical-net-atoms", "3");
+      await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+      await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+      await expect(page.getByTestId("dev-revision")).toHaveText("2");
+      expect(observedHeaders.filter(x => x.path.endsWith("/end-turn"))).toHaveLength(2);
+      expect(observedHeaders.filter(x => x.path.endsWith("/settlement-preview")).length)
+        .toBeGreaterThanOrEqual(2);
+      const view = await page.evaluate(() => ({
+        body: document.body.innerText,
+        url: location.href,
+        local: Object.values(localStorage),
+        session: Object.values(sessionStorage),
+      }));
+      expect(JSON.stringify(view)).not.toContain("NEVER_APPLY_TAX");
+    });
+}
 
 for (const forged of ["withheld", "net", "missing", "seat", "rate"] as const) {
   test(`#162: forged hypothetical salary scenario (${forged}) hides every amount`,

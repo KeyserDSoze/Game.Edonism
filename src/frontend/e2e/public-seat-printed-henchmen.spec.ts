@@ -11,7 +11,7 @@ for (const seats of [2, 4, 8] as const) {
   test("#168: " + seats + " public seats reject self-consistent forged reserve totals",
     async ({ page }) => {
       await page.goto("/");
-      const result = await page.evaluate(async count => {
+      const result = await page.evaluate(async ({ count, ids, roads, slots }) => {
         const { verifiedPublicSeatResources: verify } = await import(
           "/src/features/city/publicSeatResources.ts");
         const players = ids.slice(0, count);
@@ -80,7 +80,7 @@ for (const seats of [2, 4, 8] as const) {
             [key, verify(snapshot).size] as const),
           unchanged: original === JSON.stringify({ base, noLot, forbidden }),
         };
-      }, seats);
+      }, { count: seats, ids, roads, slots });
       expect(result.valid).toHaveLength(seats);
       expect(result.zeroLot).toHaveLength(seats);
       expect(result.valid.map(([owner]) => owner)).toEqual(ids.slice(0, seats));

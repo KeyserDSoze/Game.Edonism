@@ -285,6 +285,17 @@ public static class DevelopmentMatchEndpoints
                 : Results.NotFound(new { code = "hand_not_found" });
         });
 
+        // #164: PRIVATE inspection of the bearer holder's OWN hand slot.
+        // Returns unknown for v1 checkpoints; never exposes marker ID,
+        // whether another player holds it, the hidden pile or election powers.
+        group.MapGet("/{matchId:guid}/hand/election-day", (
+            Guid matchId, HttpContext context, DevelopmentMatchStore store) =>
+        {
+            return store.TryReadOwnElectionDay(matchId, Token(context), out var inspection)
+                ? Results.Ok(inspection)
+                : Results.NotFound(new { code = "hand_not_found" });
+        });
+
         // Prefer: wait=N activates a bounded, authenticated conditional
         // long poll ONLY when the supplied ETag matches the current revision.
         // A waiter reauthenticates after wake (including token revocation).

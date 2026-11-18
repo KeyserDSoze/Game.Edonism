@@ -812,6 +812,25 @@ public sealed class DevelopmentMatchStore
     }
 
     /// <summary>
+    /// A PRIVATE Development read: return at most the special card's
+    /// index in the bearer holder's own hand, never its physical ID or any
+    /// information about which other seat/pile holds it.
+    /// </summary>
+    public bool TryReadOwnElectionDay(
+        Guid matchId, string? token, out MatchOwnElectionDayInspection? inspection)
+    {
+        inspection = null;
+        if (!TryGetEntry(matchId, out var entry)) return false;
+        lock (entry.Gate)
+        {
+            var actorId = entry.ResolveActor(token);
+            if (actorId is null) return false;
+            inspection = entry.Match.InspectOwnElectionDayForActor(actorId);
+            return inspection is not null;
+        }
+    }
+
+    /// <summary>
     /// Optional per-actor UUID makes an accepted command safe to retry after
     /// a lost HTTP response. Replays are identified before Domain execution;
     /// the receipt is persisted with the new match checkpoint atomically.

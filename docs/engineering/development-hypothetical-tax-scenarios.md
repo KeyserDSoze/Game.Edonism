@@ -18,3 +18,7 @@ The printed Italian rulebook, `rulebook2.zip` **pp. 5, 9–10**, establishes gro
 - #162 tracks this work under parent #6. Close **only after all 3 GitHub Actions gates pass on the exact final main HEAD SHA**, recording run link + test totals on #162 and #6. Source/asset and Production blockers #4/#7/#8/#9/#13/#19 remain open.
 
 The #161 ledger row is reconciled with verified CI [#43964488649](https://github.com/KeyserDSoze/Game.Edonism/actions/runs/43964488649): 857 .NET + 527 React + 42 live = 1,426/1,426 PASS on c99113f.
+
+## Follow-up #165 — independent owner-ID trust boundary
+
+The standalone React tax-preview validator now also applies the same 2–8-seat technical player ID policy as .NET (`MatchParticipantId.IsValid`) to **every gross owner**. This ensures a forged yet internally consistent 0/1/2 preview cannot claim `system` or malformed Unicode as an owner when the helper is called independently of the public snapshot gate. See [the focused test plan](development-tax-preview-seat-identity.md). No tax/payment behavior changed.

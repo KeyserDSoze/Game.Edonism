@@ -17,6 +17,7 @@ import { verifiedPublicFreeActivityStreetDistribution } from "@/features/city/pu
 import { verifiedPublicStreetControlMatrix } from "@/features/city/publicStreetControlMatrix";
 import { verifiedPublicTerritoryFootprints } from "@/features/city/publicTerritoryFootprints";
 import { verifiedPublicSharedOwnershipStreets } from "@/features/city/publicSharedOwnershipStreets";
+import { verifiedPublicStreetPlurality } from "@/features/city/publicStreetPlurality";
 import { printedActivityCategoryQuotas } from "@/features/city/activityMarkers";
 import { verifiedPublicSeatEconomy } from "@/features/city/publicSeatEconomy";
 import { verifiedPublicSeatResources } from "@/features/city/publicSeatResources";
@@ -112,6 +113,9 @@ export default function App() {
   const publicTerritoryFootprints = verifiedPublicTerritoryFootprints(publicPlayers);
   // #157: null means invalid board; [] is an authentic zero shared street count.
   const publicSharedOwnershipStreets = verifiedPublicSharedOwnershipStreets(publicPlayers);
+  // #167: all seven verified roads, including ties and zero-lot roads;
+  // this is only a scouting comparison, NOT ownership of the street.
+  const streetPlurality = verifiedPublicStreetPlurality(publicPlayers);
   const currentStreet = streetById(selectedStreetId) ?? cityBoard.streets[0];
   const currentSlot = selectedSlotId ? slotById(selectedSlotId) : undefined;
   const streetSlots = slotsOnStreet(selectedStreetId);
@@ -777,6 +781,21 @@ export default function App() {
                             })}
                           </span>
                         </div>
+                        {streetPlurality.filter(row => row.streetId === street.streetId)
+                          .map(row => (
+                            <p key={row.streetId}
+                              data-testid={`public-street-plurality-${row.streetId}`}
+                              data-max-controlled={row.maxControlled}
+                              data-leader-count={row.leaders.length}
+                              className="mt-2 break-words text-[11px] font-medium text-muted-foreground">
+                              {row.leaders.length === 0
+                                ? t("city.publicStreetPluralityEmpty")
+                                : t("city.publicStreetPluralityLeaders", {
+                                  count: row.maxControlled,
+                                  players: row.leaders.map(owner => owner.playerId).join(", "),
+                                })}
+                            </p>
+                          ))}
                         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
                           {street.owners.map(owner => (
                             <span key={owner.playerId}

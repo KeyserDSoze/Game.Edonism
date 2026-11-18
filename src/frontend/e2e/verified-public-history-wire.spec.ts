@@ -155,16 +155,16 @@ for (const count of [2, 4, 8] as const) {
           delete (row.frames[1].players[0] as unknown as Record<string, unknown>).freeMoveUsed;
         }),
         nullFrame: changed(row => {
-          row.frames[1] = null as unknown as typeof row.frames[1];
+          row.frames[1] = null as never;
         }),
         nullSeat: changed(row => {
-          row.frames[1].players[0] = null as unknown as typeof row.frames[1].players[0];
+          row.frames[1].players[0] = null as never;
         }),
         arraySeat: changed(row => {
-          row.frames[1].players[0] = [] as unknown as typeof row.frames[1].players[0];
+          row.frames[1].players[0] = [] as never;
         }),
         frameArrayInsteadOfRecord: changed(row => {
-          row.frames[1] = [] as unknown as typeof row.frames[1];
+          row.frames[1] = [] as never;
         }),
         numericSeatMoveFlag: changed(row => {
           row.frames[1].players[0].freeMoveUsed = 0 as unknown as boolean;

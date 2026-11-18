@@ -72,7 +72,7 @@ for (const seats of [2, 4, 8] as const) {
           solo: verify(solo),
           allFree: verify(allFree),
           settled: verify(settled),
-          invalid: Object.entries(bad).map(([key, value]) => [key, verify(value).length]),
+          invalid: Object.entries(bad).map(([key, value]) => [key, verify(value).length] as const),
           unchanged: before === JSON.stringify({ base, solo, allFree, settled, bad }),
         };
       }, seats);

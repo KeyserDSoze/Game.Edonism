@@ -1471,6 +1471,23 @@ test("real .NET eight-seat match supports private join and all sequential turns"
     expect(state.events).toHaveLength(9);
     expect(state.events.at(-1)?.kind).toBe("round-settlement-pending");
 
+    // #163: the physical Election Day marker is new encrypted PRIVATE
+    // checkpoint metadata, never a public property or another seat's
+    // typed card identity. The exact card is still dealt normally as one
+    // of 59 anonymous physical IDs; no election action/trigger is exposed.
+    for (const suffix of ["", "/audit", "/history", "/settlement-preview"]) {
+      const publicResult = await request.get(origin + suffix, {
+        headers: auth(guestToken),
+      });
+      expect(publicResult.status(), suffix).toBe(200);
+      const wire = await publicResult.text();
+      expect(wire).not.toMatch(/electionDayCardId/i);
+      expect(wire).not.toMatch(/"privateDeal"\s*:/i);
+      for (const secret of created.credentials)
+        expect(wire).not.toContain(secret.token);
+    }
+    expect(state.events.every(event => !/election/i.test(event.kind))).toBe(true);
+
     // #162: for eight seats too, three printed possibilities must come
     // from the REAL .NET pending preview and match the rendered 8×3
     // client rows. The browser never chooses/applies a tax or pays wages.
@@ -2947,6 +2964,19 @@ test("real .NET settlement preview is authenticated, gross-only and consistent i
     expect(a.grossSalaryQuotes).toHaveLength(2);
     expect(a.grossSalaryQuotes.every(q => q.baseAtoms === 2
       && q.standingActivityAtoms === 1 && q.grossAtoms === 3)).toBe(true);
+    // #163: even after both seats end their turns, the typed physical
+    // Election Day card remains encrypted private deal metadata. No
+    // new election event, phase, or public identity has been invented.
+    for (const suffix of ["", "/audit", "/history", "/settlement-preview"]) {
+      const response = await request.get(
+        path.replace("/settlement-preview", "") + suffix,
+        { headers: auth(aliceToken) },
+      );
+      expect(response.status()).toBe(200);
+      const wire = await response.text();
+      expect(wire).not.toMatch(/electionDayCardId/i);
+      expect(wire).not.toMatch(/"privateDeal"\s*:/i);
+    }
     // #162: compare both REAL browsers with server-certified hypothetical
     // taxes; neither selects a rate nor changes the four-atom wallets.
     expect(a.hypotheticalTaxScenarios).toHaveLength(3);

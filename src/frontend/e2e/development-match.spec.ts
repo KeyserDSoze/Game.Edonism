@@ -73,7 +73,8 @@ const mockSeatToken = (index: number) => "abcdef01".charAt(index).repeat(64);
 type MockOptions = {
   conflictOnFirstMove?: boolean;
   creationFails?: boolean;
-  creatorCredentialFaultOnce?: "duplicate-token" | "short-token" | "null-token" | "wrong-seat";
+  creatorCredentialFaultOnce?: "duplicate-token" | "short-token" | "null-token" | "wrong-seat"
+    | "extra-top-level" | "extra-first-credential" | "extra-last-credential"; // #169
   forgedCreatorAuditChronologyOnce?: boolean; // #119: valid credentials, false public timeline.
   forgedCreatorTurnOrderOnce?: boolean; // #120: correct credentials, false next-round order.
   forgedCreatorBoardVersionOnce?: boolean; // #122: false board version on creator 201.
@@ -452,6 +453,8 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       const credentials = seats.map((playerId, index) => ({
         playerId, token: mockSeatToken(index),
       }));
+      const forgedCreatorExtra = options.creatorCredentialFaultOnce === "extra-top-level"
+        && !creatorCredentialFaultIssued;
       if (options.creatorCredentialFaultOnce && !creatorCredentialFaultIssued) {
         creatorCredentialFaultIssued = true;
         switch (options.creatorCredentialFaultOnce) {
@@ -460,6 +463,12 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
           case "null-token":
             credentials[0].token = null as unknown as string; break;
           case "wrong-seat": credentials[1].playerId = "intruder"; break;
+          case "extra-top-level": break; // injected below into the raw session DTO.
+          case "extra-first-credential":
+            Object.assign(credentials[0], { otherPlayerCards: ["never:expose"] }); break;
+          case "extra-last-credential":
+            Object.assign(credentials[credentials.length - 1],
+              { privateDeal: { seed: 2026 } }); break;
         }
       }
       const forgedCreatorAudit = Boolean(options.forgedCreatorAuditChronologyOnce
@@ -480,7 +489,9 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
             : snapshot();
       return reply({
         status: 201,
-        json: { matchId: snapshot().matchId, state: createdState, credentials },
+        json: { matchId: snapshot().matchId, state: createdState, credentials,
+          ...(forgedCreatorExtra ? { remainingDrawPile: ["never:expose"] } : {}),
+        },
       });
     }
 
@@ -1521,6 +1532,35 @@ test("#114: creator duplicate seat bearer is rejected before session, then valid
   const visible = await page.locator("body").innerText();
   for (let i = 0; i < 8; i++) expect(visible).not.toContain(mockSeatToken(i));
 });
+
+// #169: An otherwise correct HTTP 201 with hidden creator/credential
+// metadata must fail BEFORE setSession(created) or any bearer-bound reads.
+for (const fault of ["extra-top-level", "extra-first-credential",
+  "extra-last-credential"] as const) {
+  test(`#169: forged creator ${fault} never binds a Development seat`,
+    async ({ page }) => {
+      const { observedHeaders } = await mockMatchApi(page,
+        { creatorCredentialFaultOnce: fault });
+      await page.goto("/");
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("dev-error")).toContainText("Impossibile avviare");
+      await expect(page.getByTestId("dev-session")).toHaveCount(0);
+      await expect(page.getByTestId("dev-hand")).toHaveCount(0);
+      await expect(page.getByTestId("match-player-legend")).toHaveCount(0);
+      expect(observedHeaders.filter(entry =>
+        entry.path.endsWith("/hand")
+        || entry.path.endsWith("/turn-options")
+        || entry.path.endsWith("/seat"))).toHaveLength(0);
+
+      // One-shot forged response is not persisted into the next valid
+      // create attempt. The genuine mock response still binds both seats.
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("dev-session")).toBeVisible();
+      await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+      const text = await page.locator("body").innerText();
+      expect(text).not.toContain("never:expose");
+    });
+}
 
 test("Development match HUD is accessible on mobile and translated to English", async ({ page }) => {
   await mockMatchApi(page);

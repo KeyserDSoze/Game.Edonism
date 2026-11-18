@@ -140,6 +140,7 @@ type MockOptions = {
   forgedPresenceExtraOnce?: "root" | "seat"; // #171: fake extra DTO keys on POST.
   delayFirstAlicePresence?: boolean;
   invalidTurnProgress?: boolean;
+  forgedProgressExtraOnce?: boolean; // #172: forged nine-key read-only turn-progress GET.
   delayFirstAliceTurnProgress?: boolean;
   invalidSettlementPreview?: boolean;
   invalidTaxScenarios?: "withheld" | "net" | "missing" | "seat" | "rate";
@@ -212,6 +213,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let forgedPresenceExtraIssued = false;
   let delayedSettlement = false;
   let delayedAliceTurnProgress = false;
+  let forgedProgressExtraIssued = false;
   let delayedAliceRoutes = false;
   let delayedAliceOtherSeats = false;
   let delayedAliceOpponentLots = false;
@@ -813,6 +815,9 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
 
     if (path.endsWith("/turn-progress")) {
       const completed = phase === 1 ? seats.length : seats.indexOf(active!);
+      const forgedExtra = Boolean(options.forgedProgressExtraOnce
+        && !forgedProgressExtraIssued && seat === "alice");
+      if (forgedExtra) forgedProgressExtraIssued = true;
       if (options.delayFirstAliceTurnProgress && seat === "alice"
         && !delayedAliceTurnProgress) {
         delayedAliceTurnProgress = true;
@@ -825,6 +830,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         completedTurns: completed,
         completedPlayerIds: seats.slice(0, completed),
         remainingPlayerIds: seats.slice(completed),
+        ...(forgedExtra ? { skipTurn: false, privateHand: ["NEVER_EXPOSE"] } : {}),
       } });
     }
 
@@ -5007,6 +5013,38 @@ test("turn progress rejects a delayed old-seat response after switch on mobile E
   await page.getByTestId("dev-leave").click();
   await expect(page.getByTestId("dev-turn-progress")).toHaveCount(0);
 });
+
+test("#172: forged progress 200 with hidden or future fields is never displayed",
+  async ({ page }) => {
+    const { observedHeaders } = await mockMatchApi(page,
+      { forgedProgressExtraOnce: true });
+    await page.goto("/");
+    const progress200 = page.waitForResponse(r =>
+      new URL(r.url()).pathname.endsWith("/turn-progress")
+      && r.status() === 200);
+    await page.getByTestId("dev-create").click();
+    await progress200;
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    await expect(page.getByTestId("dev-turn-progress-unavailable")).toBeVisible();
+    await expect(page.getByTestId("dev-turn-progress-seats")).toHaveCount(0);
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+    await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+    expect(await page.locator("body").innerText()).not.toContain("NEVER_EXPOSE");
+
+    // Switching seats issues a NEW authenticated GET with a genuine 9-key
+    // progress DTO. It can restore public progress but never skip a turn.
+    await page.getByTestId("dev-seat-bob").click();
+    await expect(page.getByTestId("dev-turn-progress-count")).toContainText("0 di 2");
+    await expect(page.getByTestId("dev-turn-progress-seats")
+      .locator('[data-progress-state="active"]')).toHaveCount(1);
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+    await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+    await expect(page.getByTestId("dev-revision")).toHaveText("0");
+    expect(observedHeaders.filter(r =>
+      r.path.endsWith("/free-move") || r.path.endsWith("/end-turn")))
+      .toHaveLength(0);
+    expect(await page.locator("body").innerText()).not.toContain("NEVER_EXPOSE");
+  });
 
 test("turn progress never renders malformed revision even with a valid seat", async ({ page }) => {
   await mockMatchApi(page, { invalidTurnProgress: true });

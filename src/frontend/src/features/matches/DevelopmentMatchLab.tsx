@@ -13,6 +13,7 @@ import { hasValidDevelopmentPublicEnvelope } from "./verifiedDevelopmentPublicEn
 import { hasValidDevelopmentCreatorResponse } from "./verifiedDevelopmentCreatorResponse";
 import { hasValidDevelopmentRotatedCredential } from "./verifiedDevelopmentRotatedCredential";
 import { hasValidDevelopmentTurnOptions } from "./verifiedDevelopmentTurnOptions";
+import { hasValidDevelopmentFirstRoundTurnProgress } from "./verifiedDevelopmentFirstRoundTurnProgress";
 import {
   hasValidDevelopmentSeatPresence,
   type VerifiedDevelopmentSeatPresence as DevPresence,
@@ -943,25 +944,12 @@ export function DevelopmentMatchLab({
         if (controller.signal.aborted || scope?.matchId !== matchId
           || scope.seatId !== seatId || scope.token !== actorToken
           || currentRevision.current !== revision) return;
-        const ids = state.turnOrder;
-        const activeIndex = state.activePlayerId === null
-          ? ids.length : ids.indexOf(state.activePlayerId);
-        if (!result || result.matchId !== matchId || result.round !== state.round
-          || result.verifiedRevision !== revision || result.phase !== state.phase
-          || result.activePlayerId !== state.activePlayerId
-          || !Number.isInteger(result.totalTurns) || result.totalTurns !== ids.length
-          || !Number.isInteger(result.completedTurns)
-          || result.completedTurns !== activeIndex
-          || (state.phase !== 0 && state.phase !== 1)
-          || (state.phase === 0 && (activeIndex < 0 || activeIndex >= ids.length))
-          || (state.phase === 1 && state.activePlayerId !== null)
-          || !Array.isArray(result.completedPlayerIds)
-          || !Array.isArray(result.remainingPlayerIds)
-          || result.completedPlayerIds.length !== activeIndex
-          || result.remainingPlayerIds.length !== ids.length - activeIndex
-          || result.completedPlayerIds.some((id, i) => id !== ids[i])
-          || result.remainingPlayerIds.some((id, i) => id !== ids[activeIndex + i]))
-          return;
+        // #172: the entire authenticated progress DTO is untrusted raw
+        // JSON. Require the exact nine .NET fields and the deterministic
+        // public turn order before storing a read-only progress lease.
+        // Malformed progress must not authorize a skip, revoke the actor
+        // token or change the actual server gameplay revision.
+        if (!hasValidDevelopmentFirstRoundTurnProgress(result, state)) return;
         setTurnProgressLease({ token: actorToken, data: result });
       })
       .catch(() => {

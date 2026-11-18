@@ -1,7 +1,10 @@
 import type { PublicGrossSalaryQuote } from "@/features/city/activityMarkers";
+import { isValidDevelopmentTechnicalPlayerId } from "./verifiedDevelopmentTechnicalPlayerId";
 
 // #162: these are hypothetical 0/1/2 mayor TAX OPTIONS, NOT the active
 // public tax, not net atoms credited to any seat, and never a match command.
+// #165: even this standalone validator must reject forged/reserved technical
+// owners, independent of its caller's public-match ingress gate.
 export type HypotheticalNetSalary = Readonly<{
   playerId: string;
   grossAtoms: number;
@@ -21,7 +24,7 @@ export function hasVerifiedHypotheticalSalaryScenarios(
 ): scenarios is readonly HypotheticalTaxScenario[] {
   if (!Array.isArray(scenarios) || scenarios.length !== 3
     || !Array.isArray(gross) || gross.length < 2 || gross.length > 8
-    || gross.some(quote => !quote || typeof quote.playerId !== "string"
+    || gross.some(quote => !quote || !isValidDevelopmentTechnicalPlayerId(quote.playerId)
       || !Number.isInteger(quote.baseAtoms)
       || quote.baseAtoms !== 2
       || !Number.isInteger(quote.standingActivityAtoms)

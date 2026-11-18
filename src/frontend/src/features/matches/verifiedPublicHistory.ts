@@ -75,7 +75,7 @@ export function verifiedPublicHistory(
   if (!history.frames.every(frame => exactOwnKeys(frame, frameKeys)
     && Array.isArray(frame.players)
     && frame.players.length === state.players.length
-    && frame.players.every(row => exactOwnKeys(row, playerKeys))))
+    && frame.players.every((row: unknown) => exactOwnKeys(row, playerKeys))))
     return null;
 
   const ordered = state.turnOrder;

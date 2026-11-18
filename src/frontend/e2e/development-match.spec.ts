@@ -137,6 +137,7 @@ type MockOptions = {
   historyUnavailable?: boolean;
   corruptHistory?: boolean;
   tamperHistoryFrame?: "street" | "move-flag" | "active" | "phase" | "actor";
+  forgedHistoryExtraOnce?: "root" | "frame" | "seat"; // #175: over-wide public replay DTO.
   presenceUnavailable?: boolean;
   invalidPresence?: boolean;
   forgedPresenceExtraOnce?: "root" | "seat"; // #171: fake extra DTO keys on POST.
@@ -217,6 +218,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayedSettlement = false;
   let delayedAliceTurnProgress = false;
   let forgedProgressExtraIssued = false;
+  let forgedHistoryExtraIssued = false;
   let delayedAliceRoutes = false;
   let delayedAliceOtherSeats = false;
   let delayedAliceOpponentLots = false;
@@ -876,7 +878,30 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
     if (path.endsWith("/history")) {
       if (options.historyUnavailable)
         return reply({ status: 503, json: { code: "unavailable" } });
-      return reply({ status: 200, json: verifiedHistory() });
+      // #175: all chronology/positions remain genuine, but an unexpected
+      // private/future field is smuggled into ONE raw 200 history at rev #2.
+      // Root, intermediate frame and one seat must fail as a WHOLE before
+      // any raw replay lease or public audit export is published.
+      const forgedExtra = Boolean(options.forgedHistoryExtraOnce
+        && !forgedHistoryExtraIssued && seat === "alice" && revision === 2);
+      if (forgedExtra) forgedHistoryExtraIssued = true;
+      const originalHistory = verifiedHistory();
+      const forgedHistory = forgedExtra && options.forgedHistoryExtraOnce === "root"
+        ? { ...originalHistory, otherPlayerTokens: ["NEVER_EXPOSE_HISTORY"] }
+        : forgedExtra && options.forgedHistoryExtraOnce === "frame"
+          ? { ...originalHistory, frames: originalHistory.frames.map((frame, index) =>
+              index === 1
+                ? { ...frame, futureActions: ["NEVER_EXPOSE_HISTORY"] } : frame) }
+          : forgedExtra && options.forgedHistoryExtraOnce === "seat"
+            ? { ...originalHistory, frames: originalHistory.frames.map((frame, index) =>
+                index === 1
+                  ? { ...frame, players: frame.players.map((player, seatIndex) =>
+                      seatIndex === 1
+                        ? { ...player, privateHand: ["NEVER_EXPOSE_HISTORY"] }
+                        : player) }
+                  : frame) }
+            : originalHistory;
+      return reply({ status: 200, json: forgedHistory });
     }
 
     if (path.endsWith("/turn-options")) {
@@ -4359,6 +4384,47 @@ for (const seatCount of [2, 8] as const) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
       .toBe(false);
   });
+}
+
+// #175: a correctly replayed history containing one extra root/frame/seat
+// property is still an untrusted HTTP object and cannot enter replay/export.
+for (const extra of ["root", "frame", "seat"] as const) {
+  test(`#175: forged ${extra} history metadata denies replay/export, recovers on actor switch`,
+    async ({ page }) => {
+      const { observedHeaders } = await mockMatchApi(page,
+        { forgedHistoryExtraOnce: extra });
+      await page.goto("/");
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("dev-public-audit-export")).toBeEnabled();
+      await page.getByTestId("dev-move-planck").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("1");
+      await page.getByTestId("dev-end-turn").click();
+      await expect(page.getByTestId("dev-revision")).toHaveText("2");
+      await expect(page.getByTestId("dev-history-unavailable")).toBeVisible();
+      await expect(page.getByTestId("dev-public-audit-export")).toBeDisabled();
+      await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+      expect(await page.locator("body").innerText())
+        .not.toContain("NEVER_EXPOSE_HISTORY");
+
+      // New actor scope triggers a fresh genuine HTTP /history; this is
+      // only public replay. No silent new free moves or turn commands.
+      await page.getByTestId("dev-seat-bob").click();
+      await expect(page.getByTestId("dev-history-revision")).toContainText("#2");
+      await expect(page.getByTestId("dev-public-audit-export")).toBeEnabled();
+      await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+      await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+      await expect(page.getByTestId("dev-revision")).toHaveText("2");
+      expect(observedHeaders.filter(e => e.path.endsWith("/end-turn")))
+        .toHaveLength(1);
+      expect(observedHeaders.filter(e => e.path.endsWith("/free-move")))
+        .toHaveLength(1);
+      const privacy = await page.evaluate(() => ({
+        text: document.body.innerText, url: location.href,
+        local: Object.values(localStorage),
+        session: Object.values(sessionStorage),
+      }));
+      expect(JSON.stringify(privacy)).not.toContain("NEVER_EXPOSE_HISTORY");
+    });
 }
 
 for (const invalid of ["unavailable", "unknown-event", "forged-frame"] as const) {

@@ -1,6 +1,21 @@
 import { isAdjacentStreet, streetById } from "@/features/city/board";
 import type { PublicMatchEvent } from "./publicAudit";
 
+// #175: .NET emits exactly DevPublicHistory (3), MatchReplayFrame (6)
+// and ReplayedMatchPlayer (3) JSON properties. A valid-looking replay is
+// retained/exported raw, so refuse unknown private/future metadata in ANY
+// frame or seat before replaying the entire public audit.
+const historyKeys = "frames|matchId|verifiedRevision";
+const frameKeys = "activePlayerId|actorId|kind|phase|players|revision";
+const playerKeys = "freeMoveUsed|playerId|streetId";
+
+function exactOwnKeys(value: unknown, allowed: string): boolean {
+  return value !== null && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.keys(value).sort().join("|") === allowed;
+}
+
+
 /** Only the already-public first-round movement/turn subset. No private hands. */
 export type PublicHistoryPlayer = Readonly<{
   playerId: string;
@@ -42,7 +57,9 @@ export function verifiedPublicHistory(
   state: PublicHistoryMatch,
   history: PublicHistory | null,
 ): PublicHistory | null {
-  if (!state || !history || history.matchId !== state.matchId
+  if (!state || !history
+    || !exactOwnKeys(history, historyKeys)
+    || history.matchId !== state.matchId
     || state.round !== 1 || !Number.isSafeInteger(state.revision)
     || state.revision < 0 || history.verifiedRevision !== state.revision
     || !Array.isArray(state.players) || !Array.isArray(state.turnOrder)
@@ -51,6 +68,15 @@ export function verifiedPublicHistory(
     || state.turnOrder.length !== state.players.length
     || state.events.length !== state.revision + 1
     || history.frames.length !== state.events.length) return null;
+
+  // #175: do not accept a "plausible" public replay that smuggles
+  // extra nested fields (including false/null) into a retained history
+  // lease or offline export. Preserve all existing Domain-parity checks.
+  if (!history.frames.every(frame => exactOwnKeys(frame, frameKeys)
+    && Array.isArray(frame.players)
+    && frame.players.length === state.players.length
+    && frame.players.every(row => exactOwnKeys(row, playerKeys))))
+    return null;
 
   const ordered = state.turnOrder;
   const ids = new Set(ordered);

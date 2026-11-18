@@ -118,6 +118,8 @@ type MockOptions = {
   forgedJoinedBoardVersionOnce?: boolean; // #122: false board version on atomic seat read.
   forgedJoinedHandOnce?: boolean; // #118: duplicate private cards in atomic /seat.
   forgedBobHandOnce?: boolean; // #118: malformed 200 /hand before later valid recovery.
+  privateElectionStatus?: "absent" | "legacy" | "foreign" | "revision"
+    | "index" | "extra" | "missing"; // #164, not a public marker.
   bootstrapUnavailable?: boolean;
   noTurnOptions?: boolean;
   invalidTurnOptions?: boolean;
@@ -883,6 +885,30 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       });
     }
 
+    if (path.endsWith("/hand/election-day")) {
+      if (options.privateElectionStatus === "missing")
+        return reply({ status: 503, json: { code: "temporarily_unavailable" } });
+      const isLegacy = options.privateElectionStatus === "legacy";
+      const data: Record<string, unknown> = {
+        matchId: snapshot().matchId,
+        playerId: options.privateElectionStatus === "foreign" ? "outsider" : seat,
+        verifiedRevision: options.privateElectionStatus === "revision"
+          ? revision + 3 : revision,
+        classificationAvailable: !isLegacy,
+        // Mock Alice's SECOND private card as the typed one. Bob/other
+        // actors only learn that it is not in THEIR own four cards.
+        ownHandIndex: isLegacy ? null
+          : options.privateElectionStatus === "index" ? 4
+            : options.privateElectionStatus === "absent" ? null
+              : seat === "alice" ? 1 : null,
+      };
+      if (options.privateElectionStatus === "extra")
+        data.electionDayCardId = "forbidden:raw-marker";
+      return reply({
+        status: 200, headers: { "Cache-Control": "no-store" }, json: data,
+      });
+    }
+
     if (path.endsWith("/hand")) {
       const cards = Array.from({ length: 4 }, (_, index) =>
         `demo:action:${String((seat === "alice" ? 1 : 21 + (seats.indexOf(seat) - 1) * 4) + index).padStart(2, "0")}`);
@@ -1347,6 +1373,71 @@ test("Development match HUD uses the server for moving and ending both turns", a
   await expect(page.getByTestId("dev-active-player")).toContainText("In attesa");
   await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
 });
+
+test("#164: actor-only own-hand card kind remains private across seat switch", async ({ page }) => {
+  const { observedHeaders } = await mockMatchApi(page);
+  await page.goto("/");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-own-election-day-card")).toHaveCount(1);
+  await expect(page.getByTestId("dev-own-hand-card-1"))
+    .toContainText("Giorno dell’elezione");
+  await expect(page.getByTestId("dev-own-election-day-status"))
+    .toContainText("solo nella tua mano");
+  await expect(page.getByTestId("dev-own-election-day-warning"))
+    .toContainText("non avvia elezioni");
+  await page.getByTestId("dev-seat-bob").click();
+  await expect(page.getByTestId("dev-hand")).toContainText("demo:action:21");
+  await expect(page.getByTestId("dev-own-election-day-card")).toHaveCount(0);
+  await expect(page.getByTestId("dev-own-election-day-status"))
+    .toContainText("non presente fra le tue quattro carte");
+  await page.getByTestId("dev-seat-alice").click();
+  await expect(page.getByTestId("dev-own-election-day-card")).toHaveCount(1);
+  expect(observedHeaders.filter(entry =>
+    entry.path.endsWith("/hand/election-day")).map(entry => entry.token))
+    .toEqual([mockSeatToken(0), mockSeatToken(1), mockSeatToken(0)]);
+  const privacy = await page.evaluate(() => ({
+    url: location.href,
+    local: Object.values(localStorage),
+    session: Object.values(sessionStorage),
+  }));
+  expect(JSON.stringify(privacy)).not.toContain("forbidden:raw-marker");
+  await page.getByTestId("dev-leave").click();
+  await expect(page.getByTestId("dev-own-election-day-card")).toHaveCount(0);
+});
+
+test("#164: legacy v1 unknown and no-card-in-hand are distinct states on mobile EN",
+  async ({ page }) => {
+  await mockMatchApi(page, { privateElectionStatus: "legacy" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+  await page.getByTestId("dev-create").click();
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-own-election-day-status"))
+    .toContainText("Old save");
+  await expect(page.getByTestId("dev-own-election-day-status"))
+    .toContainText("does not mean it is absent");
+  await expect(page.getByTestId("dev-own-election-day-card")).toHaveCount(0);
+  await expect(page.getByTestId("dev-own-election-day-warning"))
+    .toContainText("no election, vote or card effect");
+  expect(await page.evaluate(() =>
+    document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+});
+
+for (const fault of ["foreign", "revision", "index", "extra", "missing"] as const) {
+  test(`#164: forged or missing private card classification ${fault} shows no hint`,
+    async ({ page }) => {
+    await mockMatchApi(page, { privateElectionStatus: fault });
+    await page.goto("/");
+    await page.getByTestId("dev-create").click();
+    await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    await expect(page.getByTestId("dev-own-election-day-card")).toHaveCount(0);
+    await expect(page.getByTestId("dev-own-election-day-status")).toHaveCount(0);
+    await expect(page.getByTestId("dev-own-election-day-warning")).toHaveCount(0);
+    await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+  });
+}
 
 test("two Development seat tokens fetch disjoint private hands without browser storage", async ({ page }) => {
   const { observedHeaders } = await mockMatchApi(page);

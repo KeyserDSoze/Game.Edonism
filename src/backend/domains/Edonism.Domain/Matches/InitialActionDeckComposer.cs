@@ -14,7 +14,14 @@ public sealed record InitialActionDeal(
     string AlgorithmVersion,
     int Seed,
     IReadOnlyList<InitialActionHand> Hands,
-    IReadOnlyList<string> RemainingDrawPile);
+    IReadOnlyList<string> RemainingDrawPile)
+{
+    // #163: PRIVATE typed physical identity from the trusted setup input.
+    // Never serialize this record as a public MatchSnapshot or HTTP DTO.
+    // Null is tolerated ONLY for old v1 checkpoints created before the
+    // special-card marker existed; election triggering is not implemented.
+    public string? ElectionDayCardId { get; init; }
+}
 
 /// <summary>Private actor-scoped read model. Not part of MatchSnapshot.</summary>
 public sealed record MatchPrivateHandSnapshot(
@@ -71,7 +78,11 @@ public static class InitialActionDeckComposer
             AlgorithmVersion,
             seed,
             Array.AsReadOnly(hands),
-            Array.AsReadOnly(remaining));
+            Array.AsReadOnly(remaining))
+        {
+            // Preserve TYPE, not a guessed card-name substring or filename.
+            ElectionDayCardId = electionDayCardId
+        };
     }
 
     /// <summary>
@@ -81,7 +92,8 @@ public static class InitialActionDeckComposer
     /// It is NOT proof of the seed's provenance or a Production card resolver.
     /// </summary>
     public static bool MatchesRecordedShuffle(
-        InitialActionDeal? recorded, IReadOnlyList<string>? playerIds)
+        InitialActionDeal? recorded, IReadOnlyList<string>? playerIds,
+        bool requireElectionDayMarker = false)
     {
         if (recorded is null || playerIds is null
             || recorded.AlgorithmVersion != AlgorithmVersion
@@ -102,9 +114,22 @@ public static class InitialActionDeckComposer
             || all.Distinct(StringComparer.Ordinal).Count() != all.Length)
             return false;
 
+        // #163: v2 checkpoints MUST retain the single typed special card;
+        // old v1 checkpoints had no marker and are replayable but cannot
+        // retroactively infer which opaque ID represented Election Day.
+        // A marker supplied on any version must identify exactly one card
+        // in the same 59 physical-card permutation.
+        if (requireElectionDayMarker && recorded.ElectionDayCardId is null)
+            return false;
+        if (recorded.ElectionDayCardId is not null
+            && (string.IsNullOrWhiteSpace(recorded.ElectionDayCardId)
+                || all.Count(id => string.Equals(
+                    id, recorded.ElectionDayCardId, StringComparison.Ordinal)) != 1))
+            return false;
+
         // Deal() sorts ALL 59 card IDs before shuffling. The Election Day ID
-        // is not needed to replay that permutation, and MUST NOT be exposed
-        // by a public checkpoint projection or inferred from the card name.
+        // is not inferred from a name or file and MUST NOT be exposed
+        // by a public checkpoint projection.
         var shuffled = ShuffleSortedIds(all, recorded.Seed);
         for (var i = 0; i < playerIds.Count; i++)
         {

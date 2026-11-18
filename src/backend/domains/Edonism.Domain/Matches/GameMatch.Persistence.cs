@@ -10,20 +10,31 @@ public sealed record GameMatchCheckpoint(int FormatVersion, MatchSnapshot State,
 
 public sealed partial class GameMatch
 {
-    public const int CheckpointVersion = 1;
+    // #163: v1 carried 59 shuffled private opaque IDs but lost the typed
+    // Election Day card identity. New v2 checkpoints preserve that marker;
+    // a restored v1 deck remains v1 on subsequent writes (no guessing).
+    public const int LegacyCheckpointVersion = 1;
+    public const int CheckpointVersion = 2;
 
     /// <summary>Deep copy including PRIVATE hands and remaining pile; for trusted storage only.</summary>
     public GameMatchCheckpoint CaptureCheckpoint()
     {
         var deal = _initialActionDeal is null ? null : CopyDeal(_initialActionDeal);
-        return new GameMatchCheckpoint(CheckpointVersion, Snapshot(), deal);
+        // Never silently upgrade a historical typed-unknown v1 private
+        // shuffle into a v2 checkpoint, which requires a real known marker.
+        var version = deal is { ElectionDayCardId: null }
+            ? LegacyCheckpointVersion : CheckpointVersion;
+        return new GameMatchCheckpoint(version, Snapshot(), deal);
     }
 
     private static InitialActionDeal CopyDeal(InitialActionDeal deal) => new(
         deal.AlgorithmVersion, deal.Seed,
         Array.AsReadOnly(deal.Hands.Select(h => new InitialActionHand(
             h.PlayerId, Array.AsReadOnly(h.CardIds.ToArray()))).ToArray()),
-        Array.AsReadOnly(deal.RemainingDrawPile.ToArray()));
+        Array.AsReadOnly(deal.RemainingDrawPile.ToArray()))
+    {
+        ElectionDayCardId = deal.ElectionDayCardId
+    };
 
     /// <summary>
     /// Restore is a TRUST BOUNDARY: reject incomplete, old, inconsistent or
@@ -36,7 +47,8 @@ public sealed partial class GameMatch
         ArgumentNullException.ThrowIfNull(checkpoint);
         board.Validate();
         var s = checkpoint.State;
-        if (checkpoint.FormatVersion != CheckpointVersion || s is null
+        if (checkpoint.FormatVersion is not (LegacyCheckpointVersion or CheckpointVersion)
+            || s is null
             || s.MatchId == Guid.Empty || s.BoardVersion != board.Version
             || !Enum.IsDefined(s.Phase)
             || s.Round != 1 || s.TurnOrder is null || s.Players is null
@@ -107,6 +119,13 @@ public sealed partial class GameMatch
 
         // The unplayed 59-card deck is PRIVATE and must be complete and disjoint.
         var privateDeal = checkpoint.PrivateDeal;
+        if (checkpoint.FormatVersion == LegacyCheckpointVersion
+            && privateDeal?.ElectionDayCardId is not null)
+            throw new InvalidDataException("Legacy private deal contains unsupported typed metadata.");
+        if (checkpoint.FormatVersion == CheckpointVersion
+            && privateDeal is not null && privateDeal.ElectionDayCardId is null)
+            throw new InvalidDataException("Versioned private deal lacks the Election Day marker.");
+
         if (privateDeal is not null)
         {
             if (privateDeal.AlgorithmVersion != InitialActionDeckComposer.AlgorithmVersion
@@ -130,7 +149,9 @@ public sealed partial class GameMatch
             // swap hands or reorder the hidden draw pile. Reconstruct the
             // exact original permutation for the recorded seed and seat order
             // before granting any restored actor access to private cards.
-            if (!InitialActionDeckComposer.MatchesRecordedShuffle(privateDeal, s.TurnOrder))
+            if (!InitialActionDeckComposer.MatchesRecordedShuffle(
+                    privateDeal, s.TurnOrder,
+                    requireElectionDayMarker: checkpoint.FormatVersion == CheckpointVersion))
                 throw new InvalidDataException("Checkpoint private deal does not match its recorded shuffle.");
         }
 

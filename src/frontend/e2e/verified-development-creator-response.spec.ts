@@ -28,20 +28,35 @@ for (const count of [2, 4, 8] as const) {
     async ({ page }) => {
     const response = fixture(count);
     const ids = response.state.players.map(p => p.playerId);
-    const before = JSON.stringify({ response, ids });
+    const permuted = structuredClone(response);
+    permuted.credentials.reverse(); // Wire order is not a token authority.
+    const unicode = structuredClone(response);
+    unicode.state.players[0].playerId = "Renée";
+    unicode.state.activePlayerId = "Renée";
+    unicode.state.turnOrder[0] = "Renée";
+    unicode.state.proposedNextRoundOrder[1] = "Renée";
+    unicode.credentials[0].playerId = "Renée";
+    const unicodeIds = [...ids];
+    unicodeIds[0] = "Renée";
+    const before = JSON.stringify({ response, ids, permuted, unicode, unicodeIds });
     await page.goto("/");
-    const r = await page.evaluate(async ({ response, ids }) => {
+    const r = await page.evaluate(async ({ response, ids, permuted, unicode, unicodeIds }) => {
       const { hasValidDevelopmentCreatorResponse } =
         await import("/src/features/matches/verifiedDevelopmentCreatorResponse.ts");
       return {
         correct: hasValidDevelopmentCreatorResponse(response, ids),
+        permuted: hasValidDevelopmentCreatorResponse(permuted, ids),
+        unicode: hasValidDevelopmentCreatorResponse(unicode, unicodeIds),
         duplicateRequest: hasValidDevelopmentCreatorResponse(response, [ids[0], ...ids]),
         wrongSeat: hasValidDevelopmentCreatorResponse(response,
           ids.map(id => id === "bob" ? "intruder" : id)),
       };
-    }, { response, ids });
-    expect(r).toEqual({ correct: true, duplicateRequest: false, wrongSeat: false });
-    expect(JSON.stringify({ response, ids })).toBe(before);
+    }, { response, ids, permuted, unicode, unicodeIds });
+    expect(r).toEqual({
+      correct: true, permuted: true, unicode: true,
+      duplicateRequest: false, wrongSeat: false,
+    });
+    expect(JSON.stringify({ response, ids, permuted, unicode, unicodeIds })).toBe(before);
   });
   test(`#114: ${count}-seat forged credential and creator response fields fail closed`,
     async ({ page }) => {
@@ -53,6 +68,46 @@ for (const count of [2, 4, 8] as const) {
       return r;
     };
     const cases = {
+      // #169: the 201 DTO enters React session storage as a raw object.
+      // Reject ANY extra top-level/credential keys, not just invalid tokens.
+      extraTopLevelSecret: altered(r => { Object.assign(r, {
+        remainingDrawPile: ["hidden"],
+      }); }),
+      extraTopLevelPrivateHands: altered(r => { Object.assign(r, {
+        privateHands: [{ playerId: "alice", cardIds: ["hidden"] }],
+      }); }),
+      extraTopLevelToken: altered(r => { Object.assign(r, {
+        token: "top-secret",
+      }); }),
+      extraTopLevelMetadata: altered(r => { Object.assign(r, {
+        unknownMetadata: true,
+      }); }),
+      extraFirstCredentialCards: altered(r => { Object.assign(r.credentials[0], {
+        otherPlayerCards: ["hidden"],
+      }); }),
+      extraLastCredentialSecret: altered(r => {
+        Object.assign(r.credentials[r.credentials.length - 1], {
+          secret: "top-secret",
+        });
+      }),
+      extraLastCredentialDeck: altered(r => {
+        Object.assign(r.credentials[r.credentials.length - 1], {
+          privateDeal: { seed: 2026 },
+        });
+      }),
+      extraCredentialMetadata: altered(r => { Object.assign(r.credentials[0], {
+        unknownMetadata: true,
+      }); }),
+      missingState: altered(r => { delete (r as unknown as Record<string, unknown>).state; }),
+      missingTopLevelMatch: altered(r => {
+        delete (r as unknown as Record<string, unknown>).matchId;
+      }),
+      missingCredentialSeat: altered(r => {
+        delete (r.credentials[0] as unknown as Record<string, unknown>).playerId;
+      }),
+      missingCredentialToken: altered(r => {
+        delete (r.credentials[0] as unknown as Record<string, unknown>).token;
+      }),
       duplicateBearer: altered(r => { r.credentials[1].token = r.credentials[0].token; }),
       duplicateBearerUppercase: altered(r => {
         r.credentials[1].token = r.credentials[0].token.toUpperCase();

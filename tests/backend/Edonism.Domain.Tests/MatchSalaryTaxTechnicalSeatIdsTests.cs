@@ -31,7 +31,7 @@ public sealed class MatchSalaryTaxTechnicalSeatIdsTests
         var original = Gross(seats);
         var scenarios = MatchSalaryTaxScenarios.Quote(original);
 
-        Assert.Equal([0, 1, 2],
+        Assert.Equal(new[] { 0, 1, 2 },
             scenarios.Select(s => s.HypotheticalTaxAtomsPerPlayer));
         Assert.Equal(original.Select(q => q.PlayerId),
             scenarios[0].Players.Select(p => p.PlayerId));

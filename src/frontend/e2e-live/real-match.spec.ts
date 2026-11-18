@@ -482,6 +482,13 @@ async function assertLivePublicStreetControlMatrix(
     controlledLots: row.getAttribute("data-controlled-count"),
     standing: row.getAttribute("data-standing-count"),
     fallen: row.getAttribute("data-fallen-count"),
+    // #167: same batched DOM frame, real .NET source, no extra polling.
+    plurality: Array.from(row.querySelectorAll('[data-testid^="public-street-plurality-"]'))
+      .map(entry => ({
+        id: entry.getAttribute("data-testid"),
+        maximum: entry.getAttribute("data-max-controlled"),
+        leaders: entry.getAttribute("data-leader-count"),
+      })),
     owners: Array.from(row.querySelectorAll('[data-testid*="-owner-"]')).map(owner => ({
       id: owner.getAttribute("data-testid"),
       controlled: owner.getAttribute("data-owned-count"),
@@ -503,8 +510,17 @@ async function assertLivePublicStreetControlMatrix(
     controlledTotal += control.length;
     expect(rival).toHaveLength(control.filter(x =>
       x.ownerPlayerId !== actorId).length);
+    const perPlayer = created.state.players.map(player =>
+      control.filter(lot => lot.ownerPlayerId === player.playerId).length);
+    const maximum = Math.max(0, ...perPlayer);
     return {
       id: `public-street-control-${street.id}`,
+      plurality: [{
+        id: `public-street-plurality-${street.id}`,
+        maximum: String(maximum),
+        leaders: String(maximum === 0 ? 0
+          : perPlayer.filter(value => value === maximum).length),
+      }],
       totalSlots: String(slots.length),
       freeLots: String(free.length),
       controlledLots: String(control.length),

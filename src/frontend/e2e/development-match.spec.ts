@@ -137,6 +137,7 @@ type MockOptions = {
   tamperHistoryFrame?: "street" | "move-flag" | "active" | "phase" | "actor";
   presenceUnavailable?: boolean;
   invalidPresence?: boolean;
+  forgedPresenceExtraOnce?: "root" | "seat"; // #171: fake extra DTO keys on POST.
   delayFirstAlicePresence?: boolean;
   invalidTurnProgress?: boolean;
   delayFirstAliceTurnProgress?: boolean;
@@ -208,6 +209,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let forgedCreatorBoardVersionSent = false;
   let forgedPublicBoardVersionSent = false;
   let delayedAlicePresence = false;
+  let forgedPresenceExtraIssued = false;
   let delayedSettlement = false;
   let delayedAliceTurnProgress = false;
   let delayedAliceRoutes = false;
@@ -585,12 +587,21 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         await new Promise(resolve => setTimeout(resolve, 900));
       }
       if (request.method() === "POST") presentSeats.add(seat);
+      const forgedExtra = Boolean(request.method() === "POST"
+        && options.forgedPresenceExtraOnce && !forgedPresenceExtraIssued);
+      if (forgedExtra) forgedPresenceExtraIssued = true;
+      const presenceSeats = seats.map(id => ({
+        playerId: options.invalidPresence && id === "bob" ? "intruder" : id,
+        isActive: presentSeats.has(id),
+      }));
+      if (forgedExtra && options.forgedPresenceExtraOnce === "seat")
+        Object.assign(presenceSeats[presenceSeats.length - 1],
+          { lastSeen: "NEVER_EXPOSE_PRIVATE_PRESENCE" });
       return reply({ status: 200, json: {
         matchId: snapshot().matchId,
-        seats: seats.map(id => ({
-          playerId: options.invalidPresence && id === "bob" ? "intruder" : id,
-          isActive: presentSeats.has(id),
-        })),
+        seats: presenceSeats,
+        ...(forgedExtra && options.forgedPresenceExtraOnce === "root"
+          ? { token: "NEVER_EXPOSE_PRIVATE_PRESENCE" } : {}),
       } });
     }
 
@@ -4556,6 +4567,47 @@ test("Development seat presence shows only bearer-checked active seats on mobile
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);
 });
+
+// #171: malformed *authenticated* heartbeat response must suppress the
+// entire presence hint, never a seat/capability/session. Genuine next heartbeat
+// after actor switch recovers the server's active/inactive flags.
+for (const fault of ["root", "seat"] as const) {
+  test(`#171: over-wide ${fault} presence POST hides all indicators and recovers`,
+    async ({ page }) => {
+      const { observedHeaders } = await mockMatchApi(page,
+        { forgedPresenceExtraOnce: fault });
+      await page.goto("/");
+      const first = page.waitForResponse(response =>
+        new URL(response.url()).pathname.endsWith("/presence")
+        && response.request().method() === "POST");
+      await page.getByTestId("dev-create").click();
+      await first;
+      const items = page.getByTestId("dev-presence-seats");
+      await expect(items.locator('[data-player-id="alice"]'))
+        .toHaveAttribute("data-presence", "unknown");
+      await expect(items.locator('[data-player-id="bob"]'))
+        .toHaveAttribute("data-presence", "unknown");
+      await expect(page.getByTestId("dev-hand"))
+        .toContainText("demo:action:01");
+      await expect(page.getByTestId("dev-end-turn")).toBeEnabled();
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      expect(await page.locator("body").innerText())
+        .not.toContain("NEVER_EXPOSE_PRIVATE_PRESENCE");
+
+      // Seat switching causes a separate server-read. No fake timeout,
+      // logout or authorization loss; Bob can heartbeat normally.
+      await page.getByTestId("dev-seat-bob").click();
+      await expect(items.locator('[data-player-id="bob"]'))
+        .toHaveAttribute("data-presence", "active");
+      await expect(page.getByTestId("dev-hand"))
+        .toContainText("demo:action:21");
+      await expect(page.getByTestId("dev-end-turn")).toBeDisabled();
+      expect(observedHeaders.filter(x =>
+        x.path.endsWith("/end-turn") || x.path.endsWith("/free-move"))).toHaveLength(0);
+      expect(await page.locator("body").innerText())
+        .not.toContain("NEVER_EXPOSE_PRIVATE_PRESENCE");
+    });
+}
 
 test("HTTP 503 or unknown seat presence fails closed but never revokes or grants commands", async ({ page }) => {
   await mockMatchApi(page, { presenceUnavailable: true });

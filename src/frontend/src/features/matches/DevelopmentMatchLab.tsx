@@ -13,6 +13,10 @@ import { hasValidDevelopmentPublicEnvelope } from "./verifiedDevelopmentPublicEn
 import { hasValidDevelopmentCreatorResponse } from "./verifiedDevelopmentCreatorResponse";
 import { hasValidDevelopmentRotatedCredential } from "./verifiedDevelopmentRotatedCredential";
 import { hasValidDevelopmentTurnOptions } from "./verifiedDevelopmentTurnOptions";
+import {
+  hasValidDevelopmentSeatPresence,
+  type VerifiedDevelopmentSeatPresence as DevPresence,
+} from "./verifiedDevelopmentSeatPresence";
 import { hasValidDevelopmentFirstRoundHand } from "./verifiedDevelopmentFirstRoundHand";
 import {
   hasVerifiedOwnElectionDayInspection,
@@ -183,13 +187,6 @@ type FirstRoundTurnProgress = Readonly<{
   completedTurns: number;
   completedPlayerIds: readonly string[];
   remainingPlayerIds: readonly string[];
-}>;
-
-// Development-only transport hint. Absence means no recent heartbeat,
-// NOT proof that a person disconnected or that their turn can be skipped.
-type DevPresence = Readonly<{
-  matchId: string;
-  seats: readonly Readonly<{ playerId: string; isActive: boolean }>[];
 }>;
 
 const quotaAndExtras = [
@@ -1123,7 +1120,7 @@ export function DevelopmentMatchLab({
     const life = new AbortController();
     let pending: AbortController | null = null;
     let inFlight = false;
-    const knownIds = new Set(session.state.players.map(p => p.playerId));
+    const expectedPlayerIds = session.state.players.map(p => p.playerId);
 
     const heartbeat = async () => {
       if (life.signal.aborted || inFlight
@@ -1154,11 +1151,10 @@ export function DevelopmentMatchLab({
           || currentActorScope.current?.matchId !== matchId
           || currentActorScope.current.seatId !== seatId
           || currentActorScope.current.token !== actorToken) return;
-        if (result?.matchId !== matchId || !Array.isArray(result.seats)
-          || result.seats.length !== knownIds.size
-          || new Set(result.seats.map(x => x.playerId)).size !== knownIds.size
-          || !result.seats.every(x => knownIds.has(x.playerId)
-            && typeof x.isActive === "boolean")) {
+        // #171: preserve the raw DTO only after exact-key 2–8 seat
+        // contract validation. A bogus presence must show "unknown",
+        // never grant a turn, revoke a bearer, or infer a disconnect.
+        if (!hasValidDevelopmentSeatPresence(result, matchId, expectedPlayerIds)) {
           setPresenceLease(null);
           return;
         }

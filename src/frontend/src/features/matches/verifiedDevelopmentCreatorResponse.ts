@@ -11,11 +11,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 const hexBearer = /^[0-9a-f]{64}$/i;
 const matchIdFormat = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+// #169: entire current .NET DevMatchCreated / DevSeatCredential wire shapes.
+// Creator responses are stored as raw session objects: reject unknown keys
+// instead of silently retaining attacker-provided private or token metadata.
+const creatorKeys = "credentials|matchId|state";
+const credentialKeys = "playerId|token";
 
 export function hasValidDevelopmentCreatorResponse(
   value: unknown, requestedSeatIds: readonly string[],
 ): boolean {
-  if (!isRecord(value) || typeof value.matchId !== "string"
+  if (!isRecord(value)
+    || Object.keys(value).sort().join("|") !== creatorKeys
+    || typeof value.matchId !== "string"
     || !matchIdFormat.test(value.matchId)
     || !Array.isArray(requestedSeatIds)
     || requestedSeatIds.length < 2 || requestedSeatIds.length > 8
@@ -38,7 +45,9 @@ export function hasValidDevelopmentCreatorResponse(
   const seenSeats = new Set<string>();
   const seenTokens = new Set<string>();
   for (const raw of value.credentials) {
-    if (!isRecord(raw) || typeof raw.playerId !== "string"
+    if (!isRecord(raw)
+      || Object.keys(raw).sort().join("|") !== credentialKeys
+      || typeof raw.playerId !== "string"
       || !requested.has(raw.playerId) || seenSeats.has(raw.playerId)
       || typeof raw.token !== "string" || !hexBearer.test(raw.token))
       return false;

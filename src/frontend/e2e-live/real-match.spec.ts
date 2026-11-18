@@ -74,6 +74,55 @@ test("#128: real .NET creator rejects reserved system seat without credentials",
   }
 });
 
+// #164: the real Domain supplies ONLY the index of a typed special card
+// in the currently authenticated actor's OWN hand. Never infer the hidden
+// marker from an opaque card ID or another seat's private hand.
+async function assertRealOwnElectionDayInspection(
+  page: Page, created: CreatedMatch, actorId: string, expectedRevision: number,
+): Promise<number | null> {
+  const root = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`;
+  const headers = auth(tokenFor(created, actorId));
+  const [reply, handReply] = await Promise.all([
+    page.request.get(`${root}/hand/election-day`, { headers }),
+    page.request.get(`${root}/hand`, { headers }),
+  ]);
+  expect(reply.status()).toBe(200);
+  expect(handReply.status()).toBe(200);
+  expect(reply.headers()["cache-control"]).toContain("no-store");
+  const inspection = await reply.json() as {
+    matchId: string; playerId: string; verifiedRevision: number;
+    classificationAvailable: boolean; ownHandIndex: number | null;
+  };
+  const hand = await handReply.json() as Hand;
+  expect(inspection.matchId).toBe(created.matchId);
+  expect(inspection.playerId).toBe(actorId);
+  expect(inspection.verifiedRevision).toBe(expectedRevision);
+  expect(inspection.classificationAvailable).toBe(true);
+  expect(hand.playerId).toBe(actorId);
+  expect(hand.cardIds).toHaveLength(4);
+  const wire = await reply.text();
+  expect(wire).not.toMatch(/electionDayCardId|cardIds|remainingDrawPile|token/i);
+  for (const credential of created.credentials)
+    expect(wire).not.toContain(credential.token);
+
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-own-election-day-status"))
+    .toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId("dev-own-election-day-warning"))
+    .toBeVisible();
+  if (inspection.ownHandIndex === null) {
+    await expect(page.getByTestId("dev-own-election-day-card")).toHaveCount(0);
+  } else {
+    expect(inspection.ownHandIndex).toBeGreaterThanOrEqual(0);
+    expect(inspection.ownHandIndex).toBeLessThan(4);
+    await expect(page.getByTestId("dev-own-election-day-card")).toHaveCount(1);
+    await expect(page.getByTestId(
+      `dev-own-hand-card-${inspection.ownHandIndex}`,
+    ).getByTestId("dev-own-election-day-card")).toBeVisible();
+  }
+  return inspection.ownHandIndex;
+}
+
 async function startRealMatch(page: Page): Promise<CreatedMatch> {
   await page.goto("/");
   await expect(page.getByTestId("dev-match-lab")).toBeVisible();
@@ -1430,8 +1479,28 @@ test("real .NET eight-seat match supports private join and all sequential turns"
     await expect(guest.getByTestId("dev-hand").locator("li")).toHaveCount(4);
     const heidiHand = await guest.getByTestId("dev-hand").locator("li").allTextContents();
 
+    // #164: verified actor-only special card, including a genuine 8-seat
+    // guest, never another seat's location or a public card type marker.
+    await assertRealOwnElectionDayInspection(page, created, "alice", 0);
+    await assertRealOwnElectionDayInspection(guest, created, "heidi", 0);
     const origin = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`;
     const hands: string[] = [];
+    var visiblePrivateElectionOwners = 0;
+    for (const seat of seatIds) {
+      const inspected = await request.get(`${origin}/hand/election-day`, {
+        headers: auth(tokenFor(created, seat)),
+      });
+      expect(inspected.status()).toBe(200);
+      const data = await inspected.json() as {
+        playerId: string; classificationAvailable: boolean;
+        ownHandIndex: number | null;
+      };
+      expect(data.playerId).toBe(seat);
+      expect(data.classificationAvailable).toBe(true);
+      if (data.ownHandIndex !== null) visiblePrivateElectionOwners++;
+      expect(await inspected.text()).not.toMatch(/electionDayCardId|cardIds/i);
+    }
+    expect(visiblePrivateElectionOwners).toBeLessThanOrEqual(1);
     for (const seat of seatIds) {
       const secret = tokenFor(created, seat);
       const handResponse = await request.get(`${origin}/hand`, { headers: auth(secret) });
@@ -2932,6 +3001,8 @@ test("real .NET settlement preview is authenticated, gross-only and consistent i
     await second.getByTestId("dev-join-token").fill(bobToken);
     await second.getByTestId("dev-join").click();
     await expect(second.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+    await assertRealOwnElectionDayInspection(page, created, "alice", 0);
+    await assertRealOwnElectionDayInspection(second, created, "bob", 0);
     await page.getByTestId("dev-end-turn").click();
     await expect(second.getByTestId("dev-revision")).toHaveText("1", { timeout: 9000 });
     await second.getByTestId("dev-end-turn").click();

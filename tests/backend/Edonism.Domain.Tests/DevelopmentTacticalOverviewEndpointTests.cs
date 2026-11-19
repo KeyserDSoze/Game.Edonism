@@ -152,7 +152,8 @@ public sealed class DevelopmentTacticalOverviewEndpointTests
                 availableActivities = ActivitySetupFixture.Catalog(),
                 actionCardIds = ActionDeckFixture.ActionIds(),
                 electionDayCardId = ActionDeckFixture.ElectionDayId,
-                seed = 178
+                // Reuse the proven eight-seat fixture seed (#88/#178).
+                seed = 2026
             });
         Assert.Equal(HttpStatusCode.Created, createdResponse.StatusCode);
         using var created = await createdResponse.Content.ReadFromJsonAsync<JsonDocument>();

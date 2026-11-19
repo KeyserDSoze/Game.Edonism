@@ -124,6 +124,97 @@ public sealed class DevelopmentTacticalOverviewEndpointTests
         Assert.Equal(publicBefore, await sameState.Content.ReadAsStringAsync());
     }
 
+    // #178: source of truth for the exact JSON object keysets checked by
+    // the browser before retaining raw tactical HTTP 200. Existing tests
+    // above separately cover bearer authorization, rotation and no-store.
+    private static void AssertExactKeys(JsonElement element, params string[] expected)
+    {
+        Assert.Equal(JsonValueKind.Object, element.ValueKind);
+        Assert.Equal(expected.OrderBy(key => key, StringComparer.Ordinal),
+            element.EnumerateObject().Select(property => property.Name)
+                .OrderBy(key => key, StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public async Task RawTacticalWireContainsOnlyPrintedPublicProjectionKeys(int count)
+    {
+        using var host = Host();
+        using var creator = host.CreateClient();
+        var players = Enumerable.Range(0, count).Select(i => $"player-{i}").ToArray();
+        using var createdResponse = await creator.PostAsJsonAsync(
+            "/api/dev/matches/from-full-deck", new
+            {
+                playerIds = players,
+                characters = CharacterSetupFixture.Catalog(),
+                availableActivities = ActivitySetupFixture.Catalog(),
+                actionCardIds = ActionDeckFixture.ActionIds(),
+                electionDayCardId = ActionDeckFixture.ElectionDayId,
+                seed = 178
+            });
+        Assert.Equal(HttpStatusCode.Created, createdResponse.StatusCode);
+        using var created = await createdResponse.Content.ReadFromJsonAsync<JsonDocument>();
+        Assert.NotNull(created);
+        var matchId = created.RootElement.GetProperty("matchId").GetGuid();
+        var tokens = created.RootElement.GetProperty("credentials").EnumerateArray()
+            .Select(row => row.GetProperty("token").GetString()!).ToArray();
+
+        // Include both the first actor and the last actor; the nested rows
+        // and public scopes are still server-derived, not supplied by query.
+        foreach (var index in new[] { 0, count - 1 })
+        {
+            using var seat = Seat(host, tokens[index]);
+            using var response = await seat.GetAsync(
+                $"/api/dev/matches/{matchId}/tactical-overview?playerId={players[0]}");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+            using var document = await response.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.NotNull(document);
+            var root = document.RootElement;
+            AssertExactKeys(root, "matchId", "playerId", "round",
+                "verifiedRevision", "fromStreetId", "uncontrolled",
+                "otherPlayers", "opponentControlledLots");
+            Assert.Equal(players[index], root.GetProperty("playerId").GetString());
+            Assert.Equal(1, root.GetProperty("round").GetInt32());
+            Assert.Equal(0, root.GetProperty("verifiedRevision").GetInt64());
+
+            foreach (var (property, items, expectedCount) in new[]
+            {
+                ("uncontrolled", "routes", 30 - count),
+                ("otherPlayers", "others", count - 1),
+                ("opponentControlledLots", "routes", count - 1)
+            })
+            {
+                var projection = root.GetProperty(property);
+                AssertExactKeys(projection, "matchId", "playerId", "round",
+                    "verifiedRevision", "fromStreetId", items);
+                foreach (var scopeKey in new[] { "matchId", "playerId",
+                    "round", "verifiedRevision", "fromStreetId" })
+                    Assert.Equal(root.GetProperty(scopeKey).GetRawText(),
+                        projection.GetProperty(scopeKey).GetRawText());
+                var rows = projection.GetProperty(items);
+                Assert.Equal(expectedCount, rows.GetArrayLength());
+                foreach (var row in rows.EnumerateArray())
+                {
+                    if (property == "uncontrolled")
+                        AssertExactKeys(row, "slotId", "cardId", "category",
+                            "streetId", "streetSteps", "streetPath");
+                    else if (property == "otherPlayers")
+                        AssertExactKeys(row, "otherPlayerId", "streetId",
+                            "streetSteps", "streetPath", "controlledActivities",
+                            "standingHenchmen");
+                    else
+                        AssertExactKeys(row, "slotId", "ownerPlayerId", "posture",
+                            "streetId", "streetSteps", "streetPath");
+                    Assert.Equal(JsonValueKind.Array,
+                        row.GetProperty("streetPath").ValueKind);
+                }
+            }
+        }
+    }
+
     [Fact]
     public async Task ProductionNeverMapsTheTacticalOverview()
     {

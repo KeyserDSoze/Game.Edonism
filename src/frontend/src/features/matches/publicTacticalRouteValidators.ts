@@ -4,6 +4,7 @@
  * The caller must check the current actor/token/abort/revision and #100 scope.
  */
 import type { PublicTacticalScope } from "./publicTacticalScope";
+import { hasExactPublicTacticalOverviewWire } from "./verifiedPublicTacticalOverviewWire";
 
 export type TacticalRouteState = Readonly<{
   players: readonly Readonly<{ playerId: string; streetId: string }>[];
@@ -158,7 +159,8 @@ export function validateOpponentPublicLotRoutes(
 export function validatePublicTacticalRoutes(
   overview: unknown, ctx: TacticalRouteContext,
 ): boolean {
-  return record(overview)
+  return hasExactPublicTacticalOverviewWire(overview)
+    && record(overview)
     && validateUncontrolledPublicRoutes(overview.uncontrolled, ctx)
     && validateOtherPublicPlayerRoutes(overview.otherPlayers, ctx)
     && validateOpponentPublicLotRoutes(overview.opponentControlledLots, ctx);

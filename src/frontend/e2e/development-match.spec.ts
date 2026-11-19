@@ -160,6 +160,8 @@ type MockOptions = {
   delayFirstAliceOpponentLots?: boolean;
   invalidTacticalOverview?: "outer-revision" | "outer-player" | "nested-origin"
     | "nested-lots-player" | "missing-uncontrolled" | "missing-other" | "missing-lots";
+  forgedTacticalExtraOnce?: "root" | "uncontrolled" | "otherPlayers" | "opponentLots"
+    | "uncontrolledRow" | "otherRow" | "opponentRow"; // #178: extra raw JSON ignored by old guard.
   delayRotationAcknowledgement?: boolean;
   bobLotOnSecondSlot?: boolean; // #104: a legitimate rival-held non-first space on Einstein Avenue.
 };
@@ -224,6 +226,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayedAliceRoutes = false;
   let delayedAliceOtherSeats = false;
   let delayedAliceOpponentLots = false;
+  let forgedTacticalExtraIssued = false;
   const presentSeats = new Set<Seat>();
   const acceptedKeys = new Map<string, {
     kind: string; expectedRevision: number; destinationStreetId?: string;
@@ -698,7 +701,7 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
         await new Promise(resolve => setTimeout(resolve, 900));
       }
       const defect = options.invalidTacticalOverview;
-      return reply({ status: 200, json: {
+      const overview = {
         ...fields,
         playerId: defect === "outer-player" ? "intruder" : seat,
         verifiedRevision: defect === "outer-revision" ? revision + 1 : revision,
@@ -721,7 +724,24 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
             ? revision + 99 : revision,
           routes: opponentRoutes,
         },
-      } });
+      };
+      // #178: maintain a mathematically and actor-correct HTTP 200, but
+      // add a forbidden extra property at any depth. The raw object must
+      // never enter tacticalLease or reveal private/future metadata.
+      const forged = options.forgedTacticalExtraOnce;
+      if (forged && !forgedTacticalExtraIssued) {
+        forgedTacticalExtraIssued = true;
+        const target: unknown = forged === "root" ? overview
+          : forged === "uncontrolled" ? overview.uncontrolled
+          : forged === "otherPlayers" ? overview.otherPlayers
+          : forged === "opponentLots" ? overview.opponentControlledLots
+          : forged === "uncontrolledRow" ? overview.uncontrolled?.routes[0]
+          : forged === "otherRow" ? overview.otherPlayers?.others[0]
+          : overview.opponentControlledLots?.routes[0];
+        if (target && typeof target === "object" && !Array.isArray(target))
+          (target as Record<string, unknown>).privateHand = null;
+      }
+      return reply({ status: 200, json: overview });
     }
 
     if (path.endsWith("/opponent-controlled-routes")) {
@@ -6970,6 +6990,37 @@ test("#100: forged nested rival lot actor scope hides all atomic tactical views 
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2))
     .toBe(false);
 });
+
+
+for (const fault of ["root", "uncontrolledRow", "opponentRow"] as const) {
+  test(`#178: forged tactical ${fault} metadata hides ALL public PvP guidance; seat retry recovers`,
+    async ({ page }) => {
+      const { observedHeaders } = await mockMatchApi(page, {
+        routePlannerWithFreeCards: true, forgedTacticalExtraOnce: fault,
+      });
+      await page.goto("/");
+      await page.getByTestId("dev-create").click();
+      for (const id of ["dev-other-seats-unavailable",
+        "dev-routes-unavailable", "dev-opponent-lots-unavailable"])
+        await expect(page.getByTestId(id)).toBeVisible();
+      for (const id of ["dev-other-seats-list", "dev-opponent-lots-owner-filter",
+        "dev-rival-nearest-summary", "city-tactical-focus"])
+        await expect(page.getByTestId(id)).toHaveCount(0);
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      expect(observedHeaders.filter(e => /\/(free-move|end-turn)$/.test(e.path)))
+        .toHaveLength(0);
+
+      // Same still-authorized fixture, but an entirely new bearer scope.
+      // No old poisoned response may resurrect after this seat switch.
+      await page.getByTestId("dev-seat-bob").click();
+      await expect(page.getByTestId("dev-other-seat-alice")).toBeVisible();
+      await expect(page.getByTestId("dev-opponent-lot-N-01")).toBeVisible();
+      await expect(page.getByTestId("dev-routes-unavailable")).toHaveCount(0);
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      expect(observedHeaders.filter(e => e.path.endsWith("/tactical-overview")))
+        .toHaveLength(2);
+    });
+}
 
 // #136: These are server-public history flags, never move permissions.
 // Read-only city inspection and locale changes do not issue game commands.

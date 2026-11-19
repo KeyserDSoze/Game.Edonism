@@ -7,6 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "test:playwright-discovery:unit": "node --test scripts/playwright-discovery.test.mjs",
+    "test:e2e:list": "node scripts/playwright-discovery.mjs mocked",
+    "test:e2e:live:list": "node scripts/playwright-discovery.mjs live",
     "test:e2e": "playwright test",
     "test:e2e:live": "playwright test --config playwright.live.config.ts"
   },

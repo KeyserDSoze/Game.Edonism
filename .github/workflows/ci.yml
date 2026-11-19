@@ -49,6 +49,12 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Typecheck and bundle
         run: npm run build
+      # #177: tsc does not parse e2e/*.spec.ts. Catch malformed specs
+      # and empty/default suite before spending time starting Chromium.
+      - name: Test Playwright discovery fail-closed checks
+        run: npm run test:playwright-discovery:unit
+      - name: Preflight mocked Playwright test discovery (nonempty)
+        run: npm run test:e2e:list
       - name: Verify preinstalled Chromium can launch
         run: node -e "const { chromium } = require('@playwright/test'); (async () => { const b = await chromium.launch(); await b.close(); console.log('Chromium ready'); })().catch(e => { console.error(e); process.exit(1); })"
       - name: Playwright E2E
@@ -86,6 +92,11 @@ jobs:
       - name: Install frontend dependencies
         working-directory: src/frontend
         run: npm install --no-audit --no-fund
+      # #177: parse only the real-API e2e-live specs before Chromium
+      # and the actual .NET Development server are started. No mocks.
+      - name: Preflight live Playwright test discovery (nonempty)
+        working-directory: src/frontend
+        run: npm run test:e2e:live:list
       - name: Verify preinstalled Chromium can launch
         working-directory: src/frontend
         run: node -e "const { chromium } = require('@playwright/test'); (async () => { const b = await chromium.launch(); await b.close(); console.log('Chromium ready'); })().catch(e => { console.error(e); process.exit(1); })"

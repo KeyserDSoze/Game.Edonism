@@ -69,7 +69,10 @@ for (const seats of [2, 4, 8] as const) {
         const attempts = [
           asMutated(x => { x[0].streetSteps++; }),
           asMutated(x => { x[0].streetPath = ["gauss", "main-square"]; }),
-          asMutated(x => { x[0].streetId = "gauss"; }),
+          // Every 2/4/8-seat fixture must actually CHANGE the field;
+          // nearest seat can already be on Gauss in an eight-seat setup.
+          asMutated(x => { x[0].streetId = x[0].streetId === "gauss"
+            ? "einstein" : "gauss"; }),
           asMutated(x => { x[0].otherPlayerId = "unknown"; }),
           asMutated(x => { x[0].controlledActivities++; }),
           asMutated(x => { x[0].standingHenchmen++; }),

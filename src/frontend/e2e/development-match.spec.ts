@@ -7111,6 +7111,7 @@ for (const fault of ["root", "street", "owner", "footprint"] as const) {
       // the ENTIRE authenticated report. No stale actor/rival rows survive.
       await expect(page.getByTestId("dev-territory-rivals")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-sort")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-territory-server-standings")).toHaveCount(0);
@@ -7143,6 +7144,7 @@ for (const fault of ["root", "street", "owner", "footprint"] as const) {
         .toHaveAttribute("aria-pressed", "false");
       await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-map-alice")).toBeVisible();
+      await expect(page.getByTestId("dev-rival-dossier-sort")).toHaveValue("canonical");
       await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-territory-server-unavailable")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
@@ -7177,6 +7179,7 @@ for (const fault of ["root", "otherRow"] as const) {
       await expect(page.getByTestId("dev-territory-rivals-list").locator("li"))
         .toHaveCount(1);
       await expect(page.getByTestId("dev-rival-dossier")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-sort")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
@@ -7193,6 +7196,7 @@ for (const fault of ["root", "otherRow"] as const) {
         .toHaveAttribute("aria-pressed", "false");
       await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-map-alice")).toBeVisible();
+      await expect(page.getByTestId("dev-rival-dossier-sort")).toHaveValue("canonical");
       await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
@@ -7348,6 +7352,81 @@ for (const count of [2, 4, 8] as const) {
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       expect(observedHeaders.filter(x =>
         /\/(free-move|end-turn|rotate-token)$/.test(x.path))).toHaveLength(0);
+    });
+}
+
+for (const count of [2, 4, 8] as const) {
+  test("#184: " + count + "-seat audited rival sort preserves scoped map route and lot filter",
+    async ({ page }) => {
+      const { observedHeaders } = await mockMatchApi(page, {
+        playerCount: count, publicCardCategory: "full-valid", serverTerritory: true,
+      });
+      if (count === 2) await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto("/");
+      await page.getByTestId("dev-player-count").selectOption(String(count));
+      await page.getByTestId("dev-create").click();
+      const rows = page.getByTestId("dev-rival-dossier-list").locator("li");
+      await expect(rows).toHaveCount(count - 1);
+      const canonical = await rows.evaluateAll(nodes => nodes.map((node, index) => ({
+        id: node.getAttribute("data-player-id"),
+        steps: Number(node.getAttribute("data-steps")),
+        lots: Number(node.getAttribute("data-controlled")),
+        index,
+      })));
+      const visibleIds = () => rows.evaluateAll(nodes =>
+        nodes.map(node => node.getAttribute("data-player-id")));
+      const sort = page.getByTestId("dev-rival-dossier-sort");
+      await expect(sort).toHaveValue("canonical");
+      await expect(sort).toHaveAttribute("aria-controls", "dev-rival-dossier-list");
+      await expect(sort).toHaveAccessibleName("Ordina i rivali verificati");
+      if (count === 8) expect(canonical.some(row => row.lots === 0)).toBe(true);
+      await page.getByTestId("dev-rival-dossier-filter-bob").click();
+      await page.getByTestId("dev-rival-dossier-map-bob").click();
+      const path = await page.getByTestId("dev-rival-dossier-bob")
+        .getAttribute("data-street-path");
+      await expect(page.getByTestId("city-renderer"))
+        .toHaveAttribute("data-focus-path", path!);
+      await sort.focus();
+      await page.keyboard.press("End");
+      await expect(sort).toHaveValue("lots");
+      await expect.poll(visibleIds).toEqual([...canonical]
+        .sort((a, b) => b.lots - a.lots || a.index - b.index).map(row => row.id));
+      // Change locale without changing the selected public metric.
+      await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+      await expect(sort).toHaveAccessibleName("Sort verified rivals");
+      await expect(sort).toHaveValue("lots");
+      await sort.selectOption("nearest");
+      await expect.poll(visibleIds).toEqual([...canonical]
+        .sort((a, b) => a.steps - b.steps || a.index - b.index).map(row => row.id));
+      await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("bob");
+      await expect(page.getByTestId("city-renderer"))
+        .toHaveAttribute("data-focus-path", path!);
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      await sort.selectOption("canonical");
+      await expect.poll(visibleIds).toEqual(canonical.map(row => row.id));
+      await sort.selectOption("lots");
+      await page.getByTestId("dev-seat-bob").click();
+      await expect(sort).toHaveValue("canonical");
+      await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-map-alice")).toBeVisible();
+      await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
+      await expect(page.getByTestId("city-renderer"))
+        .toHaveAttribute("data-focus-path", "");
+      expect(observedHeaders.filter(x =>
+        /\/(free-move|end-turn|rotate-token)$/.test(x.path))).toHaveLength(0);
+      // Credential rotation changes only the currently authenticated scope.
+      // A local sort chosen for the previous bearer cannot survive it.
+      await sort.selectOption("nearest");
+      await page.getByTestId("dev-rotate-token").click();
+      await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+      await expect(sort).toHaveValue("canonical");
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      expect(observedHeaders.filter(x => x.path.endsWith("/rotate-token")))
+        .toHaveLength(1);
+      if (count === 2) {
+        expect(await page.evaluate(() =>
+          document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+      }
     });
 }
 

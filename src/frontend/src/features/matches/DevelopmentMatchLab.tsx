@@ -308,6 +308,9 @@ export function DevelopmentMatchLab({
   // a browser-only display predicate, never targeting or game authority.
   const [selectedOpponentPosture, setSelectedOpponentPosture] =
     useState<"all" | "standing" | "fallen">("all");
+  // #184: local ordering of verified public rival rows, never game authority.
+  const [rivalDossierSort, setRivalDossierSort] =
+    useState<"canonical" | "nearest" | "lots">("canonical");
   const [turnProgressLease, setTurnProgressLease] = useState<{
     token: string; data: FirstRoundTurnProgress;
   } | null>(null);
@@ -375,6 +378,8 @@ export function DevelopmentMatchLab({
   const initialDocumentTitle = useRef<string | null>(null);
 
   const token = session?.credentials.find((seat) => seat.playerId === actorId)?.token;
+  useEffect(() => { setRivalDossierSort("canonical"); },
+    [session?.matchId, session?.state.revision, actorId, token]);
   const player = session?.state.players.find((seat) => seat.playerId === actorId);
   const isMyTurn = Boolean(session && token && actorId
     && session.state.phase === 0 && session.state.activePlayerId === actorId);
@@ -655,6 +660,17 @@ export function DevelopmentMatchLab({
     ? verifiedPublicRivalProximityDossier(
       session.state, territoryStandings, actorId, tactical.otherPlayers.others)
     : [];
+  // Sort copies of the complete certified array only. Resolve ties by the
+  // original server-verified row ordinal, never locale-dependent player IDs.
+  const orderedRivalProximityDossier = rivalDossierSort === "canonical"
+    ? rivalProximityDossier
+    : rivalProximityDossier.map((row, index) => ({ row, index }))
+      .sort((a, b) => {
+        const metric = rivalDossierSort === "nearest"
+          ? a.row.streetSteps - b.row.streetSteps
+          : b.row.rivalControlledLots - a.row.rivalControlledLots;
+        return metric || a.index - b.index;
+      }).map(entry => entry.row);
   const settlement = settlementLease && token
     && settlementLease.token === token
     && settlementLease.data.matchId === session?.matchId
@@ -2203,9 +2219,26 @@ export function DevelopmentMatchLab({
                 className="space-y-2 rounded-xl border border-border p-3">
                 <p className="text-xs font-semibold">{t("dev.rivalDossierTitle")}</p>
                 <p className="text-xs text-muted-foreground">{t("dev.rivalDossierSubtitle")}</p>
+                <label htmlFor="dev-rival-dossier-sort" className="block text-xs font-medium">
+                  {t("dev.rivalDossierSortLabel")}
+                </label>
+                <select id="dev-rival-dossier-sort"
+                  data-testid="dev-rival-dossier-sort"
+                  aria-controls="dev-rival-dossier-list"
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-xs sm:max-w-xs"
+                  value={rivalDossierSort}
+                  onChange={event => {
+                    const value = event.currentTarget.value;
+                    if (value === "canonical" || value === "nearest" || value === "lots")
+                      setRivalDossierSort(value);
+                  }}>
+                  <option value="canonical">{t("dev.rivalDossierSortCanonical")}</option>
+                  <option value="nearest">{t("dev.rivalDossierSortNearest")}</option>
+                  <option value="lots">{t("dev.rivalDossierSortLots")}</option>
+                </select>
                 <ol data-testid="dev-rival-dossier-list"
                   className="grid gap-2 text-xs sm:grid-cols-2">
-                  {rivalProximityDossier.map(row => (
+                  {orderedRivalProximityDossier.map(row => (
                     <li key={row.rivalPlayerId}
                       data-testid={`dev-rival-dossier-${row.rivalPlayerId}`}
                       data-player-id={row.rivalPlayerId}

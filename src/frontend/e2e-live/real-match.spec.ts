@@ -768,6 +768,22 @@ async function assertLivePublicStreetControlMatrix(
   })));
   expect(shownDossier).toEqual(expectedDossier);
   await expect(page.getByTestId("dev-rival-dossier-note")).toBeVisible();
+  // #184: display-only public rival sorting, original tie order preserved.
+  const dossierSort = page.getByTestId("dev-rival-dossier-sort");
+  const dossierIds = () => dossierRows.evaluateAll(nodes =>
+    nodes.map(node => node.getAttribute("data-player-id")));
+  await expect(dossierSort).toHaveValue("canonical");
+  await dossierSort.selectOption("nearest");
+  await expect.poll(dossierIds).toEqual([...shownDossier]
+    .sort((a, b) => Number(a.steps) - Number(b.steps))
+    .map(row => row.playerId));
+  await dossierSort.selectOption("lots");
+  await expect.poll(dossierIds).toEqual([...shownDossier]
+    .sort((a, b) => Number(b.controlled) - Number(a.controlled))
+    .map(row => row.playerId));
+  await dossierSort.selectOption("canonical");
+  await expect.poll(dossierIds).toEqual(shownDossier.map(row => row.playerId));
+
   // #183: the public rival position in the joint #181 dossier is an
   // independently certified .NET shortest graph path, also suitable for
   // read-only highlighted route on the existing 3D city map. Tested with

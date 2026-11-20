@@ -7289,13 +7289,13 @@ for (const count of [2, 4, 8] as const) {
       await expect(page.getByTestId("dev-rival-dossier-map-alice")).toHaveCount(0);
       const focus = page.getByTestId("dev-rival-dossier-map-bob");
       await expect(focus).toHaveAttribute("aria-label",
-        "Highlight bob on the public map (no attack or movement)");
+        "Evidenzia bob sulla mappa pubblica (nessun attacco o movimento)");
       await focus.focus();
       await page.keyboard.press("Enter");
       await expect(page.getByTestId("city-renderer"))
         .toHaveAttribute("data-focus-path", expectedPath!);
       await expect(page.getByTestId("city-tactical-target"))
-        .toContainText("Observed player: bob");
+        .toHaveText("Giocatore osservato: bob");
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       // #182's independent owner filter must NOT be edited by a map focus.
       await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
@@ -7311,7 +7311,7 @@ for (const count of [2, 4, 8] as const) {
         await expect(page.getByTestId("city-renderer"))
           .toHaveAttribute("data-focus-path", zeroPath!);
         await expect(page.getByTestId("city-tactical-target"))
-          .toContainText("Observed player: charlie");
+          .toHaveText("Giocatore osservato: charlie");
       }
 
       // A user can filter public lots in parallel, but changing that
@@ -7328,6 +7328,15 @@ for (const count of [2, 4, 8] as const) {
       await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("bob");
       await expect(page.getByTestId("city-renderer"))
         .toHaveAttribute("data-focus-path", expectedPath!);
+
+      // Confirm the same authenticated public map route works in EN too.
+      // Changing language never changes an actor, route or game revision.
+      await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+      await expect(focus).toHaveAttribute("aria-label",
+        "Highlight bob on the public map (no attack or movement)");
+      await expect(page.getByTestId("city-tactical-target"))
+        .toHaveText("Observed player: bob");
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
 
       // Actor lease switches revoke the old route/focus; new observer's
       // same-match dossier has the opposite server-confirmed route.

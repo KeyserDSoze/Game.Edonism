@@ -784,6 +784,28 @@ async function assertLivePublicStreetControlMatrix(
   await dossierSort.selectOption("canonical");
   await expect.poll(dossierIds).toEqual(shownDossier.map(row => row.playerId));
 
+  // #185: authenticated 2/8-seat real .NET shared controlled-street
+  // report drives the complete browser filter; no additional API/game command.
+  const sharedRivalIds = shownDossier
+    .filter(row => Boolean(row.shared))
+    .map(row => row.playerId);
+  const sharedRivalToggle = page.getByTestId("dev-rival-dossier-shared-toggle");
+  await expect(sharedRivalToggle).toHaveAttribute("aria-pressed", "false");
+  await sharedRivalToggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(sharedRivalToggle).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(dossierIds).toEqual(sharedRivalIds);
+  await expect(page.getByTestId("dev-rival-dossier-shared-count"))
+    .toHaveText(new RegExp("^" + sharedRivalIds.length
+      + " (?:di|of) " + shownDossier.length + " "));
+  if (sharedRivalIds.length === 0)
+    await expect(page.getByTestId("dev-rival-dossier-shared-empty")).toBeVisible();
+  else
+    await expect(page.getByTestId("dev-rival-dossier-shared-empty")).toHaveCount(0);
+  await sharedRivalToggle.click();
+  await expect(sharedRivalToggle).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(dossierIds).toEqual(shownDossier.map(row => row.playerId));
+
   // #183: the public rival position in the joint #181 dossier is an
   // independently certified .NET shortest graph path, also suitable for
   // read-only highlighted route on the existing 3D city map. Tested with

@@ -311,6 +311,8 @@ export function DevelopmentMatchLab({
   // #184: local ordering of verified public rival rows, never game authority.
   const [rivalDossierSort, setRivalDossierSort] =
     useState<"canonical" | "nearest" | "lots">("canonical");
+  // #185: filter only cross-verified public street ownership, never hostility.
+  const [sharedRivalsOnly, setSharedRivalsOnly] = useState(false);
   const [turnProgressLease, setTurnProgressLease] = useState<{
     token: string; data: FirstRoundTurnProgress;
   } | null>(null);
@@ -378,8 +380,10 @@ export function DevelopmentMatchLab({
   const initialDocumentTitle = useRef<string | null>(null);
 
   const token = session?.credentials.find((seat) => seat.playerId === actorId)?.token;
-  useEffect(() => { setRivalDossierSort("canonical"); },
-    [session?.matchId, session?.state.revision, actorId, token]);
+  useEffect(() => {
+    setRivalDossierSort("canonical");
+    setSharedRivalsOnly(false);
+  }, [session?.matchId, session?.state.revision, actorId, token]);
   const player = session?.state.players.find((seat) => seat.playerId === actorId);
   const isMyTurn = Boolean(session && token && actorId
     && session.state.phase === 0 && session.state.activePlayerId === actorId);
@@ -671,6 +675,11 @@ export function DevelopmentMatchLab({
           : b.row.rivalControlledLots - a.row.rivalControlledLots;
         return metric || a.index - b.index;
       }).map(entry => entry.row);
+  // #185: filter ONLY complete independently audited #180 shared-ownership IDs
+  // after #184 sorting, without mutating verified rows or other UI selections.
+  const visibleRivalProximityDossier = sharedRivalsOnly
+    ? orderedRivalProximityDossier.filter(row => row.sharedStreetIds.length > 0)
+    : orderedRivalProximityDossier;
   const settlement = settlementLease && token
     && settlementLease.token === token
     && settlementLease.data.matchId === session?.matchId
@@ -2236,9 +2245,34 @@ export function DevelopmentMatchLab({
                   <option value="nearest">{t("dev.rivalDossierSortNearest")}</option>
                   <option value="lots">{t("dev.rivalDossierSortLots")}</option>
                 </select>
+                {/* #185: read-only shared *controlled* street view on a complete
+                    actor/revision-verified dossier, never an attack range. */}
+                <Button type="button" size="sm" variant="outline"
+                  data-testid="dev-rival-dossier-shared-toggle"
+                  aria-controls="dev-rival-dossier-list"
+                  aria-pressed={sharedRivalsOnly}
+                  className="h-auto min-h-10 w-full whitespace-normal sm:w-auto"
+                  onClick={() => setSharedRivalsOnly(value => !value)}>
+                  {sharedRivalsOnly
+                    ? t("dev.rivalDossierShowAllRivals")
+                    : t("dev.rivalDossierShowSharedRivals")}
+                </Button>
+                <p data-testid="dev-rival-dossier-shared-count"
+                  aria-live="polite" className="text-xs text-muted-foreground">
+                  {t("dev.rivalDossierVisibleCount", {
+                    visible: visibleRivalProximityDossier.length,
+                    total: rivalProximityDossier.length,
+                  })}
+                </p>
+                {sharedRivalsOnly && visibleRivalProximityDossier.length === 0 && (
+                  <p data-testid="dev-rival-dossier-shared-empty"
+                    className="text-xs text-muted-foreground">
+                    {t("dev.rivalDossierSharedEmpty")}
+                  </p>
+                )}
                 <ol data-testid="dev-rival-dossier-list"
                   className="grid gap-2 text-xs sm:grid-cols-2">
-                  {orderedRivalProximityDossier.map(row => (
+                  {visibleRivalProximityDossier.map(row => (
                     <li key={row.rivalPlayerId}
                       data-testid={`dev-rival-dossier-${row.rivalPlayerId}`}
                       data-player-id={row.rivalPlayerId}

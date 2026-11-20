@@ -7111,6 +7111,8 @@ for (const fault of ["root", "street", "owner", "footprint"] as const) {
       // the ENTIRE authenticated report. No stale actor/rival rows survive.
       await expect(page.getByTestId("dev-territory-rivals")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-shared-toggle")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-shared-count")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-sort")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
@@ -7145,6 +7147,8 @@ for (const fault of ["root", "street", "owner", "footprint"] as const) {
       await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-map-alice")).toBeVisible();
       await expect(page.getByTestId("dev-rival-dossier-sort")).toHaveValue("canonical");
+      await expect(page.getByTestId("dev-rival-dossier-shared-toggle"))
+        .toHaveAttribute("aria-pressed", "false");
       await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-territory-server-unavailable")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
@@ -7179,6 +7183,8 @@ for (const fault of ["root", "otherRow"] as const) {
       await expect(page.getByTestId("dev-territory-rivals-list").locator("li"))
         .toHaveCount(1);
       await expect(page.getByTestId("dev-rival-dossier")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-shared-toggle")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-shared-count")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-sort")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
@@ -7197,6 +7203,8 @@ for (const fault of ["root", "otherRow"] as const) {
       await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-map-alice")).toBeVisible();
       await expect(page.getByTestId("dev-rival-dossier-sort")).toHaveValue("canonical");
+      await expect(page.getByTestId("dev-rival-dossier-shared-toggle"))
+        .toHaveAttribute("aria-pressed", "false");
       await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
@@ -7427,6 +7435,110 @@ for (const count of [2, 4, 8] as const) {
         expect(await page.evaluate(() =>
           document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
       }
+    });
+}
+
+
+// #185: filter only independently audited PUBLIC jointly owned streets.
+for (const count of [2, 4, 8] as const) {
+  test("#185: " + count + "-seat shared controlled-street rivals preserve sort and tactical focus",
+    async ({ page }) => {
+      test.setTimeout(60_000);
+      const { observedHeaders } = await mockMatchApi(page, {
+        playerCount: count, publicCardCategory: "full-valid",
+        serverTerritory: true, sharedOwnedStreet: true,
+      });
+      if (count === 2) await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto("/");
+      await page.getByTestId("dev-player-count").selectOption(String(count));
+      await page.getByTestId("dev-create").click();
+      const rows = page.getByTestId("dev-rival-dossier-list").locator("li");
+      const toggle = page.getByTestId("dev-rival-dossier-shared-toggle");
+      const status = page.getByTestId("dev-rival-dossier-shared-count");
+      const sort = page.getByTestId("dev-rival-dossier-sort");
+      await expect(rows).toHaveCount(count - 1);
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await expect(toggle).toHaveAttribute("aria-controls", "dev-rival-dossier-list");
+      await expect(toggle).toHaveAccessibleName(
+        "Solo rivali con proprietà su strade condivise");
+      await expect(status).toHaveText((count - 1) + " di " + (count - 1)
+        + " rivali pubblici mostrati");
+      await expect(page.getByTestId("dev-rival-dossier-bob"))
+        .toHaveAttribute("data-shared-streets", "gauss");
+      if (count === 8)
+        await expect(page.getByTestId("dev-rival-dossier-charlie"))
+          .toHaveAttribute("data-controlled", "0");
+      await toggle.focus();
+      await page.keyboard.press("Enter");
+      await expect(toggle).toHaveAttribute("aria-pressed", "true");
+      await expect(toggle).toHaveAccessibleName("Mostra tutti i rivali");
+      await expect(rows).toHaveCount(1);
+      await expect(status).toHaveText("1 di " + (count - 1)
+        + " rivali pubblici mostrati");
+      await sort.selectOption("lots");
+      await expect(sort).toHaveValue("lots");
+      await page.getByTestId("dev-rival-dossier-filter-bob").click();
+      await page.getByTestId("dev-rival-dossier-map-bob").click();
+      const path = await page.getByTestId("dev-rival-dossier-bob")
+        .getAttribute("data-street-path");
+      await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("bob");
+      await expect(page.getByTestId("city-renderer"))
+        .toHaveAttribute("data-focus-path", path!);
+      await page.getByRole("combobox", { name: "Lingua" }).selectOption("en");
+      await expect(toggle).toHaveAccessibleName("Show all public rivals");
+      await expect(status).toHaveText("1 of " + (count - 1) + " public rivals shown");
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await expect(toggle).toHaveAccessibleName("Rivals sharing a controlled street");
+      await expect(rows).toHaveCount(count - 1);
+      await expect(sort).toHaveValue("lots");
+      await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("bob");
+      await expect(page.getByTestId("city-renderer"))
+        .toHaveAttribute("data-focus-path", path!);
+      await toggle.click();
+      await page.getByTestId("dev-seat-bob").click();
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await expect(rows).toHaveCount(count - 1);
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-pressed", "true");
+      await page.getByTestId("dev-rotate-token").click();
+      await expect(page.getByTestId("dev-rotation-notice")).toBeVisible();
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      if (count === 2)
+        expect(await page.evaluate(() =>
+          document.documentElement.scrollWidth > innerWidth + 2)).toBe(false);
+      expect(observedHeaders.filter(x =>
+        /\/(free-move|end-turn)$/.test(x.path))).toHaveLength(0);
+    });
+}
+
+for (const count of [2, 8] as const) {
+  test("#185: " + count + "-seat zero shared public ownership is not a missing roster",
+    async ({ page }) => {
+      test.setTimeout(60_000);
+      const { observedHeaders } = await mockMatchApi(page, {
+        playerCount: count, publicCardCategory: "full-valid", serverTerritory: true,
+      });
+      await page.goto("/");
+      await page.getByTestId("dev-player-count").selectOption(String(count));
+      await page.getByTestId("dev-create").click();
+      const rows = page.getByTestId("dev-rival-dossier-list").locator("li");
+      const toggle = page.getByTestId("dev-rival-dossier-shared-toggle");
+      await expect(rows).toHaveCount(count - 1);
+      await toggle.click();
+      await expect(rows).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-shared-count"))
+        .toHaveText("0 di " + (count - 1) + " rivali pubblici mostrati");
+      await expect(page.getByTestId("dev-rival-dossier-shared-empty"))
+        .toContainText("Nessun rivale con proprietà controllate");
+      await expect(page.getByTestId("dev-rival-dossier")).toBeVisible();
+      await toggle.click();
+      await expect(rows).toHaveCount(count - 1);
+      await expect(page.getByTestId("dev-rival-dossier-shared-empty")).toHaveCount(0);
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      expect(observedHeaders.filter(x =>
+        /\/(free-move|end-turn|rotate-token)$/.test(x.path))).toHaveLength(0);
     });
 }
 

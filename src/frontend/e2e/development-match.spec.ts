@@ -7112,6 +7112,7 @@ for (const fault of ["root", "street", "owner", "footprint"] as const) {
       await expect(page.getByTestId("dev-territory-rivals")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-territory-server-standings")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
@@ -7141,6 +7142,8 @@ for (const fault of ["root", "street", "owner", "footprint"] as const) {
       await expect(page.getByTestId("dev-rival-dossier-filter-alice"))
         .toHaveAttribute("aria-pressed", "false");
       await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-map-alice")).toBeVisible();
+      await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-territory-server-unavailable")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       const reads = observedHeaders.filter(x => x.path.endsWith("/public-territory"));
@@ -7175,6 +7178,7 @@ for (const fault of ["root", "otherRow"] as const) {
         .toHaveCount(1);
       await expect(page.getByTestId("dev-rival-dossier")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
       await page.getByTestId("dev-seat-bob").click();
       await expect(page.getByTestId("dev-rival-dossier-list").locator("li"))
@@ -7188,6 +7192,8 @@ for (const fault of ["root", "otherRow"] as const) {
       await expect(page.getByTestId("dev-rival-dossier-filter-alice"))
         .toHaveAttribute("aria-pressed", "false");
       await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-map-alice")).toBeVisible();
+      await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
         .toHaveLength(0);
@@ -7259,6 +7265,77 @@ for (const count of [2, 4, 8] as const) {
       await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
       await expect(page.getByTestId("dev-rival-dossier-filter-alice"))
         .toHaveAttribute("aria-pressed", "false");
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      expect(observedHeaders.filter(x =>
+        /\/(free-move|end-turn|rotate-token)$/.test(x.path))).toHaveLength(0);
+    });
+}
+
+
+for (const count of [2, 4, 8] as const) {
+  test(`#183: ${count}-seat audited dossier highlights only the public rival street path on the city map`,
+    async ({ page }) => {
+      const { observedHeaders } = await mockMatchApi(page, {
+        playerCount: count, publicCardCategory: "full-valid", serverTerritory: true,
+      });
+      await page.goto("/");
+      await page.getByTestId("dev-player-count").selectOption(String(count));
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("dev-rival-dossier-list").locator("li"))
+        .toHaveCount(count - 1);
+      const bob = page.getByTestId("dev-rival-dossier-bob");
+      const expectedPath = await bob.getAttribute("data-street-path");
+      expect(expectedPath).toBeTruthy();
+      await expect(page.getByTestId("dev-rival-dossier-map-alice")).toHaveCount(0);
+      const focus = page.getByTestId("dev-rival-dossier-map-bob");
+      await expect(focus).toHaveAttribute("aria-label",
+        "Highlight bob on the public map (no attack or movement)");
+      await focus.focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("city-renderer"))
+        .toHaveAttribute("data-focus-path", expectedPath!);
+      await expect(page.getByTestId("city-tactical-target"))
+        .toContainText("Observed player: bob");
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      // #182's independent owner filter must NOT be edited by a map focus.
+      await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
+
+      if (count === 8) {
+        // A zero-controlled-lot rival still has a real publicly verified
+        // position; map focus is NOT a lot/attack target.
+        const zeroOwner = page.getByTestId("dev-rival-dossier-charlie");
+        await expect(zeroOwner).toHaveAttribute("data-controlled", "0");
+        const zeroPath = await zeroOwner.getAttribute("data-street-path");
+        expect(zeroPath).toBeTruthy();
+        await page.getByTestId("dev-rival-dossier-map-charlie").click();
+        await expect(page.getByTestId("city-renderer"))
+          .toHaveAttribute("data-focus-path", zeroPath!);
+        await expect(page.getByTestId("city-tactical-target"))
+          .toContainText("Observed player: charlie");
+      }
+
+      // A user can filter public lots in parallel, but changing that
+      // filter deliberately invalidates the prior map focus (#182).
+      await page.getByTestId("dev-rival-dossier-map-bob").click();
+      await expect(page.getByTestId("city-renderer"))
+        .toHaveAttribute("data-focus-path", expectedPath!);
+      await page.getByTestId("dev-rival-dossier-filter-bob").click();
+      await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("bob");
+      await expect(page.getByTestId("city-renderer"))
+        .toHaveAttribute("data-focus-path", "");
+      // Fresh focus must leave the independently selected lot filter intact.
+      await focus.click();
+      await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("bob");
+      await expect(page.getByTestId("city-renderer"))
+        .toHaveAttribute("data-focus-path", expectedPath!);
+
+      // Actor lease switches revoke the old route/focus; new observer's
+      // same-match dossier has the opposite server-confirmed route.
+      await page.getByTestId("dev-seat-bob").click();
+      await expect(page.getByTestId("dev-rival-dossier-map-bob")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-map-alice")).toBeVisible();
+      await expect(page.getByTestId("city-renderer"))
+        .toHaveAttribute("data-focus-path", "");
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       expect(observedHeaders.filter(x =>
         /\/(free-move|end-turn|rotate-token)$/.test(x.path))).toHaveLength(0);

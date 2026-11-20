@@ -2264,6 +2264,25 @@ export function DevelopmentMatchLab({
                           ? t("dev.rivalDossierShowAll")
                           : t("dev.rivalDossierShowLots")}
                       </Button>
+                      {/* #183: use only the already #181 verified canonical
+                          street path to highlight this public player on the
+                          existing read-only city map. No movement/combat. */}
+                      <Button type="button" size="sm" variant="outline"
+                        className="h-auto min-h-10 w-full whitespace-normal"
+                        data-testid={`dev-rival-dossier-map-${row.rivalPlayerId}`}
+                        aria-label={t("dev.rivalDossierMapFocusLabel", {
+                          player: row.rivalPlayerId,
+                        })}
+                        onClick={() => onTacticalFocus({
+                          kind: "player",
+                          matchId: session.matchId,
+                          revision: session.state.revision,
+                          actorId,
+                          targetId: row.rivalPlayerId,
+                          streetPath: [...row.streetPath],
+                        })}>
+                        {t("dev.rivalDossierMapFocus")}
+                      </Button>
                     </li>
                   ))}
                 </ol>

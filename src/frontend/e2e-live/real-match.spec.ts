@@ -768,6 +768,28 @@ async function assertLivePublicStreetControlMatrix(
   })));
   expect(shownDossier).toEqual(expectedDossier);
   await expect(page.getByTestId("dev-rival-dossier-note")).toBeVisible();
+  // #183: the public rival position in the joint #181 dossier is an
+  // independently certified .NET shortest graph path, also suitable for
+  // read-only highlighted route on the existing 3D city map. Tested with
+  // BOTH 2 and 8 authentic .NET-created seats, without a new game command.
+  const realMapRival = distances.others[0];
+  const realMapButton = page.getByTestId(
+    `dev-rival-dossier-map-${realMapRival.otherPlayerId}`);
+  await expect(realMapButton).toBeVisible();
+  const otherRow = page.getByTestId(
+    `dev-rival-dossier-${realMapRival.otherPlayerId}`);
+  await expect(otherRow).toHaveAttribute("data-street-path",
+    realMapRival.streetPath.join(">"));
+  await realMapButton.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("city-renderer"))
+    .toHaveAttribute("data-focus-path", realMapRival.streetPath.join(">"));
+  await expect(page.getByTestId("city-tactical-target"))
+    .toContainText(`Observed player: ${realMapRival.otherPlayerId}`);
+  await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
+  await expect(page.getByTestId("dev-revision"))
+    .toHaveText(String(created.state.revision));
+
   // #182: selecting one truly audited rival affects ONLY the existing
   // public opponent owner view filter; never a .NET command, movement or
   // an implicit PvP attack permission. Check this in both 2/8-seat tests.

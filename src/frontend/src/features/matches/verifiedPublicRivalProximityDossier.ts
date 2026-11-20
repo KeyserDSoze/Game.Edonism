@@ -97,14 +97,19 @@ export function verifiedPublicRivalProximityDossier(
     for (let i = 0; i < ordered.length; i++) {
       const raw: unknown = others[i];
       const row = ordered[i];
-      if (!exactOther(raw) || raw.otherPlayerId !== row.rivalPlayerId
+      if (!exactOther(raw)) return [];
+      // Assign the untrusted property to a local before the callback:
+      // TypeScript does not preserve mutable property narrowing inside
+      // Array.every(), but does preserve a validated local array.
+      const actualPath: unknown = raw.streetPath;
+      if (raw.otherPlayerId !== row.rivalPlayerId
         || raw.streetId !== row.rivalStreetId
         || raw.streetSteps !== row.streetSteps
         || raw.controlledActivities !== row.rivalControlledLots
         || raw.standingHenchmen !== row.rivalStandingHenchmen
-        || !Array.isArray(raw.streetPath)
-        || raw.streetPath.length !== row.streetPath.length
-        || !row.streetPath.every((street, n) => raw.streetPath[n] === street))
+        || !Array.isArray(actualPath)
+        || actualPath.length !== row.streetPath.length
+        || !row.streetPath.every((street, n) => actualPath[n] === street))
         return [];
     }
     return ordered.map(row => ({

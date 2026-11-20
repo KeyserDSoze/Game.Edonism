@@ -746,7 +746,11 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
       const unowned = state.boardActivities.filter(card =>
         !state.controlledActivities.some(c => c.slotId === card.slotId));
       const uncontrolledRoutes = unowned.map(card => {
-        const streetId = card.slotId.startsWith("N-") ? "gauss" : "einstein";
+        // #181: a FULL printed board has seven genuine streets, not just
+        // N/S in the older partial tactical mock. Preserve legacy behavior
+        // outside #179/#181's explicit complete server-territory fixture.
+        const streetId = printedBoard?.slots.find(slot => slot.id === card.slotId)
+          ?.streetId ?? (card.slotId.startsWith("N-") ? "gauss" : "einstein");
         const streetPath = shortestStreetPath(origin, streetId) ?? [];
         const streetSteps = streetPath.length - 1
           + (options.invalidRouteSteps && card.slotId === "S-02" ? 1 : 0);
@@ -7106,6 +7110,7 @@ for (const fault of ["root", "street", "owner", "footprint"] as const) {
       // #180: no confidence in head-to-head pressure before #179 verifies
       // the ENTIRE authenticated report. No stale actor/rival rows survive.
       await expect(page.getByTestId("dev-territory-rivals")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier")).toHaveCount(0);
       await expect(page.getByTestId("dev-territory-server-standings")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
@@ -7122,12 +7127,56 @@ for (const fault of ["root", "street", "owner", "footprint"] as const) {
         .toHaveAttribute("data-my-advantage", "0");
       await expect(page.getByTestId("dev-territory-rival-alice"))
         .toHaveAttribute("data-shared-street-ids", "");
+      const dossier = page.getByTestId("dev-rival-dossier-list");
+      await expect(dossier.locator("li")).toHaveCount(1);
+      await expect(page.getByTestId("dev-rival-dossier-alice"))
+        .toHaveAttribute("data-controlled", "1");
+      await expect(page.getByTestId("dev-rival-dossier-alice"))
+        .toHaveAttribute("data-advantage", "0");
+      await expect(page.getByTestId("dev-rival-dossier-alice"))
+        .toHaveAttribute("data-shared-streets", "");
       await expect(page.getByTestId("dev-territory-server-unavailable")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       const reads = observedHeaders.filter(x => x.path.endsWith("/public-territory"));
       expect(reads).toHaveLength(2);
       expect(reads[0].token).toBe(mockSeatToken(0));
       expect(reads[1].token).toBe(mockSeatToken(1));
+      expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+        .toHaveLength(0);
+    });
+}
+
+
+for (const fault of ["root", "otherRow"] as const) {
+  test(`#181: forged public tactical ${fault} hides combined dossier despite valid territory, then recovers on actor switch`,
+    async ({ page }) => {
+      const { observedHeaders } = await mockMatchApi(page, {
+        publicCardCategory: "full-valid", serverTerritory: true,
+        forgedTacticalExtraOnce: fault,
+      });
+      await page.goto("/");
+      const forged = page.waitForResponse(response =>
+        new URL(response.url()).pathname.endsWith("/tactical-overview")
+        && response.request().headers()["x-edonism-dev-token"] === mockSeatToken(0)
+        && response.status() === 200);
+      await page.getByTestId("dev-create").click();
+      await forged;
+      // The authenticated .NET-style territory is valid, but a forged
+      // tactical route cannot be used to compose even public scouting.
+      await expect(page.getByTestId("dev-territory-server-standings").locator("li"))
+        .toHaveCount(2);
+      await expect(page.getByTestId("dev-territory-rivals-list").locator("li"))
+        .toHaveCount(1);
+      await expect(page.getByTestId("dev-rival-dossier")).toHaveCount(0);
+      await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+      await page.getByTestId("dev-seat-bob").click();
+      await expect(page.getByTestId("dev-rival-dossier-list").locator("li"))
+        .toHaveCount(1);
+      await expect(page.getByTestId("dev-rival-dossier-alice"))
+        .toHaveAttribute("data-advantage", "0");
+      await expect(page.getByTestId("dev-rival-dossier-alice"))
+        .toHaveAttribute("data-shared-streets", "");
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
       expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
         .toHaveLength(0);
     });

@@ -713,6 +713,62 @@ async function assertLivePublicStreetControlMatrix(
   })));
   expect(actualRivals).toEqual(expectedRivals);
   await expect(page.getByTestId("dev-territory-rivals-note")).toBeVisible();
+  // #181: the new compact dossier joins TWO genuinely authenticated,
+  // independently audited .NET projections at the exact same revision.
+  // Graph steps are street EDGES, never PvP attack rights or turn estimates.
+  const distanceReply = await page.request.get(endpoint + "/other-player-routes", {
+    headers: auth(token),
+  });
+  expect(distanceReply.status()).toBe(200);
+  expect(distanceReply.headers()["cache-control"]).toContain("no-store");
+  const distances = await distanceReply.json() as {
+    matchId: string; playerId: string; verifiedRevision: number; fromStreetId: string;
+    others: { otherPlayerId: string; streetId: string; streetSteps: number;
+      streetPath: string[]; controlledActivities: number; standingHenchmen: number }[];
+  };
+  expect(distances.matchId).toBe(created.matchId);
+  expect(distances.playerId).toBe(actorId);
+  expect(distances.verifiedRevision).toBe(created.state.revision);
+  expect(distances.fromStreetId).toBe(
+    created.state.players.find(p => p.playerId === actorId)?.streetId);
+  expect(distances.others).toHaveLength(created.state.players.length - 1);
+  const expectedDossier = distances.others.map(other => {
+    const footprint = report.footprints.find(f => f.playerId === other.otherPlayerId);
+    expect(footprint).toBeDefined();
+    expect(other.controlledActivities).toBe(footprint!.controlledLots);
+    expect(other.standingHenchmen).toBe(footprint!.standing);
+    return {
+      id: `dev-rival-dossier-${other.otherPlayerId}`,
+      playerId: other.otherPlayerId,
+      steps: String(other.streetSteps),
+      streetId: other.streetId,
+      path: other.streetPath.join(">"),
+      controlled: String(other.controlledActivities),
+      standing: String(other.standingHenchmen),
+      advantage: String(myFootprint!.controlledLots - other.controlledActivities),
+      shared: report.streets.filter(street =>
+        street.owners.some(owner => owner.playerId === actorId && owner.controlledLots > 0)
+        && street.owners.some(owner => owner.playerId === other.otherPlayerId
+          && owner.controlledLots > 0))
+        .map(street => street.streetId).join(","),
+    };
+  });
+  const dossierRows = page.getByTestId("dev-rival-dossier-list").locator("li");
+  await expect(dossierRows).toHaveCount(created.state.players.length - 1);
+  const shownDossier = await dossierRows.evaluateAll(nodes => nodes.map(node => ({
+    id: node.getAttribute("data-testid"),
+    playerId: node.getAttribute("data-player-id"),
+    steps: node.getAttribute("data-steps"),
+    streetId: node.getAttribute("data-street-id"),
+    path: node.getAttribute("data-street-path"),
+    controlled: node.getAttribute("data-controlled"),
+    standing: node.getAttribute("data-standing"),
+    advantage: node.getAttribute("data-advantage"),
+    shared: node.getAttribute("data-shared-streets"),
+  })));
+  expect(shownDossier).toEqual(expectedDossier);
+  await expect(page.getByTestId("dev-rival-dossier-note")).toBeVisible();
+
   expect(report.footprints.reduce((sum, player) =>
     sum + player.controlledLots, 0)).toBe(report.controlledLots);
   expect(rawFootprints.reduce((sum, item) => sum + item.owned, 0))

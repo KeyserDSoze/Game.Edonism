@@ -48,6 +48,7 @@ import {
 import { verifiedPublicStreetControlMatrix } from "@/features/city/publicStreetControlMatrix";
 import type { PublicTerritoryFootprint } from "@/features/city/publicTerritoryFootprints";
 import { verifiedPublicRivalTerritory } from "./verifiedPublicRivalTerritory";
+import { verifiedPublicRivalProximityDossier } from "./verifiedPublicRivalProximityDossier";
 
 type DemoCredential = Readonly<{ playerId: string; token: string }>;
 type DemoPlayer = Readonly<{
@@ -647,6 +648,13 @@ export function DevelopmentMatchLab({
   // completed whole-roster server verification. No command authority.
   const territoryRivals = territoryStandings && session?.state
     ? verifiedPublicRivalTerritory(session.state, territoryStandings, actorId) : [];
+  // #181: two distinct, separately scoped server-verification leases must
+  // certify the same seat and revision before a combined PvP route/lot dossier
+  // can be displayed. This is never a movement or combat authorization.
+  const rivalProximityDossier = territoryStandings && tactical && session?.state
+    ? verifiedPublicRivalProximityDossier(
+      session.state, territoryStandings, actorId, tactical.otherPlayers.others)
+    : [];
   const settlement = settlementLease && token
     && settlementLease.token === token
     && settlementLease.data.matchId === session?.matchId
@@ -2184,6 +2192,60 @@ export function DevelopmentMatchLab({
                 <p data-testid="dev-territory-rivals-note"
                   className="text-[11px] leading-5 text-muted-foreground">
                   {t("dev.territoryRivalsNote")}
+                </p>
+              </section>
+            )}
+
+            {territoryStandings && tactical
+              && rivalProximityDossier.length === session.state.players.length - 1 && (
+              <section aria-label={t("dev.rivalDossierTitle")}
+                data-testid="dev-rival-dossier"
+                className="space-y-2 rounded-xl border border-border p-3">
+                <p className="text-xs font-semibold">{t("dev.rivalDossierTitle")}</p>
+                <p className="text-xs text-muted-foreground">{t("dev.rivalDossierSubtitle")}</p>
+                <ol data-testid="dev-rival-dossier-list"
+                  className="grid gap-2 text-xs sm:grid-cols-2">
+                  {rivalProximityDossier.map(row => (
+                    <li key={row.rivalPlayerId}
+                      data-testid={`dev-rival-dossier-${row.rivalPlayerId}`}
+                      data-player-id={row.rivalPlayerId}
+                      data-steps={row.streetSteps}
+                      data-street-id={row.rivalStreetId}
+                      data-street-path={row.streetPath.join(">")}
+                      data-controlled={row.rivalControlledLots}
+                      data-standing={row.rivalStandingHenchmen}
+                      data-advantage={row.myLotAdvantage}
+                      data-shared-streets={row.sharedStreetIds.join(",")}
+                      className="rounded-md bg-muted p-2">
+                      <p className="font-semibold">{row.rivalPlayerId}</p>
+                      <p>{t("dev.rivalDossierDistance", {
+                        street: streetById(row.rivalStreetId)?.name ?? row.rivalStreetId,
+                        count: row.streetSteps,
+                      })}</p>
+                      <p className="break-words text-muted-foreground">
+                        {t("dev.rivalDossierPath")}: {row.streetPath.map(id =>
+                          streetById(id)?.name ?? id).join(" → ")}
+                      </p>
+                      <p>{t("dev.rivalDossierLots", {
+                        lots: row.rivalControlledLots,
+                        standing: row.rivalStandingHenchmen,
+                        delta: row.myLotAdvantage > 0
+                          ? `+${row.myLotAdvantage}` : String(row.myLotAdvantage),
+                      })}</p>
+                      <p className="text-muted-foreground">
+                        {row.sharedStreetIds.length
+                          ? t("dev.rivalDossierShared", {
+                            streets: row.sharedStreetIds.map(id =>
+                              streetById(id)?.name ?? id).join(", "),
+                          })
+                          : t("dev.territoryRivalsNoSharedStreets")}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+                <p data-testid="dev-rival-dossier-note"
+                  className="text-[11px] leading-5 text-muted-foreground">
+                  {t("dev.rivalDossierNote")}
                 </p>
               </section>
             )}

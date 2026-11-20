@@ -162,6 +162,8 @@ type MockOptions = {
     | "nested-lots-player" | "missing-uncontrolled" | "missing-other" | "missing-lots";
   forgedTacticalExtraOnce?: "root" | "uncontrolled" | "otherPlayers" | "opponentLots"
     | "uncontrolledRow" | "otherRow" | "opponentRow"; // #178: extra raw JSON ignored by old guard.
+  serverTerritory?: boolean; // #179: exact .NET-style public territory on a FULL board.
+  forgedTerritoryExtraOnce?: "root" | "street" | "owner" | "footprint";
   delayRotationAcknowledgement?: boolean;
   bobLotOnSecondSlot?: boolean; // #104: a legitimate rival-held non-first space on Einstein Avenue.
 };
@@ -227,6 +229,14 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
   let delayedAliceOtherSeats = false;
   let delayedAliceOpponentLots = false;
   let forgedTacticalExtraIssued = false;
+  let forgedTerritoryExtraIssued = false;
+  // Node imports the JSON only for the few #179 mock cases requesting
+  // the authoritative report: the other 600+ tests remain unaffected.
+  const printedBoard = options.serverTerritory
+    ? JSON.parse(await readFile(new URL("../../shared/board/edonism-board.v1.json", import.meta.url), "utf8")) as {
+      streets: Array<{ id: string; name: string }>;
+      slots: Array<{ id: string; streetId: string }>;
+    } : null;
   const presentSeats = new Set<Seat>();
   const acceptedKeys = new Map<string, {
     kind: string; expectedRevision: number; destinationStreetId?: string;
@@ -624,6 +634,66 @@ async function mockMatchApi(page: Page, options: MockOptions = {}) {
 
     // #88: one atomic, bearer-bound tactical snapshot replaces three client
     // GETs. Retain legacy mocked paths below for explicit API compatibility.
+    // #179: the real .NET Domain report is only meaningful on a complete
+    // 30-card public board. All other existing mock scenarios get a 409,
+    // NOT a 404 (which would incorrectly revoke an authenticated actor).
+    if (path.endsWith("/public-territory")) {
+      if (!options.serverTerritory || !printedBoard)
+        return reply({ status: 409, json: { code: "full_board_required" } });
+      const state = snapshot();
+      const controls = state.controlledActivities;
+      const reportStreets = printedBoard.streets.map(street => {
+        const slots = printedBoard.slots.filter(slot => slot.streetId === street.id);
+        const lots = controls.filter(lot => slots.some(slot => slot.id === lot.slotId));
+        const standing = lots.filter(lot => lot.posture === 0).length;
+        const owners = seats.map(playerId => {
+          const held = lots.filter(lot => lot.ownerPlayerId === playerId);
+          return { playerId, controlledLots: held.length,
+            standing: held.filter(lot => lot.posture === 0).length,
+            fallen: held.filter(lot => lot.posture === 1).length };
+        });
+        const distinctOwnerCount = owners.filter(owner => owner.controlledLots > 0).length;
+        return { streetId: street.id, streetName: street.name,
+          totalSlots: slots.length, freeLots: slots.length - lots.length,
+          controlledLots: lots.length, standing, fallen: lots.length - standing,
+          distinctOwnerCount, isShared: distinctOwnerCount >= 2, owners };
+      });
+      const sorted = seats.map(playerId => {
+        const owned = controls.filter(lot => lot.ownerPlayerId === playerId);
+        return { playerId, controlledLots: owned.length,
+          standing: owned.filter(lot => lot.posture === 0).length,
+          fallen: owned.filter(lot => lot.posture === 1).length,
+          occupiedStreets: reportStreets.filter(street =>
+            street.owners.some(owner => owner.playerId === playerId
+              && owner.controlledLots > 0)).length };
+      }).sort((a, b) => b.controlledLots - a.controlledLots
+        || (a.playerId < b.playerId ? -1 : a.playerId > b.playerId ? 1 : 0));
+      let place = 0;
+      const footprints = sorted.map((row, index) => {
+        if (index === 0 || row.controlledLots !== sorted[index - 1].controlledLots)
+          place = index + 1;
+        return { ...row, place };
+      });
+      const report = {
+        matchId: state.matchId, playerId: seat, round: state.round,
+        verifiedRevision: revision, totalSlots: printedBoard.slots.length,
+        freeLots: reportStreets.reduce((n, street) => n + street.freeLots, 0),
+        controlledLots: controls.length,
+        sharedStreetCount: reportStreets.filter(street => street.isShared).length,
+        streets: reportStreets, footprints,
+      };
+      const fault = options.forgedTerritoryExtraOnce;
+      if (fault && seat === "alice" && !forgedTerritoryExtraIssued) {
+        forgedTerritoryExtraIssued = true;
+        const target = fault === "root" ? report
+          : fault === "street" ? reportStreets[0]
+          : fault === "owner" ? reportStreets[0].owners[0]
+          : footprints[0];
+        (target as unknown as Record<string, unknown>).privateHand = null;
+      }
+      return reply({ status: 200, json: report });
+    }
+
     if (path.endsWith("/tactical-overview")) {
       const state = snapshot();
       const origin = streets[seat];
@@ -7019,6 +7089,38 @@ for (const fault of ["root", "uncontrolledRow", "opponentRow"] as const) {
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       expect(observedHeaders.filter(e => e.path.endsWith("/tactical-overview")))
         .toHaveLength(2);
+    });
+}
+
+
+for (const fault of ["root", "street", "owner", "footprint"] as const) {
+  test(`#179: forged public territory ${fault} is hidden; same match with next authorized actor recovers`,
+    async ({ page }) => {
+      const { observedHeaders } = await mockMatchApi(page, {
+        publicCardCategory: "full-valid", serverTerritory: true,
+        forgedTerritoryExtraOnce: fault,
+      });
+      await page.goto("/");
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("dev-territory-server-unavailable")).toBeVisible();
+      await expect(page.getByTestId("dev-territory-server-standings")).toHaveCount(0);
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
+      await page.getByTestId("dev-seat-bob").click();
+      await expect(page.getByTestId("dev-territory-server-standings").locator("li"))
+        .toHaveCount(2);
+      await expect(page.getByTestId("dev-territory-server-bob"))
+        .toHaveAttribute("data-controlled", "1");
+      await expect(page.getByTestId("dev-territory-server-alice"))
+        .toHaveAttribute("data-controlled", "1");
+      await expect(page.getByTestId("dev-territory-server-unavailable")).toHaveCount(0);
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      const reads = observedHeaders.filter(x => x.path.endsWith("/public-territory"));
+      expect(reads).toHaveLength(2);
+      expect(reads[0].token).toBe(mockSeatToken(0));
+      expect(reads[1].token).toBe(mockSeatToken(1));
+      expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
+        .toHaveLength(0);
     });
 }
 

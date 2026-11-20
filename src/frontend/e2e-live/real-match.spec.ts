@@ -658,6 +658,30 @@ async function assertLivePublicStreetControlMatrix(
   expect(serverFootprints).toHaveLength(created.state.players.length);
   expect(serverFootprints).toEqual(expectedFootprints);
   expect(serverFootprints).toEqual(observedFootprints);
+  // #179: the *Development lab* now also consumes that same actor-bearer
+  // .NET report, validates every nested row against the current public board,
+  // then shows a fresh public-only server-confirmed standings roster.
+  const serverPanel = page.getByTestId("dev-territory-server-standings");
+  await expect(serverPanel.locator("li")).toHaveCount(created.state.players.length);
+  const serverVerifiedRows = await serverPanel.locator("li").evaluateAll(nodes =>
+    nodes.map(node => ({
+      id: node.getAttribute("data-testid"),
+      place: node.getAttribute("data-place"),
+      owned: node.getAttribute("data-controlled"),
+      standing: node.getAttribute("data-standing"),
+      fallen: node.getAttribute("data-fallen"),
+      roads: node.getAttribute("data-occupied-streets"),
+    })));
+  expect(serverVerifiedRows).toEqual(report.footprints.map(player => ({
+    id: `dev-territory-server-${player.playerId}`,
+    place: String(player.place),
+    owned: String(player.controlledLots),
+    standing: String(player.standing),
+    fallen: String(player.fallen),
+    roads: String(player.occupiedStreets),
+  })));
+  await expect(page.getByTestId("dev-territory-server-note")).toBeVisible();
+  await expect(page.getByTestId("dev-territory-server-unavailable")).toHaveCount(0);
   expect(report.footprints.reduce((sum, player) =>
     sum + player.controlledLots, 0)).toBe(report.controlledLots);
   expect(rawFootprints.reduce((sum, item) => sum + item.owned, 0))

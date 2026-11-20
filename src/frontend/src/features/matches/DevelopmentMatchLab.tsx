@@ -42,6 +42,11 @@ import { verifiedPublicHistory, type PublicHistory } from "./verifiedPublicHisto
 import { selectPublicScoutingView } from "./publicScoutingSelectors";
 import { hasAtomicPublicTacticalScope } from "./publicTacticalScope";
 import { validatePublicTacticalRoutes } from "./publicTacticalRouteValidators";
+import {
+  verifiedDevelopmentPublicTerritory,
+} from "./verifiedDevelopmentPublicTerritory";
+import { verifiedPublicStreetControlMatrix } from "@/features/city/publicStreetControlMatrix";
+import type { PublicTerritoryFootprint } from "@/features/city/publicTerritoryFootprints";
 
 type DemoCredential = Readonly<{ playerId: string; token: string }>;
 type DemoPlayer = Readonly<{
@@ -303,6 +308,11 @@ export function DevelopmentMatchLab({
     useState<"all" | "standing" | "fallen">("all");
   const [turnProgressLease, setTurnProgressLease] = useState<{
     token: string; data: FirstRoundTurnProgress;
+  } | null>(null);
+  // #179: server-verified public-only scoreboard, never raw HTTP or a victory score.
+  const [territoryLease, setTerritoryLease] = useState<{
+    token: string; actorId: string; matchId: string; revision: number;
+    standings: readonly PublicTerritoryFootprint[];
   } | null>(null);
   const [settlementLease, setSettlementLease] = useState<{
     token: string; data: PendingSettlementPreview;
@@ -626,6 +636,12 @@ export function DevelopmentMatchLab({
     && turnProgressLease.data.phase === session?.state.phase
     && turnProgressLease.data.activePlayerId === session?.state.activePlayerId
     ? turnProgressLease.data : null;
+  const territoryStandings = territoryLease && token
+    && territoryLease.token === token
+    && territoryLease.actorId === actorId
+    && territoryLease.matchId === session?.matchId
+    && territoryLease.revision === session?.state.revision
+    ? territoryLease.standings : null;
   const settlement = settlementLease && token
     && settlementLease.token === token
     && settlementLease.data.matchId === session?.matchId
@@ -1027,6 +1043,49 @@ export function DevelopmentMatchLab({
     setSelectedOpponentStreetId("");
     setSelectedOpponentPosture("all");
   }, [session?.matchId, actorId, token]);
+
+  // #179: the existing .NET seven-road public report is independent from
+  // browser-derived scouting. No accepted raw report enters React state:
+  // validate *all* streets, owner rows and footprints against the canonical
+  // current public snapshot, then store a fresh public-only copy.
+  useEffect(() => {
+    const matchId = session?.matchId;
+    const state = session?.state;
+    const revision = state?.revision;
+    const seatId = actorId;
+    const actorToken = token;
+    setTerritoryLease(null);
+    if (!matchId || !state || revision === undefined || !seatId || !actorToken
+      || verifiedPublicStreetControlMatrix(state).length !== cityBoard.streets.length)
+      return;
+    const controller = new AbortController();
+    void fetch(`/api/dev/matches/${matchId}/public-territory`, {
+      headers: { "X-Edonism-Dev-Token": actorToken },
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(response => {
+        if (response.status === 404 && !controller.signal.aborted)
+          reconcileRevokedSeat(matchId, seatId, actorToken);
+        return responseJson<unknown>(response);
+      })
+      .then(response => {
+        const scope = currentActorScope.current;
+        if (controller.signal.aborted || scope?.matchId !== matchId
+          || scope.seatId !== seatId || scope.token !== actorToken
+          || currentRevision.current !== revision) return;
+        const standings = verifiedDevelopmentPublicTerritory(response, state, seatId);
+        if (standings)
+          setTerritoryLease({ token: actorToken, actorId: seatId, matchId,
+            revision, standings });
+      })
+      .catch(() => {
+        // 409 partial board, 404 revoked, malformed or failed fetch:
+        // never invent zero controlled lots or revoke on a forged 200.
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.matchId, session?.state.revision, actorId, token]);
 
   // Read only after the FINAL first-round event; never derive net payments
   // or apply next-round order locally. Old HTTP responses cannot resurrect
@@ -2037,6 +2096,49 @@ export function DevelopmentMatchLab({
               </p>
               <p className="text-[11px] text-muted-foreground">{t("dev.turnSignalNote")}</p>
             </div>
+
+            <section aria-label={t("dev.territoryServerTitle")}
+              data-testid="dev-territory-server-panel"
+              className="space-y-2 rounded-xl border border-border p-3">
+              <p className="text-xs font-semibold">{t("dev.territoryServerTitle")}</p>
+              {!territoryStandings ? (
+                <p data-testid="dev-territory-server-unavailable"
+                  className="text-xs text-muted-foreground">
+                  {t("dev.territoryServerUnavailable")}
+                </p>
+              ) : (
+                <ol data-testid="dev-territory-server-standings"
+                  className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                  {territoryStandings.map(row => (
+                    <li key={row.playerId}
+                      data-testid={`dev-territory-server-${row.playerId}`}
+                      data-place={row.place}
+                      data-controlled={row.controlledLots}
+                      data-standing={row.standing}
+                      data-fallen={row.fallen}
+                      data-occupied-streets={row.occupiedStreets}
+                      className="rounded-md bg-muted px-2 py-2">
+                      <span className="block font-semibold">
+                        {t("dev.territoryServerPlace", { place: row.place })} · {row.playerId}
+                      </span>
+                      <span className="block">
+                        {t("dev.territoryServerLots", {
+                          count: row.controlledLots, standing: row.standing,
+                          fallen: row.fallen,
+                        })}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {t("dev.territoryServerStreets", { count: row.occupiedStreets })}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              <p data-testid="dev-territory-server-note"
+                className="text-[11px] leading-5 text-muted-foreground">
+                {t("dev.territoryServerNote")}
+              </p>
+            </section>
 
             <section aria-label={t("dev.turnProgressTitle")}
               data-testid="dev-turn-progress"

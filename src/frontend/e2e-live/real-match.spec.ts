@@ -785,7 +785,795 @@ async function assertLivePublicStreetControlMatrix(
   await expect(page.getByTestId("city-renderer"))
     .toHaveAttribute("data-focus-path", realMapRival.streetPath.join(">"));
   await expect(page.getByTestId("city-tactical-target"))
-    .toContainText(`Observed player: ${realMapRival.otherPlayerId}`);
+    // #183: the live runner may use IT or EN; the route/player remains exact.
+    .toHaveText(new RegExp(`^(?:Observed player|Giocatore osservato): ${realMapRival.otherPlayerId}import { readFile } from "node:fs/promises";
+import { expect, test, type Page } from "@playwright/test";
+
+type Seat = string;
+type PublicPlayer = Readonly<{
+  playerId: Seat;
+  streetId: string;
+  startingSlotId: string;
+  freeMoveUsed: boolean;
+  hearts: number;
+  atoms: number;
+  diplomacyTokens: number;
+  henchmenTotal: number;
+  henchmenAvailable: number;
+}>;
+type PublicMatch = Readonly<{
+  matchId: string;
+  revision: number;
+  round: number;
+  phase: number;
+  activePlayerId: Seat | null;
+  players: readonly PublicPlayer[];
+  boardActivities: readonly { slotId: string; cardId: string; category: string }[];
+  controlledActivities: readonly { slotId: string; ownerPlayerId: Seat; posture: number }[];
+  grossSalaryQuotes: readonly {
+    playerId: Seat; baseAtoms: number; standingActivityAtoms: number; grossAtoms: number
+  }[];
+  assignedCharacters: readonly {
+    playerId: Seat; characterId: string;
+    startingActivityCardId: string; printedInitialHearts: number
+  }[];
+  turnOrder: readonly Seat[];
+  proposedNextRoundOrder: readonly Seat[];
+  events: readonly {
+    revision: number;
+    round: number;
+    kind: string;
+    actorId: string;
+    fromStreetId: string | null;
+    toStreetId: string | null;
+  }[];
+}>;
+type CreatedMatch = Readonly<{
+  matchId: string;
+  state: PublicMatch;
+  credentials: readonly { playerId: Seat; token: string }[];
+}>;
+type Hand = Readonly<{ matchId: string; playerId: Seat; cardIds: readonly string[] }>;
+
+/**
+ * Unlike e2e/development-match.spec.ts, these tests DO NOT mock fetch.
+ * The UI talks to the real ASP.NET Core Development API via the Vite proxy.
+ * Run only after starting .NET on 127.0.0.1:5080.
+ */
+
+// #128: Playwright integration against the REAL .NET Development creator,
+// not a mocked route. Invalid actor names must not allocate a match slot or
+// leak any bearer credentials. No valid fixture is created by this test.
+test("#128: real .NET creator rejects reserved system seat without credentials",
+  async ({ request }) => {
+  const endpoint = "http://127.0.0.1:5080/api/dev/matches/";
+  for (const seats of [
+    [{ playerId: "system", startingSlotId: "N-01" },
+      { playerId: "bob", startingSlotId: "S-01" }],
+    [{ playerId: "alice", startingSlotId: "N-01" },
+      { playerId: "system", startingSlotId: "S-01" }],
+  ]) {
+    const res = await request.post(endpoint, { data: { players: seats } });
+    expect(res.status()).toBe(400);
+    expect(res.headers()["cache-control"]).toContain("no-store");
+    const payload = await res.json() as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("credentials");
+    expect(payload).not.toHaveProperty("state");
+  }
+});
+
+// #164: the real Domain supplies ONLY the index of a typed special card
+// in the currently authenticated actor's OWN hand. Never infer the hidden
+// marker from an opaque card ID or another seat's private hand.
+async function assertRealOwnElectionDayInspection(
+  page: Page, created: CreatedMatch, actorId: string, expectedRevision: number,
+): Promise<number | null> {
+  const root = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`;
+  const headers = auth(tokenFor(created, actorId));
+  const [reply, handReply] = await Promise.all([
+    page.request.get(`${root}/hand/election-day`, { headers }),
+    page.request.get(`${root}/hand`, { headers }),
+  ]);
+  expect(reply.status()).toBe(200);
+  expect(handReply.status()).toBe(200);
+  expect(reply.headers()["cache-control"]).toContain("no-store");
+  const inspection = await reply.json() as {
+    matchId: string; playerId: string; verifiedRevision: number;
+    classificationAvailable: boolean; ownHandIndex: number | null;
+  };
+  const hand = await handReply.json() as Hand;
+  expect(inspection.matchId).toBe(created.matchId);
+  expect(inspection.playerId).toBe(actorId);
+  expect(inspection.verifiedRevision).toBe(expectedRevision);
+  expect(inspection.classificationAvailable).toBe(true);
+  expect(hand.playerId).toBe(actorId);
+  expect(hand.cardIds).toHaveLength(4);
+  const wire = await reply.text();
+  expect(wire).not.toMatch(/electionDayCardId|cardIds|remainingDrawPile|token/i);
+  for (const credential of created.credentials)
+    expect(wire).not.toContain(credential.token);
+
+  await expect(page.getByTestId("dev-hand").locator("li")).toHaveCount(4);
+  await expect(page.getByTestId("dev-own-election-day-status"))
+    .toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId("dev-own-election-day-warning"))
+    .toBeVisible();
+  if (inspection.ownHandIndex === null) {
+    await expect(page.getByTestId("dev-own-election-day-card")).toHaveCount(0);
+  } else {
+    expect(inspection.ownHandIndex).toBeGreaterThanOrEqual(0);
+    expect(inspection.ownHandIndex).toBeLessThan(4);
+    await expect(page.getByTestId("dev-own-election-day-card")).toHaveCount(1);
+    await expect(page.getByTestId(
+      `dev-own-hand-card-${inspection.ownHandIndex}`,
+    ).getByTestId("dev-own-election-day-card")).toBeVisible();
+  }
+  return inspection.ownHandIndex;
+}
+
+async function startRealMatch(page: Page): Promise<CreatedMatch> {
+  await page.goto("/");
+  await expect(page.getByTestId("dev-match-lab")).toBeVisible();
+  const created = page.waitForResponse(
+    (res) => new URL(res.url()).pathname === "/api/dev/matches/from-full-deck"
+      && res.request().method() === "POST",
+  );
+  await page.getByTestId("dev-create").click();
+  const response = await created;
+  expect(response.status(), "Real Development API should create a full-deck fixture").toBe(201);
+  const match = (await response.json()) as CreatedMatch;
+  expect(match.credentials).toHaveLength(2);
+  expect(match.state.players).toHaveLength(2);
+  await expect(page.getByTestId("dev-session")).toBeVisible();
+  await expect(page.getByTestId("dev-audit-list").locator("li")).toHaveCount(1);
+  await expect(page.getByTestId("dev-audit-event-0")).toHaveAttribute(
+    "data-event-kind", "match-created");
+  await expect(page.getByTestId("dev-next-order").locator("li"))
+    .toHaveText(match.state.proposedNextRoundOrder.map((id, i) => `${i + 1}.${id}`));
+  // These labels are derived from the same public snapshot as the 3D pawns.
+  await expect(page.getByTestId("match-player-legend")).toBeVisible();
+  await expect(page.getByTestId("match-activity-roster")).toBeVisible();
+  expect(match.state.boardActivities).toHaveLength(30);
+  expect(match.state.controlledActivities).toHaveLength(2);
+  // #145: the genuine two-seat printed character origin is one board
+  // card in exactly the same immutable starting lot as its player.
+  for (const character of match.state.assignedCharacters) {
+    const seat = match.state.players.find(p => p.playerId === character.playerId);
+    expect(seat).toBeDefined();
+    const byCard = match.state.boardActivities.filter(card =>
+      card.cardId === character.startingActivityCardId);
+    const bySlot = match.state.boardActivities.filter(card =>
+      card.slotId === seat!.startingSlotId);
+    expect(byCard).toHaveLength(1);
+    expect(bySlot).toHaveLength(1);
+    expect(byCard[0]).toEqual(bySlot[0]);
+  }
+  // #140: actual server full-deck contains many UNCONTROLLED cards;
+  // their printed lots are unique and do not invalidate financial views.
+  expect(new Set(match.state.boardActivities.map(a => a.slotId)).size).toBe(30);
+  expect(match.state.boardActivities.filter(a =>
+    !match.state.controlledActivities.some(l => l.slotId === a.slotId))).toHaveLength(28);
+  await expect(page.getByTestId("match-board-card-count")).toContainText("30");
+  for (const control of match.state.controlledActivities) {
+    const lot = page.getByTestId(`controlled-lot-${control.slotId}`);
+    const card = match.state.boardActivities.find((a) => a.slotId === control.slotId);
+    expect(card).toBeDefined();
+    await expect(lot).toHaveAttribute("data-owner-id", control.ownerPlayerId);
+    await expect(lot).toHaveAttribute("data-card-id", card!.cardId);
+    await expect(lot).toHaveAttribute("data-posture", control.posture === 0 ? "standing" : "fallen");
+  }
+  // #144: the actual Vite projector agrees with a real 2-seat .NET roster.
+  const projectedGross = await page.evaluate(async state => {
+    const { publicGrossSalaryQuotes } =
+      await import("/src/features/city/activityMarkers.ts");
+    return publicGrossSalaryQuotes(state);
+  }, match.state);
+  expect(projectedGross).toEqual(match.state.grossSalaryQuotes);
+  for (const quote of match.state.grossSalaryQuotes) {
+    await expect(page.getByTestId(`gross-salary-${quote.playerId}`))
+      .toHaveAttribute("data-gross-atoms", String(quote.grossAtoms));
+    // #138: read-only city summary must equal the actual .NET public quote
+    // and its authoritative controlled-lot posture records for this seat.
+    const owned = match.state.controlledActivities.filter(
+      lot => lot.ownerPlayerId === quote.playerId);
+    const standing = owned.filter(lot => lot.posture === 0).length;
+    const summary = page.getByTestId(`match-player-economy-${quote.playerId}`);
+    await expect(summary).toHaveAttribute("data-gross-atoms", String(quote.grossAtoms));
+    await expect(summary).toHaveAttribute("data-controlled-lots", String(owned.length));
+    await expect(summary).toHaveAttribute("data-standing", String(standing));
+    await expect(summary).toHaveAttribute("data-fallen", String(owned.length - standing));
+    await expect(summary).toContainText(`preventivo lordo: ${quote.grossAtoms} atomi`);
+  }
+  for (const player of match.state.players) {
+    // #139: resource counts are already in the authoritative public
+    // snapshot. Gross wage is an unpaid quote, NOT current atoms.
+    const owned = match.state.controlledActivities.filter(
+      lot => lot.ownerPlayerId === player.playerId);
+    expect(player.atoms).toBe(4);
+    expect(player.diplomacyTokens).toBe(2);
+    expect(player.henchmenTotal).toBe(16);
+    expect(player.henchmenAvailable).toBe(16 - owned.length);
+    const resources = page.getByTestId(`match-player-resources-${player.playerId}`);
+    await expect(resources).toHaveAttribute("data-atoms", String(player.atoms));
+    await expect(resources).toHaveAttribute("data-diplomacy-tokens", String(player.diplomacyTokens));
+    await expect(resources).toHaveAttribute("data-henchmen-total", String(player.henchmenTotal));
+    await expect(resources).toHaveAttribute("data-henchmen-available", String(player.henchmenAvailable));
+    await expect(resources).toContainText(`Atomi attuali: ${player.atoms}`);
+    await expect(page.getByTestId(`match-player-${player.playerId}`))
+      .toHaveAttribute("data-street-id", player.streetId);
+    // #136: same public server field, no derived move permission.
+    await expect(page.getByTestId(`match-free-move-${player.playerId}`))
+      .toHaveAttribute("data-free-move-used", String(player.freeMoveUsed));
+    // #141: the SAME real public .NET response must show each assigned
+    // character's printed hearts, never a guessed rival combat HP value.
+    const assigned = match.state.assignedCharacters.find(
+      character => character.playerId === player.playerId);
+    expect(assigned).toBeDefined();
+    expect(assigned?.printedInitialHearts).toBe(player.hearts);
+    // #146: inspect the same public assigned card identities in the actual
+    // React UI. Private hand/action cards and bearer tokens never enter it.
+    await expect(page.getByTestId(`match-character-card-${player.playerId}`))
+      .toHaveAttribute("data-character-card-id", assigned!.characterId);
+    await expect(page.getByTestId(`match-character-starting-card-${player.playerId}`))
+      .toHaveAttribute("data-starting-activity-card-id", assigned!.startingActivityCardId);
+    // #137: real printed, public character hearts (not a client estimate).
+    expect(player.hearts).toBeGreaterThanOrEqual(1);
+    expect(player.hearts).toBeLessThanOrEqual(5);
+    await expect(page.getByTestId(`match-character-hearts-${player.playerId}`))
+      .toHaveAttribute("data-character-hearts", String(player.hearts));
+    await expect(page.getByTestId(`match-character-hearts-${player.playerId}`))
+      .toHaveText(`Cuori personaggio: ${player.hearts}`);
+  }
+  return match;
+}
+
+function tokenFor(match: CreatedMatch, seat: Seat): string {
+  const token = match.credentials.find((item) => item.playerId === seat)?.token;
+  expect(token).toMatch(/^[A-F0-9]{64}$/);
+  return token!;
+}
+
+function auth(token: string) {
+  return { "X-Edonism-Dev-Token": token };
+}
+
+
+// #149: all UI free cards must equal the REAL .NET audited public route set.
+// Routes are sorted by distance; the city atlas is sorted by printed slot.
+// This checks the same cards rather than assuming an arbitrary UI order.
+async function assertLivePublicUncontrolledAtlas(
+  page: Page,
+  routes: readonly {
+    slotId: string; cardId: string; category: string; streetId: string;
+  }[],
+  inspectFirst = false,
+) {
+  const printedBoard = JSON.parse(await readFile(
+    new URL("../../shared/board/edonism-board.v1.json", import.meta.url), "utf8",
+  )) as { slots: { id: string }[]; streets: { id: string; name: string }[] };
+  const slots = printedBoard.slots.map(slot => slot.id);
+  const expected = [...routes].sort((a, b) =>
+    slots.indexOf(a.slotId) - slots.indexOf(b.slotId))
+    .map(({ slotId, cardId, category, streetId }) => ({
+      slotId, cardId, category, streetId,
+    }));
+  const atlas = page.getByTestId("match-public-free-activities");
+  await expect(atlas).toBeVisible();
+  await expect(atlas.locator("summary"))
+    .toContainText(String(routes.length));
+  if (await atlas.getAttribute("open") === null)
+    await atlas.locator("summary").click();
+  await expect(atlas.getByTestId("match-public-free-activities-list")
+    .locator("li")).toHaveCount(routes.length);
+  const observed = await atlas.getByTestId("match-public-free-activities-list")
+    .locator("li").evaluateAll(items => items.map(item => ({
+      slotId: item.getAttribute("data-testid")?.replace("public-free-activity-", ""),
+      cardId: item.getAttribute("data-card-id"),
+      category: item.getAttribute("data-category"),
+      streetId: item.getAttribute("data-street-id"),
+    })));
+  expect(observed).toEqual(expected);
+  // #150: client filters operate only AFTER the same public data verified
+  // against the .NET endpoint. Count/identity/slot order must remain exact.
+  const streetFilter = page.getByTestId("public-free-filter-street");
+  const categoryFilter = page.getByTestId("public-free-filter-category");
+  const count = page.getByTestId("public-free-filter-count");
+  const listed = page.getByTestId("match-public-free-activities-list").locator("li");
+  await expect(count).toHaveAttribute("data-total-count", String(expected.length));
+  await streetFilter.selectOption(expected[0].streetId);
+  const streetCards = expected.filter(x => x.streetId === expected[0].streetId);
+  await expect(listed).toHaveCount(streetCards.length);
+  await expect(count).toHaveAttribute("data-visible-count", String(streetCards.length));
+  await categoryFilter.selectOption(expected[0].category);
+  const paired = streetCards.filter(x => x.category === expected[0].category);
+  await expect(listed).toHaveCount(paired.length);
+  expect(await listed.evaluateAll(rows => rows.map(row =>
+    row.getAttribute("data-testid")?.replace("public-free-activity-", ""))))
+    .toEqual(paired.map(x => x.slotId));
+  const allCategories = [
+    "public-financing", "private-financing", "black-market", "corruption",
+    "culture", "sport", "transport", "bishopric",
+  ];
+  const absent = allCategories.find(category =>
+    streetCards.every(card => card.category !== category));
+  if (absent) {
+    await categoryFilter.selectOption(absent);
+    await expect(listed).toHaveCount(0);
+    await expect(page.getByTestId("public-free-filter-empty")).toBeVisible();
+    await expect(count).toHaveAttribute("data-total-count", String(expected.length));
+  }
+  await categoryFilter.selectOption("");
+  await streetFilter.selectOption("");
+  await expect(listed).toHaveCount(expected.length);
+  await expect(page.getByTestId("public-free-filter-empty")).toHaveCount(0);
+
+  // #151: compare every street count to the genuine authenticated .NET
+  // route set, including streets with ZERO public uncontrolled cards.
+  const streetButtons = page.getByTestId("public-free-street-distribution")
+    .locator('button[data-testid^="public-free-street-count-"]');
+  await expect(streetButtons).toHaveCount(printedBoard.streets.length);
+  let countSum = 0;
+  for (let i = 0; i < printedBoard.streets.length; i++) {
+    const street = printedBoard.streets[i];
+    const amount = expected.filter(route => route.streetId === street.id).length;
+    countSum += amount;
+    await expect(streetButtons.nth(i)).toHaveAttribute(
+      "data-testid", `public-free-street-count-${street.id}`);
+    await expect(streetButtons.nth(i)).toHaveAttribute(
+      "data-free-count", String(amount));
+  }
+  expect(countSum).toBe(expected.length);
+  await categoryFilter.selectOption(expected[0].category);
+  await page.getByTestId(
+    `public-free-street-count-${expected[0].streetId}`).click();
+  await expect(streetFilter).toHaveValue(expected[0].streetId);
+  await expect(categoryFilter).toHaveValue("");
+  await expect(listed).toHaveCount(expected.filter(route =>
+    route.streetId === expected[0].streetId).length);
+  await streetFilter.selectOption("");
+  await expect(listed).toHaveCount(expected.length);
+  await expect(page.getByTestId("public-free-filter-count"))
+    .toHaveAttribute("data-total-count", String(expected.length));
+  if (inspectFirst) {
+    const before = await page.getByTestId("dev-revision").textContent();
+    await page.getByTestId(
+      `match-inspect-free-activity-${expected[0].slotId}`).click();
+    await expect(page.getByTestId("selected-slot"))
+      .toHaveText(expected[0].slotId);
+    await expect(page.getByTestId("dev-revision")).toHaveText(before ?? "0");
+  }
+}
+
+
+// #152: end-to-end parity against the ACTUAL ASP.NET Core bearer-scoped
+// public free/opponent-lot routes, with zero-count owners and roads intact.
+async function assertLivePublicStreetControlMatrix(
+  page: Page,
+  created: CreatedMatch,
+  actorId: string,
+) {
+  const token = tokenFor(created, actorId);
+  const endpoint = `http://127.0.0.1:5080/api/dev/matches/${created.matchId}`;
+  const [freeReply, opponentReply] = await Promise.all([
+    page.request.get(endpoint + "/uncontrolled-routes", { headers: auth(token) }),
+    page.request.get(endpoint + "/opponent-controlled-routes", { headers: auth(token) }),
+  ]);
+  expect(freeReply.status()).toBe(200);
+  expect(opponentReply.status()).toBe(200);
+  expect(freeReply.headers()["cache-control"]).toContain("no-store");
+  expect(opponentReply.headers()["cache-control"]).toContain("no-store");
+  const freePlan = await freeReply.json() as {
+    routes: { slotId: string; streetId: string }[];
+  };
+  const opponents = await opponentReply.json() as {
+    routes: { slotId: string; streetId: string; ownerPlayerId: string; posture: number }[];
+  };
+  expect(freePlan.routes).toHaveLength(
+    created.state.boardActivities.length - created.state.controlledActivities.length);
+  expect(opponents.routes).toHaveLength(
+    created.state.controlledActivities.filter(x => x.ownerPlayerId !== actorId).length);
+  expect(opponents.routes.every(route => route.ownerPlayerId !== actorId)).toBe(true);
+
+  // #161: a correct event sequence must NOT certify forged public
+  // first-round resources or activity setup. Check the real Domain audit
+  // and its public-only frames against the original .NET-created match
+  // for both 2 and 8 seats. No POST, no client-authorized state.
+  const [auditReply, historyReply] = await Promise.all([
+    page.request.get(endpoint + "/audit", { headers: auth(token) }),
+    page.request.get(endpoint + "/history", { headers: auth(token) }),
+  ]);
+  expect(auditReply.status()).toBe(200);
+  expect(historyReply.status()).toBe(200);
+  expect(auditReply.headers()["cache-control"]).toContain("no-store");
+  expect(historyReply.headers()["cache-control"]).toContain("no-store");
+  const audit = await auditReply.json() as {
+    isValid: boolean; code: string; verifiedRevision: number;
+    activePlayerId: string | null;
+    frames: { revision: number; kind: string; actorId: string;
+      players: { playerId: string; streetId: string; freeMoveUsed: boolean }[] }[];
+    players: { playerId: string; streetId: string; freeMoveUsed: boolean }[];
+  };
+  const history = await historyReply.json() as {
+    matchId: string; verifiedRevision: number; frames: typeof audit.frames;
+  };
+  expect(audit.isValid).toBe(true);
+  expect(audit.code).toBe("ok");
+  expect(audit.verifiedRevision).toBe(created.state.revision);
+  expect(history.verifiedRevision).toBe(created.state.revision);
+  expect(history.matchId).toBe(created.matchId);
+  expect(audit.frames).toEqual(history.frames);
+  expect(audit.frames).toHaveLength(created.state.events.length);
+  expect(audit.frames[0].revision).toBe(0);
+  expect(audit.frames[0].kind).toBe("match-created");
+  expect(audit.frames[0].actorId).toBe("system");
+  expect(audit.players).toEqual(created.state.players.map(player => ({
+    playerId: player.playerId,
+    streetId: player.streetId,
+    freeMoveUsed: player.freeMoveUsed,
+  })));
+  expect(created.state.players.every(p =>
+    p.atoms === 4 && p.diplomacyTokens === 2
+    && p.henchmenTotal === 16 && p.henchmenAvailable === 15)).toBe(true);
+  expect(created.state.controlledActivities.every(lot => lot.posture === 0)).toBe(true);
+  expect(created.state.grossSalaryQuotes.every(quote =>
+    quote.baseAtoms === 2 && quote.standingActivityAtoms === 1
+    && quote.grossAtoms === 3)).toBe(true);
+  const publicAuditWire = JSON.stringify(audit) + JSON.stringify(history);
+  expect(publicAuditWire).not.toMatch(/cardIds|drawPile|actionCard/i);
+  for (const credential of created.credentials)
+    expect(publicAuditWire).not.toContain(credential.token);
+
+  // #160: .NET's public salary quote is valid only for an actual 2–8
+  // seat printed roster. Check every seat's own standing controlled lots,
+  // printed per-seat resources and that a quote is NOT a wallet credit.
+  expect(created.state.players.length).toBeGreaterThanOrEqual(2);
+  expect(created.state.players.length).toBeLessThanOrEqual(8);
+  expect(created.state.grossSalaryQuotes).toHaveLength(created.state.players.length);
+  for (const player of created.state.players) {
+    const own = created.state.controlledActivities.filter(lot =>
+      lot.ownerPlayerId === player.playerId);
+    const standing = own.filter(lot => lot.posture === 0).length;
+    const quote = created.state.grossSalaryQuotes.find(entry =>
+      entry.playerId === player.playerId);
+    expect(quote).toBeDefined();
+    expect(quote!.baseAtoms).toBe(2);
+    expect(quote!.standingActivityAtoms).toBe(standing);
+    expect(quote!.grossAtoms).toBe(2 + standing);
+    expect(player.atoms).toBe(4);
+    expect(player.diplomacyTokens).toBe(2);
+    expect(player.henchmenTotal).toBe(16);
+    expect(player.henchmenAvailable).toBe(16 - own.length);
+  }
+
+  const board = JSON.parse(await readFile(
+    new URL("../../shared/board/edonism-board.v1.json", import.meta.url), "utf8",
+  )) as {
+    streets: { id: string; name: string }[];
+    slots: { id: string; streetId: string }[];
+  };
+  const bySlot = new Map(board.slots.map(slot => [slot.id, slot.streetId]));
+  const matrix = page.getByTestId("public-street-control-details");
+  await expect(matrix).toBeVisible();
+  if (await matrix.getAttribute("open") === null)
+    await matrix.locator("summary").click();
+  const rows = page.getByTestId("public-street-control-list").locator("li");
+  await expect(rows).toHaveCount(board.streets.length);
+  // #154: Do NOT run ~250 sequential Playwright expect/poll calls across
+  // seven roads times eight public seats. Read one consistent DOM frame,
+  // then compare every owner and posture against REAL bearer-protected .NET
+  // routes and the server-public snapshot. The previous polling loop made
+  // the 8-seat test exceed its timeout before finishing the fourth road.
+  const observed = await rows.evaluateAll(elements => elements.map(row => ({
+    id: row.getAttribute("data-testid"),
+    totalSlots: row.getAttribute("data-total-slots"),
+    freeLots: row.getAttribute("data-free-count"),
+    controlledLots: row.getAttribute("data-controlled-count"),
+    standing: row.getAttribute("data-standing-count"),
+    fallen: row.getAttribute("data-fallen-count"),
+    // #167: same batched DOM frame, real .NET source, no extra polling.
+    plurality: Array.from(row.querySelectorAll('[data-testid^="public-street-plurality-"]'))
+      .map(entry => ({
+        id: entry.getAttribute("data-testid"),
+        maximum: entry.getAttribute("data-max-controlled"),
+        leaders: entry.getAttribute("data-leader-count"),
+      })),
+    owners: Array.from(row.querySelectorAll('[data-testid*="-owner-"]')).map(owner => ({
+      id: owner.getAttribute("data-testid"),
+      controlled: owner.getAttribute("data-owned-count"),
+      standing: owner.getAttribute("data-standing-count"),
+      fallen: owner.getAttribute("data-fallen-count"),
+    })),
+  })));
+  let total = 0;
+  let available = 0;
+  let controlledTotal = 0;
+  const expected = board.streets.map(street => {
+    const slots = board.slots.filter(slot => slot.streetId === street.id);
+    const control = created.state.controlledActivities.filter(x =>
+      bySlot.get(x.slotId) === street.id);
+    const free = freePlan.routes.filter(route => route.streetId === street.id);
+    const rival = opponents.routes.filter(route => route.streetId === street.id);
+    total += slots.length;
+    available += free.length;
+    controlledTotal += control.length;
+    expect(rival).toHaveLength(control.filter(x =>
+      x.ownerPlayerId !== actorId).length);
+    const perPlayer = created.state.players.map(player =>
+      control.filter(lot => lot.ownerPlayerId === player.playerId).length);
+    const maximum = Math.max(0, ...perPlayer);
+    return {
+      id: `public-street-control-${street.id}`,
+      plurality: [{
+        id: `public-street-plurality-${street.id}`,
+        maximum: String(maximum),
+        leaders: String(maximum === 0 ? 0
+          : perPlayer.filter(value => value === maximum).length),
+      }],
+      totalSlots: String(slots.length),
+      freeLots: String(free.length),
+      controlledLots: String(control.length),
+      standing: String(control.filter(x => x.posture === 0).length),
+      fallen: String(control.filter(x => x.posture === 1).length),
+      owners: created.state.players.map(actor => {
+        const one = control.filter(x => x.ownerPlayerId === actor.playerId);
+        return {
+          id: `public-street-control-${street.id}-owner-${actor.playerId}`,
+          controlled: String(one.length),
+          standing: String(one.filter(x => x.posture === 0).length),
+          fallen: String(one.filter(x => x.posture === 1).length),
+        };
+      }),
+    };
+  });
+  // Full order, all zero-valued owners, 30 slots and posture checks remain.
+  expect(observed).toEqual(expected);
+  expect(total).toBe(30);
+  expect(available).toBe(freePlan.routes.length);
+  expect(controlledTotal).toBe(created.state.controlledActivities.length);
+
+  // #158: the server computes an authenticated, audited seven-road territory
+  // projection. Match every road and ALL public owners (including zero) to
+  // the independently verified UI frame + real free/owned .NET routes.
+  const reportReply = await page.request.get(endpoint + "/public-territory", {
+    headers: auth(token),
+  });
+  expect(reportReply.status()).toBe(200);
+  expect(reportReply.headers()["cache-control"]).toContain("no-store");
+  const report = await reportReply.json() as {
+    matchId: string; playerId: string; round: number; verifiedRevision: number;
+    totalSlots: number; freeLots: number; controlledLots: number;
+    sharedStreetCount: number;
+    footprints: {
+      playerId: string; place: number; controlledLots: number;
+      standing: number; fallen: number; occupiedStreets: number;
+    }[];
+    streets: {
+      streetId: string; streetName: string; totalSlots: number; freeLots: number;
+      controlledLots: number; standing: number; fallen: number;
+      distinctOwnerCount: number; isShared: boolean;
+      owners: { playerId: string; controlledLots: number; standing: number; fallen: number }[];
+    }[];
+  };
+  expect(report.matchId).toBe(created.matchId);
+  expect(report.playerId).toBe(actorId);
+  expect(report.round).toBe(1);
+  expect(report.verifiedRevision).toBe(created.state.revision);
+  expect(report.totalSlots).toBe(30);
+  expect(report.freeLots).toBe(freePlan.routes.length);
+  expect(report.controlledLots).toBe(created.state.controlledActivities.length);
+  const expectedServerReport = expected.map(street => {
+    const streetId = street.id.replace("public-street-control-", "");
+    const owners = street.owners.map(owner => ({
+      playerId: owner.id.slice(`public-street-control-${streetId}-owner-`.length),
+      controlledLots: Number(owner.controlled),
+      standing: Number(owner.standing),
+      fallen: Number(owner.fallen),
+    }));
+    const distinctOwnerCount = owners.filter(owner => owner.controlledLots > 0).length;
+    return {
+      streetId,
+      streetName: board.streets.find(road => road.id === streetId)!.name,
+      totalSlots: Number(street.totalSlots),
+      freeLots: Number(street.freeLots),
+      controlledLots: Number(street.controlledLots),
+      standing: Number(street.standing),
+      fallen: Number(street.fallen),
+      distinctOwnerCount,
+      isShared: distinctOwnerCount >= 2,
+      owners,
+    };
+  });
+  expect(report.streets).toEqual(expectedServerReport);
+  expect(report.sharedStreetCount).toBe(expectedServerReport.filter(x => x.isShared).length);
+  expect(JSON.stringify(report)).not.toMatch(/cardIds|cardId|accessToken|privateHand|atoms/i);
+  for (const credential of created.credentials)
+    expect(JSON.stringify(report)).not.toContain(credential.token);
+
+  // #153: one batched browser frame verifies the public per-owner footprint
+  // and shared ordinal tie positions against the REAL .NET public snapshot;
+  // no guessed power, victory points, cards or client-authorized movement.
+  const standingsPanel = page.getByTestId("public-territory-standings");
+  await expect(standingsPanel).toBeVisible();
+  if (await standingsPanel.getAttribute("open") === null)
+    await standingsPanel.locator("summary").click();
+  const standingsRows = page.getByTestId("public-territory-standings-list")
+    .locator("li");
+  await expect(standingsRows).toHaveCount(created.state.players.length);
+  const observedFootprints = await standingsRows.evaluateAll(nodes => nodes.map(node => ({
+    id: node.getAttribute("data-testid"),
+    place: node.getAttribute("data-place"),
+    owned: node.getAttribute("data-controlled-lots"),
+    standing: node.getAttribute("data-standing"),
+    fallen: node.getAttribute("data-fallen"),
+    roads: node.getAttribute("data-occupied-streets"),
+  })));
+  const rawFootprints = created.state.players.map(player => {
+    const own = created.state.controlledActivities.filter(
+      x => x.ownerPlayerId === player.playerId);
+    return {
+      playerId: player.playerId,
+      owned: own.length,
+      standing: own.filter(x => x.posture === 0).length,
+      fallen: own.filter(x => x.posture === 1).length,
+      roads: new Set(own.map(x => bySlot.get(x.slotId))).size,
+    };
+  }).sort((a, b) => b.owned - a.owned
+    || (a.playerId < b.playerId ? -1 : a.playerId > b.playerId ? 1 : 0));
+  let place = 0;
+  const expectedFootprints = rawFootprints.map((player, i) => {
+    if (i === 0 || player.owned !== rawFootprints[i - 1].owned)
+      place = i + 1;
+    return {
+      id: `public-territory-footprint-${player.playerId}`,
+      place: String(place),
+      owned: String(player.owned),
+      standing: String(player.standing),
+      fallen: String(player.fallen),
+      roads: String(player.roads),
+    };
+  });
+  expect(observedFootprints).toEqual(expectedFootprints);
+  // #159: the exact same audited .NET report must reproduce every
+  // real React footprint, including all public seats and competition ties.
+  const serverFootprints = report.footprints.map(player => ({
+    id: `public-territory-footprint-${player.playerId}`,
+    place: String(player.place),
+    owned: String(player.controlledLots),
+    standing: String(player.standing),
+    fallen: String(player.fallen),
+    roads: String(player.occupiedStreets),
+  }));
+  expect(serverFootprints).toHaveLength(created.state.players.length);
+  expect(serverFootprints).toEqual(expectedFootprints);
+  expect(serverFootprints).toEqual(observedFootprints);
+  // #179: the *Development lab* now also consumes that same actor-bearer
+  // .NET report, validates every nested row against the current public board,
+  // then shows a fresh public-only server-confirmed standings roster.
+  const serverPanel = page.getByTestId("dev-territory-server-standings");
+  await expect(serverPanel.locator("li")).toHaveCount(created.state.players.length);
+  const serverVerifiedRows = await serverPanel.locator("li").evaluateAll(nodes =>
+    nodes.map(node => ({
+      id: node.getAttribute("data-testid"),
+      place: node.getAttribute("data-place"),
+      owned: node.getAttribute("data-controlled"),
+      standing: node.getAttribute("data-standing"),
+      fallen: node.getAttribute("data-fallen"),
+      roads: node.getAttribute("data-occupied-streets"),
+    })));
+  expect(serverVerifiedRows).toEqual(report.footprints.map(player => ({
+    id: `dev-territory-server-${player.playerId}`,
+    place: String(player.place),
+    owned: String(player.controlledLots),
+    standing: String(player.standing),
+    fallen: String(player.fallen),
+    roads: String(player.occupiedStreets),
+  })));
+  await expect(page.getByTestId("dev-territory-server-note")).toBeVisible();
+  await expect(page.getByTestId("dev-territory-server-unavailable")).toHaveCount(0);
+  // #180: the same real, actor-scoped #179 .NET 200 proves every
+  // head-to-head row. Neither shared printed roads nor controlled-lot
+  // differences imply combat or a victory threshold.
+  const myFootprint = report.footprints.find(row => row.playerId === actorId);
+  expect(myFootprint).toBeDefined();
+  const expectedRivals = report.footprints
+    .filter(row => row.playerId !== actorId)
+    .map(row => ({
+      id: `dev-territory-rival-${row.playerId}`,
+      rivalId: row.playerId,
+      myControlled: String(myFootprint!.controlledLots),
+      rivalControlled: String(row.controlledLots),
+      advantage: String(myFootprint!.controlledLots - row.controlledLots),
+      shared: report.streets.filter(street =>
+        street.owners.some(owner => owner.playerId === actorId && owner.controlledLots > 0)
+        && street.owners.some(owner => owner.playerId === row.playerId
+          && owner.controlledLots > 0))
+        .map(street => street.streetId).join(","),
+    }));
+  const rivalRows = page.getByTestId("dev-territory-rivals-list").locator("li");
+  await expect(rivalRows).toHaveCount(created.state.players.length - 1);
+  const actualRivals = await rivalRows.evaluateAll(nodes => nodes.map(node => ({
+    id: node.getAttribute("data-testid"),
+    rivalId: node.getAttribute("data-rival"),
+    myControlled: node.getAttribute("data-my-controlled"),
+    rivalControlled: node.getAttribute("data-rival-controlled"),
+    advantage: node.getAttribute("data-my-advantage"),
+    shared: node.getAttribute("data-shared-street-ids"),
+  })));
+  expect(actualRivals).toEqual(expectedRivals);
+  await expect(page.getByTestId("dev-territory-rivals-note")).toBeVisible();
+  // #181: the new compact dossier joins TWO genuinely authenticated,
+  // independently audited .NET projections at the exact same revision.
+  // Graph steps are street EDGES, never PvP attack rights or turn estimates.
+  const distanceReply = await page.request.get(endpoint + "/other-player-routes", {
+    headers: auth(token),
+  });
+  expect(distanceReply.status()).toBe(200);
+  expect(distanceReply.headers()["cache-control"]).toContain("no-store");
+  const distances = await distanceReply.json() as {
+    matchId: string; playerId: string; verifiedRevision: number; fromStreetId: string;
+    others: { otherPlayerId: string; streetId: string; streetSteps: number;
+      streetPath: string[]; controlledActivities: number; standingHenchmen: number }[];
+  };
+  expect(distances.matchId).toBe(created.matchId);
+  expect(distances.playerId).toBe(actorId);
+  expect(distances.verifiedRevision).toBe(created.state.revision);
+  expect(distances.fromStreetId).toBe(
+    created.state.players.find(p => p.playerId === actorId)?.streetId);
+  expect(distances.others).toHaveLength(created.state.players.length - 1);
+  const expectedDossier = distances.others.map(other => {
+    const footprint = report.footprints.find(f => f.playerId === other.otherPlayerId);
+    expect(footprint).toBeDefined();
+    expect(other.controlledActivities).toBe(footprint!.controlledLots);
+    expect(other.standingHenchmen).toBe(footprint!.standing);
+    return {
+      id: `dev-rival-dossier-${other.otherPlayerId}`,
+      playerId: other.otherPlayerId,
+      steps: String(other.streetSteps),
+      streetId: other.streetId,
+      path: other.streetPath.join(">"),
+      controlled: String(other.controlledActivities),
+      standing: String(other.standingHenchmen),
+      advantage: String(myFootprint!.controlledLots - other.controlledActivities),
+      shared: report.streets.filter(street =>
+        street.owners.some(owner => owner.playerId === actorId && owner.controlledLots > 0)
+        && street.owners.some(owner => owner.playerId === other.otherPlayerId
+          && owner.controlledLots > 0))
+        .map(street => street.streetId).join(","),
+    };
+  });
+  const dossierRows = page.getByTestId("dev-rival-dossier-list").locator("li");
+  await expect(dossierRows).toHaveCount(created.state.players.length - 1);
+  const shownDossier = await dossierRows.evaluateAll(nodes => nodes.map(node => ({
+    id: node.getAttribute("data-testid"),
+    playerId: node.getAttribute("data-player-id"),
+    steps: node.getAttribute("data-steps"),
+    streetId: node.getAttribute("data-street-id"),
+    path: node.getAttribute("data-street-path"),
+    controlled: node.getAttribute("data-controlled"),
+    standing: node.getAttribute("data-standing"),
+    advantage: node.getAttribute("data-advantage"),
+    shared: node.getAttribute("data-shared-streets"),
+  })));
+  expect(shownDossier).toEqual(expectedDossier);
+  await expect(page.getByTestId("dev-rival-dossier-note")).toBeVisible();
+  // #183: the public rival position in the joint #181 dossier is an
+  // independently certified .NET shortest graph path, also suitable for
+  // read-only highlighted route on the existing 3D city map. Tested with
+  // BOTH 2 and 8 authentic .NET-created seats, without a new game command.
+  const realMapRival = distances.others[0];
+  const realMapButton = page.getByTestId(
+    `dev-rival-dossier-map-${realMapRival.otherPlayerId}`);
+  await expect(realMapButton).toBeVisible();
+  const otherRow = page.getByTestId(
+    `dev-rival-dossier-${realMapRival.otherPlayerId}`);
+  await expect(otherRow).toHaveAttribute("data-street-path",
+    realMapRival.streetPath.join(">"));
+  await realMapButton.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("city-renderer"))
+    .toHaveAttribute("data-focus-path", realMapRival.streetPath.join(">"));
+  await expect(page.getByTestId("city-tactical-target"))
+));
   await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
   await expect(page.getByTestId("dev-revision"))
     .toHaveText(String(created.state.revision));

@@ -682,6 +682,37 @@ async function assertLivePublicStreetControlMatrix(
   })));
   await expect(page.getByTestId("dev-territory-server-note")).toBeVisible();
   await expect(page.getByTestId("dev-territory-server-unavailable")).toHaveCount(0);
+  // #180: the same real, actor-scoped #179 .NET 200 proves every
+  // head-to-head row. Neither shared printed roads nor controlled-lot
+  // differences imply combat or a victory threshold.
+  const myFootprint = report.footprints.find(row => row.playerId === actorId);
+  expect(myFootprint).toBeDefined();
+  const expectedRivals = report.footprints
+    .filter(row => row.playerId !== actorId)
+    .map(row => ({
+      id: `dev-territory-rival-${row.playerId}`,
+      rivalId: row.playerId,
+      myControlled: String(myFootprint!.controlledLots),
+      rivalControlled: String(row.controlledLots),
+      advantage: String(myFootprint!.controlledLots - row.controlledLots),
+      shared: report.streets.filter(street =>
+        street.owners.some(owner => owner.playerId === actorId && owner.controlledLots > 0)
+        && street.owners.some(owner => owner.playerId === row.playerId
+          && owner.controlledLots > 0))
+        .map(street => street.streetId).join(","),
+    }));
+  const rivalRows = page.getByTestId("dev-territory-rivals-list").locator("li");
+  await expect(rivalRows).toHaveCount(created.state.players.length - 1);
+  const actualRivals = await rivalRows.evaluateAll(nodes => nodes.map(node => ({
+    id: node.getAttribute("data-testid"),
+    rivalId: node.getAttribute("data-rival"),
+    myControlled: node.getAttribute("data-my-controlled"),
+    rivalControlled: node.getAttribute("data-rival-controlled"),
+    advantage: node.getAttribute("data-my-advantage"),
+    shared: node.getAttribute("data-shared-street-ids"),
+  })));
+  expect(actualRivals).toEqual(expectedRivals);
+  await expect(page.getByTestId("dev-territory-rivals-note")).toBeVisible();
   expect(report.footprints.reduce((sum, player) =>
     sum + player.controlledLots, 0)).toBe(report.controlledLots);
   expect(rawFootprints.reduce((sum, item) => sum + item.owned, 0))

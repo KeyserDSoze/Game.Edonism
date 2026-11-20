@@ -7103,6 +7103,9 @@ for (const fault of ["root", "street", "owner", "footprint"] as const) {
       await page.goto("/");
       await page.getByTestId("dev-create").click();
       await expect(page.getByTestId("dev-territory-server-unavailable")).toBeVisible();
+      // #180: no confidence in head-to-head pressure before #179 verifies
+      // the ENTIRE authenticated report. No stale actor/rival rows survive.
+      await expect(page.getByTestId("dev-territory-rivals")).toHaveCount(0);
       await expect(page.getByTestId("dev-territory-server-standings")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
@@ -7113,6 +7116,12 @@ for (const fault of ["root", "street", "owner", "footprint"] as const) {
         .toHaveAttribute("data-controlled", "1");
       await expect(page.getByTestId("dev-territory-server-alice"))
         .toHaveAttribute("data-controlled", "1");
+      const rivalList = page.getByTestId("dev-territory-rivals-list");
+      await expect(rivalList.locator("li")).toHaveCount(1);
+      await expect(page.getByTestId("dev-territory-rival-alice"))
+        .toHaveAttribute("data-my-advantage", "0");
+      await expect(page.getByTestId("dev-territory-rival-alice"))
+        .toHaveAttribute("data-shared-street-ids", "");
       await expect(page.getByTestId("dev-territory-server-unavailable")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       const reads = observedHeaders.filter(x => x.path.endsWith("/public-territory"));

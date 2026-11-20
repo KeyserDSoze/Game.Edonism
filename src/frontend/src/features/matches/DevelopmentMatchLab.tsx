@@ -47,6 +47,7 @@ import {
 } from "./verifiedDevelopmentPublicTerritory";
 import { verifiedPublicStreetControlMatrix } from "@/features/city/publicStreetControlMatrix";
 import type { PublicTerritoryFootprint } from "@/features/city/publicTerritoryFootprints";
+import { verifiedPublicRivalTerritory } from "./verifiedPublicRivalTerritory";
 
 type DemoCredential = Readonly<{ playerId: string; token: string }>;
 type DemoPlayer = Readonly<{
@@ -642,6 +643,10 @@ export function DevelopmentMatchLab({
     && territoryLease.matchId === session?.matchId
     && territoryLease.revision === session?.state.revision
     ? territoryLease.standings : null;
+  // #180: a read-only same-actor comparison derived ONLY after #179
+  // completed whole-roster server verification. No command authority.
+  const territoryRivals = territoryStandings && session?.state
+    ? verifiedPublicRivalTerritory(session.state, territoryStandings, actorId) : [];
   const settlement = settlementLease && token
     && settlementLease.token === token
     && settlementLease.data.matchId === session?.matchId
@@ -2139,6 +2144,49 @@ export function DevelopmentMatchLab({
                 {t("dev.territoryServerNote")}
               </p>
             </section>
+
+            {territoryStandings
+              && territoryRivals.length === session.state.players.length - 1 && (
+              <section aria-label={t("dev.territoryRivalsTitle")}
+                data-testid="dev-territory-rivals"
+                className="space-y-2 rounded-xl border border-border p-3">
+                <p className="text-xs font-semibold">{t("dev.territoryRivalsTitle")}</p>
+                <p className="text-xs text-muted-foreground">
+                  {t("dev.territoryRivalsSubtitle")}
+                </p>
+                <ol data-testid="dev-territory-rivals-list"
+                  className="grid gap-2 text-xs sm:grid-cols-2">
+                  {territoryRivals.map(rival => (
+                    <li key={rival.rivalPlayerId}
+                      data-testid={`dev-territory-rival-${rival.rivalPlayerId}`}
+                      data-rival={rival.rivalPlayerId}
+                      data-my-controlled={rival.myControlledLots}
+                      data-rival-controlled={rival.rivalControlledLots}
+                      data-my-advantage={rival.myLotAdvantage}
+                      data-shared-street-ids={rival.sharedStreetIds.join(",")}
+                      className="rounded-md bg-muted p-2">
+                      <p className="font-semibold">{rival.rivalPlayerId}</p>
+                      <p>{t("dev.territoryRivalsAdvantage", {
+                        delta: rival.myLotAdvantage > 0
+                          ? `+${rival.myLotAdvantage}` : String(rival.myLotAdvantage),
+                      })}</p>
+                      <p className="text-muted-foreground">
+                        {rival.sharedStreetIds.length
+                          ? t("dev.territoryRivalsSharedStreets", {
+                            roads: rival.sharedStreetIds.map(id =>
+                              streetById(id)?.name ?? id).join(", "),
+                          })
+                          : t("dev.territoryRivalsNoSharedStreets")}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+                <p data-testid="dev-territory-rivals-note"
+                  className="text-[11px] leading-5 text-muted-foreground">
+                  {t("dev.territoryRivalsNote")}
+                </p>
+              </section>
+            )}
 
             <section aria-label={t("dev.turnProgressTitle")}
               data-testid="dev-turn-progress"

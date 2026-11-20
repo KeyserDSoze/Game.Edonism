@@ -7111,6 +7111,7 @@ for (const fault of ["root", "street", "owner", "footprint"] as const) {
       // the ENTIRE authenticated report. No stale actor/rival rows survive.
       await expect(page.getByTestId("dev-territory-rivals")).toHaveCount(0);
       await expect(page.getByTestId("dev-rival-dossier")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-territory-server-standings")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
@@ -7135,6 +7136,11 @@ for (const fault of ["root", "street", "owner", "footprint"] as const) {
         .toHaveAttribute("data-advantage", "0");
       await expect(page.getByTestId("dev-rival-dossier-alice"))
         .toHaveAttribute("data-shared-streets", "");
+      // #182: the fresh authenticated actor can focus only their newly
+      // verified rival, never the previous corrupted actor's row.
+      await expect(page.getByTestId("dev-rival-dossier-filter-alice"))
+        .toHaveAttribute("aria-pressed", "false");
+      await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-territory-server-unavailable")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       const reads = observedHeaders.filter(x => x.path.endsWith("/public-territory"));
@@ -7168,6 +7174,7 @@ for (const fault of ["root", "otherRow"] as const) {
       await expect(page.getByTestId("dev-territory-rivals-list").locator("li"))
         .toHaveCount(1);
       await expect(page.getByTestId("dev-rival-dossier")).toHaveCount(0);
+      await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-hand")).toContainText("demo:action:01");
       await page.getByTestId("dev-seat-bob").click();
       await expect(page.getByTestId("dev-rival-dossier-list").locator("li"))
@@ -7176,9 +7183,85 @@ for (const fault of ["root", "otherRow"] as const) {
         .toHaveAttribute("data-advantage", "0");
       await expect(page.getByTestId("dev-rival-dossier-alice"))
         .toHaveAttribute("data-shared-streets", "");
+      // #182: the fresh authenticated actor can focus only their newly
+      // verified rival, never the previous corrupted actor's row.
+      await expect(page.getByTestId("dev-rival-dossier-filter-alice"))
+        .toHaveAttribute("aria-pressed", "false");
+      await expect(page.getByTestId("dev-rival-dossier-filter-bob")).toHaveCount(0);
       await expect(page.getByTestId("dev-revision")).toHaveText("0");
       expect(observedHeaders.filter(x => /\/(free-move|end-turn)$/.test(x.path)))
         .toHaveLength(0);
+    });
+}
+
+
+for (const count of [2, 4, 8] as const) {
+  test(`#182: ${count}-seat verified rival dossier selects only public scouting owner filter, toggles and clears on seat change`,
+    async ({ page }) => {
+      const { observedHeaders } = await mockMatchApi(page, {
+        playerCount: count, publicCardCategory: "full-valid", serverTerritory: true,
+      });
+      await page.goto("/");
+      await page.getByTestId("dev-player-count").selectOption(String(count));
+      await page.getByTestId("dev-create").click();
+      await expect(page.getByTestId("dev-rival-dossier-list").locator("li"))
+        .toHaveCount(count - 1);
+      const focus = page.getByTestId("dev-rival-dossier-filter-bob");
+      await expect(focus).toHaveAttribute("aria-controls", "dev-opponent-lots-list");
+      await expect(focus).toHaveAttribute("aria-pressed", "false");
+      await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
+
+      // Existing unrelated view preferences cannot secretly narrow the
+      // selected rival's verified public lot list.
+      await page.getByTestId("dev-opponent-lots-street-filter").selectOption("gauss");
+      await page.getByTestId("dev-opponent-lots-posture-filter").selectOption("fallen");
+      await page.getByTestId("dev-opponent-lots-nearby-toggle").click();
+      // Native button must remain fully keyboard operable.
+      await focus.focus();
+      await page.keyboard.press("Enter");
+      await expect(focus).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("bob");
+      await expect(page.getByTestId("dev-opponent-lots-street-filter")).toHaveValue("");
+      await expect(page.getByTestId("dev-opponent-lots-posture-filter")).toHaveValue("all");
+      await expect(page.getByTestId("dev-opponent-lots-nearby-toggle"))
+        .toHaveAttribute("aria-pressed", "false");
+      await expect(page.getByTestId("dev-opponent-lots-owner-filtered-count")).toBeVisible();
+      const ownedSlots = page.getByTestId("dev-opponent-lots-list").locator("li");
+      await expect(ownedSlots).toHaveCount(1);
+      await expect(ownedSlots.first()).toHaveAttribute("data-owner", "bob");
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+
+      await focus.click();
+      await expect(focus).toHaveAttribute("aria-pressed", "false");
+      await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
+      await expect(page.getByTestId("dev-opponent-lots-owner-filtered-count")).toHaveCount(0);
+
+      if (count === 8) {
+        // A legitimate zero-lot public rival stays selectable as a seat;
+        // its empty lot list must not become a forged zero or game action.
+        const zeroOwner = page.getByTestId("dev-rival-dossier-filter-charlie");
+        await expect(zeroOwner).toBeVisible();
+        await zeroOwner.click();
+        await expect(zeroOwner).toHaveAttribute("aria-pressed", "true");
+        await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("charlie");
+        await expect(ownedSlots).toHaveCount(0);
+        await expect(page.getByTestId("dev-opponent-lots-no-owner")).toBeVisible();
+        await zeroOwner.click();
+        await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
+      }
+
+      // A focused owner is not a persistent actor identity. On seat switch
+      // the former actor is not silently reused as a browser preference.
+      await focus.click();
+      await expect(focus).toHaveAttribute("aria-pressed", "true");
+      await page.getByTestId("dev-seat-bob").click();
+      await expect(page.getByTestId("dev-rival-dossier-filter-alice")).toBeVisible();
+      await expect(page.getByTestId("dev-opponent-lots-owner-filter")).toHaveValue("");
+      await expect(page.getByTestId("dev-rival-dossier-filter-alice"))
+        .toHaveAttribute("aria-pressed", "false");
+      await expect(page.getByTestId("dev-revision")).toHaveText("0");
+      expect(observedHeaders.filter(x =>
+        /\/(free-move|end-turn|rotate-token)$/.test(x.path))).toHaveLength(0);
     });
 }
 

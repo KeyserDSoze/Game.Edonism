@@ -2240,6 +2240,30 @@ export function DevelopmentMatchLab({
                           })
                           : t("dev.territoryRivalsNoSharedStreets")}
                       </p>
+                      {/* #182: the dossier is only available after BOTH verified
+                          public server leases; selecting an actor is a browser
+                          display filter, never a targeting/game command. */}
+                      <Button type="button" size="sm" variant="outline"
+                        className="h-auto min-h-10 w-full whitespace-normal"
+                        data-testid={`dev-rival-dossier-filter-${row.rivalPlayerId}`}
+                        aria-controls="dev-opponent-lots-list"
+                        aria-label={t("dev.rivalDossierFilterLabel", {
+                          player: row.rivalPlayerId,
+                        })}
+                        aria-pressed={selectedOpponentOwner === row.rivalPlayerId}
+                        onClick={() => {
+                          const alreadySelected = selectedOpponentOwner === row.rivalPlayerId;
+                          setSelectedOpponentOwnerId(alreadySelected ? "" : row.rivalPlayerId);
+                          setSelectedOpponentStreetId("");
+                          setNearbyOpponentLotsOnly(false);
+                          setSelectedOpponentPosture("all");
+                          // Never retain map focus on a now-filtered route.
+                          onTacticalFocus(null);
+                        }}>
+                        {selectedOpponentOwner === row.rivalPlayerId
+                          ? t("dev.rivalDossierShowAll")
+                          : t("dev.rivalDossierShowLots")}
+                      </Button>
                     </li>
                   ))}
                 </ol>
@@ -2829,7 +2853,8 @@ export function DevelopmentMatchLab({
                           ))}
                         </ol>
                       </div>
-                      <ol data-testid="dev-opponent-lots-list" className="grid gap-2 sm:grid-cols-2">
+                      <ol id="dev-opponent-lots-list" data-testid="dev-opponent-lots-list"
+                        className="grid gap-2 sm:grid-cols-2">
                         {visibleOpponentLots.map(route => (
                           <li key={route.slotId}
                             data-testid={`dev-opponent-lot-${route.slotId}`}

@@ -768,6 +768,33 @@ async function assertLivePublicStreetControlMatrix(
   })));
   expect(shownDossier).toEqual(expectedDossier);
   await expect(page.getByTestId("dev-rival-dossier-note")).toBeVisible();
+  // #182: selecting one truly audited rival affects ONLY the existing
+  // public opponent owner view filter; never a .NET command, movement or
+  // an implicit PvP attack permission. Check this in both 2/8-seat tests.
+  const selectedRival = distances.others[0];
+  const selection = page.getByTestId(
+    `dev-rival-dossier-filter-${selectedRival.otherPlayerId}`);
+  const opponentFilter = page.getByTestId("dev-opponent-lots-owner-filter");
+  await expect(selection).toHaveAttribute("aria-pressed", "false");
+  await expect(opponentFilter).toHaveValue("");
+  await selection.click();
+  await expect(selection).toHaveAttribute("aria-pressed", "true");
+  await expect(opponentFilter).toHaveValue(selectedRival.otherPlayerId);
+  await expect(page.getByTestId("dev-opponent-lots-street-filter")).toHaveValue("");
+  await expect(page.getByTestId("dev-opponent-lots-nearby-toggle"))
+    .toHaveAttribute("aria-pressed", "false");
+  const visibleOwned = page.getByTestId("dev-opponent-lots-list").locator("li");
+  await expect(visibleOwned).toHaveCount(selectedRival.controlledActivities);
+  const displayedOwners = await visibleOwned.evaluateAll(nodes =>
+    nodes.map(node => node.getAttribute("data-owner")));
+  expect(displayedOwners).toEqual(
+    Array(selectedRival.controlledActivities).fill(selectedRival.otherPlayerId));
+  await selection.click();
+  await expect(selection).toHaveAttribute("aria-pressed", "false");
+  await expect(opponentFilter).toHaveValue("");
+  await expect(page.getByTestId("dev-revision"))
+    .toHaveText(String(created.state.revision));
+
 
   expect(report.footprints.reduce((sum, player) =>
     sum + player.controlledLots, 0)).toBe(report.controlledLots);
